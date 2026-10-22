@@ -19,6 +19,7 @@ from pathlib import Path
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, paths, updater
 from . import __version__
+from .backup_import import import_backup, MAX_BACKUP
 
 STATIC = Path(__file__).parent / 'static'
 MAX_UPLOAD = 50 * 1024 * 1024
@@ -90,7 +91,7 @@ class Service:
             stop = threading.Event()
             self.captures[item_id] = stop
             self.login_confirmations[item_id] = threading.Event()
-            self.archive.update(item_id, state='opening_browser', error='正在打开专用浏览器，请准备登录 ChatGPT。')
+            self.archive.update(item_id, state='opening_browser', error='正在打开专用浏览器；登录有效时会自动读取。')
         self.capture_pool.submit(self.capture, item_id, stop, force_summary)
 
     def capture(self, item_id, stop, force_summary):
@@ -99,7 +100,9 @@ class Service:
             item = self.archive.get(item_id)
             def notify(state, message):
                 self.archive.update(item_id, state=state, error=message)
-            result = browser_reader.read(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id])
+            settings = self.archive.settings()
+            result = browser_reader.read(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id],
+                                         background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'])
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')
             self.archive.replace_capture(item_id,result['title'],result['text'])
@@ -235,7 +238,11 @@ def handler(service):
         def do_POST(self):
             if not self.trusted() or self.headers.get('X-Knowledge-Token') != token: return self.send(403, {'error':'请求验证失败，请刷新页面'})
             try:
+                path = urllib.parse.urlsplit(self.path).path
                 length = int(self.headers.get('Content-Length', 0))
+                if path=='/api/import':
+                    if not 0<length<=MAX_BACKUP: raise ValueError('请选择不超过 256 MB 的 ZIP 备份')
+                    return self.send(200, import_backup(service.archive, self.rfile.read(length)))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
                 if path=='/api/update/check': return self.send(200, updater.check())
@@ -250,7 +257,7 @@ def handler(service):
                     return
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/settings':
-                    service.archive.configure(body['backend'], body['auto_ai']); return self.send(200, {'ok':True})
+                    service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs')); return self.send(200, {'ok':True})
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
                     if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login))?', path):
