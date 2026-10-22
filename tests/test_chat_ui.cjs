@@ -86,3 +86,19 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  console.log('PASS: startup, link archive, question with sources, save note, history persistence, new chat preserves archive, legacy backend and false-success rejection, delegated confirmation click, expired-token retry, persistent failure feedback');
 })().catch(e=>{console.error(e);process.exitCode=1});
 const inputUrl='https://chatgpt.com/c/test';
+// Rich text regression checks are also run by CI with the existing UI harness.
+const markdownTable=vm.runInContext('readerMarkdown("| 需求 | 普通基金 | ETF |\\n| --- | --- | --- |\\n| **定投** | 更方便 | 取决于券商 |")',context);
+assert(markdownTable.includes('<table>')&&markdownTable.includes('<th scope="col">需求</th>')&&markdownTable.includes('<strong>定投</strong>'));
+assert(vm.runInContext('readerMarkdown("需求\\t普通基金\\tETF\\n定投\\t更方便\\t券商功能")',context).includes('<table>'));
+const chartFixture={version:1,background:'#111',tree:{tag:'svg',attrs:{viewBox:'0 0 600 240',width:600,height:240},children:[{tag:'path',attrs:{d:'M0 100 L300 50 L600 10',stroke:'#e99a65','stroke-width':2},children:[]},{tag:'text',attrs:{x:20,y:200,fill:'white'},text:'2018 <标签>',children:[]}]}};
+context.chartFixture=chartFixture;
+const chartMarkup=vm.runInContext('readerMarkdown("```stellar-chart\\n"+JSON.stringify(chartFixture)+"\\n```")',context);
+assert(chartMarkup.includes('<svg')&&chartMarkup.includes('<path')&&chartMarkup.includes('2018 &lt;标签&gt;'));
+context.chartAttack={version:1,tree:{tag:'svg',attrs:{viewBox:'0 0 500 200',onload:'alert(1)'},children:[{tag:'text',attrs:{onclick:'alert(2)',fill:'url(https://example.com/track)'},text:'<img onerror=alert(3)>',children:[]}]}};
+const safeChart=vm.runInContext('readerChart(JSON.stringify(chartAttack))',context);
+assert(!safeChart.includes(' onload=')&&!safeChart.includes(' onclick=')&&!safeChart.includes('url(')&&safeChart.includes('&lt;img'));
+context.chartAttack.tree.children.push({tag:'script',text:'alert(1)'});
+assert(vm.runInContext('readerChart(JSON.stringify(chartAttack))',context).includes('无法显示'));
+assert(!vm.runInContext('readerMarkdown("```json\\n{\\"x\\":\\"<svg onload=evil()>\\"}\\n```")',context).includes('<svg'));
+assert.equal(fs.readFileSync('browser-extension/extract.js','utf8'),fs.readFileSync('secretary/static/extract.js','utf8'));
+console.log('PASS: markdown and legacy tables, chart snapshots, untrusted SVG rejection, shared extension extractor');

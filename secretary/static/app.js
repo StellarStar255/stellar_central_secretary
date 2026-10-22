@@ -12,6 +12,34 @@ function readerInline(text){
  }
  return html+readerEscape(text.slice(offset));
 }
+function readerChart(raw){
+ try{
+  if(raw.length>160000)throw Error('size');
+  const chart=JSON.parse(raw),tags=new Set(['svg','g','path','line','polyline','polygon','rect','circle','ellipse','text','tspan']);
+  const attrs=new Set(['viewBox','width','height','x','y','x1','x2','y1','y2','cx','cy','r','rx','ry','d','points','transform','fill','stroke','stroke-width','stroke-dasharray','opacity','fill-opacity','stroke-opacity','text-anchor','dominant-baseline','font-size','font-weight','dx','dy']);
+  const color=value=>typeof value==='string'&&/^(?:#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\)|[a-z]+)$/i.test(value)?value:'white';
+  let count=0;
+  const draw=(node,depth=0)=>{
+   if(!node||!tags.has(node.tag)||++count>1500||depth>40)throw Error('shape');
+   let properties='';
+   for(const [key,value] of Object.entries(node.attrs||{})){
+    if(!attrs.has(key)||!['string','number'].includes(typeof value)||String(value).length>50000||/url\s*\(|javascript:|data:|[<>]/i.test(String(value)))continue;
+    properties+=' '+key+'="'+readerEscape(value)+'"';
+   }
+   return '<'+node.tag+properties+'>'+readerEscape(node.text||'')+(node.children||[]).map(n=>draw(n,depth+1)).join('')+'</'+node.tag+'>';
+  };
+  if(chart.version!==1||chart.tree?.tag!=='svg')throw Error('version');
+  const view=String(chart.tree.attrs?.viewBox||'').trim().split(/[ ,]+/).map(Number);
+  if(view.length!==4||!view.every(Number.isFinite)||view[2]<=0||view[3]<=0||view.some(v=>Math.abs(v)>10000))throw Error('bounds');
+  chart.tree.children=[{tag:'rect',attrs:{x:view[0],y:view[1],width:view[2],height:view[3],fill:color(chart.background)},children:[]},...(chart.tree.children||[])];
+  return '<figure class="reader-chart"><div class="reader-chart-scroll" role="img" aria-label="归档图表快照">'+draw(chart.tree)+'</div><figcaption>图表快照 · 悬浮提示和交互请打开原链接查看</figcaption></figure>';
+ }catch{return '<p class="reader-chart-unavailable">图表快照无法显示，请打开原链接查看。</p>'}
+}
+function readerTable(rows){
+ const width=Math.max(...rows.map(row=>row.length));
+ const cell=value=>readerInline(String(value||'').replace(/&#124;|\\\|/g,'|'));
+ return '<div class="reader-table-scroll" role="region" aria-label="数据表格" tabindex="0"><table><thead><tr>'+Array.from({length:width},(_,i)=>'<th scope="col">'+cell(rows[0][i])+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(1).map(row=>'<tr>'+Array.from({length:width},(_,i)=>'<td>'+cell(row[i])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+}
 function readerMarkdown(text){
  const lines=text.replace(/\r\n?/g,'\n').split('\n');let html='',paragraph=[],list=null;
  const flushParagraph=()=>{if(paragraph.length){html+='<p>'+paragraph.map(readerInline).join('<br>')+'</p>';paragraph=[]}};
@@ -21,7 +49,19 @@ function readerMarkdown(text){
   if(/^\s*```/.test(line)){
    flushParagraph();closeList();const code=[];
    while(++i<lines.length&&!/^\s*```/.test(lines[i]))code.push(lines[i]);
-   html+='<pre><code>'+readerEscape(code.join('\n'))+'</code></pre>';continue;
+   html+=line.trim()==='```stellar-chart'?readerChart(code.join('\n')):'<pre><code>'+readerEscape(code.join('\n'))+'</code></pre>';continue;
+  }
+  const pipeRow=value=>{let row=value.trim().replace(/^\|/,'').replace(/(?<!\\)\|$/,'').split(/(?<!\\)\|/);return row.map(v=>v.trim())};
+  const separator=lines[i+1]&&pipeRow(lines[i+1]);
+  if(line.includes('|')&&separator?.length>=2&&separator.every(v=>/^:?-{3,}:?$/.test(v))){
+   flushParagraph();closeList();const rows=[pipeRow(line)];i++;
+   while(i+1<lines.length&&lines[i+1].trim()&&lines[i+1].includes('|'))rows.push(pipeRow(lines[++i]));
+   html+=readerTable(rows);continue;
+  }
+  if(line.includes('\t')&&lines[i+1]?.includes('\t')){
+   flushParagraph();closeList();const rows=[line.trim().split('\t')];
+   while(i+1<lines.length&&lines[i+1].includes('\t'))rows.push(lines[++i].trim().split('\t'));
+   html+=readerTable(rows);continue;
   }
   if(!line.trim()){flushParagraph();closeList();continue}
   const heading=line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);

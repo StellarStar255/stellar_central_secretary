@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
+from .rich_text import searchable_text
 
 
 class PageText(HTMLParser):
@@ -119,6 +120,7 @@ class Archive:
         with self.db() as db:
             db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)', [('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())])
     def _index(self, db, item_id, text):
+        text = searchable_text(text)
         db.execute('DELETE FROM search WHERE item_id=?', (item_id,)); db.execute('DELETE FROM chunks WHERE item_id=?', (item_id,))
         for pos, offset in enumerate(range(0, len(text), 1000)):
             chunk = text[offset:offset+1200]
@@ -158,7 +160,7 @@ class Archive:
     def replace_capture(self, item_id, title, text):
         previous = self.get(item_id)
         if not text.strip(): raise ValueError('新采集正文为空，原正文已保留。')
-        if previous['text'] and len(text)<len(previous['text'])*.85:
+        if previous['text'] and len(searchable_text(text))<len(searchable_text(previous['text']))*.85:
             raise ValueError('新采集正文显著短于原正文，可能仍有消息未加载；原正文已保留。')
         if text==previous['text']: return False
         if previous['text']:
@@ -172,10 +174,10 @@ class Archive:
             ids = set()
             if q:
                 # Literal substring preserves filenames, URLs and short Chinese queries.
-                ids = {r['id'] for r in db.execute('SELECT id FROM items WHERE instr(lower(text),?)>0', (q.lower(),))}
+                ids = {r['id'] for r in db.execute('SELECT id,text FROM items') if q.lower() in searchable_text(r['text']).lower()}
                 ids.update(p['item_id'] for p in self.retrieve(q, 100))
                 # Search derived aliases for existing archives as well as new ones.
-                ids.update(r['id'] for r in db.execute('SELECT id,text,summary,tags,title FROM items') if q.lower() in search_aliases(' '.join(str(r[k] or '') for k in ('text','summary','tags','title'))).lower())
+                ids.update(r['id'] for r in db.execute('SELECT id,text,summary,tags,title FROM items') if q.lower() in search_aliases(' '.join(searchable_text(str(r[k] or '')) if k=='text' else str(r[k] or '') for k in ('text','summary','tags','title'))).lower())
         for r in rows: r['tags'] = json.loads(r['tags'])
         return [r for r in rows if (not q or r['id'] in ids or q.lower() in json.dumps(r, ensure_ascii=False).lower()) and (not category or r['category']==category) and (not kind or r['kind']==kind)]
     def retrieve(self, query, limit=8):

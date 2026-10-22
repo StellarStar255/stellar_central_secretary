@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stellar 知识采集",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "将当前可见网页或对话保存为可导入知识秘书的文件。",
   "permissions": [
     "activeTab",
