@@ -194,17 +194,25 @@ class Archive:
         self.update(item_id,text=text,title=title or previous['title'],summary='',tags=[],category='未分类',state='pending',error='')
         return True
     def list(self, q='', category='', kind=''):
+        # Library filters require every whitespace-separated keyword, across fields.
+        # Conversational retrieval below keeps its broader relevance ranking.
+        keywords=list(dict.fromkeys(q.casefold().split()))
+        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length'
         with self.db() as db:
-            rows = [dict(r) for r in db.execute('SELECT id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length FROM items ORDER BY created DESC')]
-            ids = set()
-            if q:
-                # Literal substring preserves filenames, URLs and short Chinese queries.
-                ids = {r['id'] for r in db.execute('SELECT id,text FROM items') if q.lower() in searchable_text(r['text']).lower()}
-                ids.update(p['item_id'] for p in self.retrieve(q, 100))
-                # Search derived aliases for existing archives as well as new ones.
-                ids.update(r['id'] for r in db.execute('SELECT id,text,summary,tags,title FROM items') if q.lower() in search_aliases(' '.join(searchable_text(str(r[k] or '')) if k=='text' else str(r[k] or '') for k in ('text','summary','tags','title'))).lower())
-        for r in rows: r['tags'] = json.loads(r['tags'])
-        return [r for r in rows if (not q or r['id'] in ids or q.lower() in json.dumps(r, ensure_ascii=False).lower()) and (not category or r['category']==category) and (not kind or r['kind']==kind)]
+            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text' if keywords else '')+' FROM items ORDER BY created DESC')]
+        result=[]
+        for row in rows:
+            body=row.pop('text','')
+            row['tags']=json.loads(row['tags'])
+            if category and row['category']!=category or kind and row['kind']!=kind:continue
+            if keywords:
+                fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category')]
+                fields.extend(row['tags']);fields.append(searchable_text(body))
+                source='\n'.join(fields)
+                haystack=(source+'\n'+search_aliases(source)).casefold()
+                if not all(keyword in haystack for keyword in keywords):continue
+            result.append(row)
+        return result
     def retrieve(self, query, limit=8):
         tokens = list(dict.fromkeys(terms(query)))[:80]
         if not tokens: return []

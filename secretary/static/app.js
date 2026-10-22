@@ -163,6 +163,7 @@ async function refresh(){
 async function renderLibrary(){
  const q=$('#search').value.trim(),kind=$('#kind-filter').value,category=$('#category-filter').value;
  const items=await api('/api/items?'+new URLSearchParams({q,kind,category}));
+ if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML='<option value="">全部主题</option>'+cats.map(c=>`<option ${c===category?'selected':''}>${esc(c)}</option>`).join('');
  $('#result-count').textContent=items.length+' 份资料';$('#empty').hidden=items.length>0;
  $('#items').innerHTML=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||'正文已保存，可随时查阅。')}</p></div><small>${states[i.state]}<br>${date(i.created)}</small></button>`).join('');bindDetails($('#items'));
