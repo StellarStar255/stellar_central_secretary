@@ -174,6 +174,19 @@ $('#kind-filter').onchange=$('#category-filter').onchange=()=>renderLibrary().ca
 $('#new-chat').onclick=newChat;
 $('#sidebar-toggle').onclick=()=>{if(window.innerWidth<=700)document.body.classList.toggle('mobile-sidebar');else{document.body.classList.toggle('sidebar-hidden');$('#workspace').classList.toggle('sidebar-hidden')}};
 $('#chat-scroll').onclick=()=>document.body.classList.remove('mobile-sidebar');
+// The backdrop targets the dialog itself; its padding and scrollbar do too.
+document.querySelectorAll('dialog').forEach(dialog=>{
+ let startedOutside=false;
+ const outside=event=>{const rect=dialog.getBoundingClientRect();return event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom};
+ dialog.addEventListener('pointerdown',event=>{startedOutside=event.button===0&&event.target===dialog&&outside(event)});
+ dialog.addEventListener('pointercancel',()=>{startedOutside=false});
+ dialog.addEventListener('click',event=>{
+  const dismiss=startedOutside&&event.target===dialog&&outside(event);
+  startedOutside=false;
+  if(dismiss)dialog.close();
+ });
+ dialog.addEventListener('close',()=>{startedOutside=false});
+});
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&['k','j'].includes(e.key.toLowerCase())){e.preventDefault();e.key.toLowerCase()==='k'?openLibrary().catch(e=>toast(e.message)):newChat()}});
 function resizeInput(){const input=$('#message-input');input.style.height='auto';input.style.height=Math.min(input.scrollHeight,220)+'px';updateSend()}
 function updateSend(){$('#send-button').disabled=sending||(!$('#message-input').value.trim()&&!attachedFiles.length)}
