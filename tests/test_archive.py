@@ -68,6 +68,18 @@ class ArchiveTest(unittest.TestCase):
 
 
 class ManualLoginTest(unittest.TestCase):
+    def test_background_launch_defers_window_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proc=Mock();proc.poll.return_value=0
+            info={'endpoint':'http://127.0.0.1:9371','websocket':'ws://127.0.0.1:9371/devtools/browser/example'}
+            with patch('secretary.browser_reader.existing_session',return_value=None), patch('secretary.browser_reader.chrome_executable',return_value='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), patch('secretary.browser_reader.free_loopback_port',return_value=9371), patch('secretary.browser_reader.debug_info',return_value=info), patch('secretary.browser_reader.subprocess.Popen',return_value=proc) as launch:
+                result=browser_reader.start_or_reuse_browser('about:blank#task',Path(directory),threading.Event(),background=True)
+            command=launch.call_args.args[0]
+            self.assertIn('--no-startup-window',command)
+            self.assertNotIn('--new-window',command)
+            self.assertNotIn('about:blank#task',command)
+            self.assertNotIn('startup_url',result)
+
     def test_collection_scrolls_down_for_later_virtualized_turns(self):
         def message(i):return {'id':str(i),'role':'user' if i%2 else 'assistant','text':f'第{i}条消息，这段正文需要完整保存。'}
         page=Mock();position={'step':0}

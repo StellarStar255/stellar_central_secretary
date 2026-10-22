@@ -133,7 +133,7 @@ def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=Fa
     # imports. The debugging endpoint is local and uses this dedicated profile.
     args = ['--user-data-dir='+str(profile), '--no-first-run',
             '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
-            '--new-window', target]
+            *(['--no-startup-window'] if background else ['--new-window', target])]
     options = {}
     if background and sys.platform == 'darwin':
         command = ['/usr/bin/open', '-g', '-n', '-a', str(Path(chrome).parents[2]), '--args', *args]
@@ -151,7 +151,8 @@ def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=Fa
         if cancelled.is_set(): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
         if proc.poll() not in (None,0): raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
         try:
-            session = dict(debug_info(endpoint),confirmed=False,process=proc,startup_url=target)
+            session = dict(debug_info(endpoint),confirmed=False,process=proc)
+            if not background: session['startup_url'] = target
             save_session(profile,session)
             return session
         except (OSError,ValueError): pass
