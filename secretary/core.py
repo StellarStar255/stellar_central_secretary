@@ -114,11 +114,18 @@ class Archive:
         finally: db.close()
     def settings(self):
         with self.db() as db: values = dict(db.execute('SELECT key,value FROM settings').fetchall())
-        return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true'}
-    def configure(self, backend, auto_ai):
+        return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
+                'capture_background': values.get('capture_background', 'true') == 'true',
+                'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true'}
+    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None):
         if backend not in ('codex', 'claude'): raise ValueError('未知模型后端')
         with self.db() as db:
-            db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)', [('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())])
+            pairs=[('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())]
+            for key,value in (('capture_background',capture_background),('capture_close_tabs',capture_close_tabs)):
+                if value is not None:
+                    if not isinstance(value,bool): raise ValueError('浏览器选项格式无效')
+                    pairs.append((key,str(value).lower()))
+            db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)', pairs)
     def _index(self, db, item_id, text):
         text = searchable_text(text)
         db.execute('DELETE FROM search WHERE item_id=?', (item_id,)); db.execute('DELETE FROM chunks WHERE item_id=?', (item_id,))

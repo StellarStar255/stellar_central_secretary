@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as data:
                             env={**os.environ, 'SECRETARY_DATA_DIR': data})
     def request(path, body=None, token=None):
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
-                                     data=json.dumps(body).encode() if body is not None else None,
+                                     data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or ''})
         with opener.open(req, timeout=3) as response:
             return response.read()
@@ -37,6 +37,10 @@ with tempfile.TemporaryDirectory() as data:
         request('/api/settings', {'backend':'codex', 'auto_ai':False}, status['token'])
         request('/api/ingest', {'text':'安装包测试资料，可供检索。'}, status['token'])
         assert len(json.loads(request('/api/items'))) == 1
+        backup = request('/api/backup')
+        imported = json.loads(request('/api/import', backup, status['token']))
+        assert imported == {'imported': 0, 'skipped': 1, 'total': 1}, imported
+        assert b'import-backup' in request('/')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

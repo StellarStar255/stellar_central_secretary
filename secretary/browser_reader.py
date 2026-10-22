@@ -4,6 +4,7 @@ No cookie export, password input, login clicks or default-profile access. The
 browser session lives in data/browser-live-profile and is excluded from backups.
 """
 import os
+import sys
 import json
 import socket
 import urllib.request
@@ -121,7 +122,7 @@ def free_loopback_port():
         return sock.getsockname()[1]
 
 
-def start_or_reuse_browser(target, profile, cancelled, timeout=20):
+def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False):
     current = existing_session(profile)
     if current: return current
     chrome = chrome_executable()
@@ -130,16 +131,27 @@ def start_or_reuse_browser(target, profile, cancelled, timeout=20):
     endpoint = f'http://127.0.0.1:{port}'
     # This browser remains alive throughout manual sign-in, extraction and later
     # imports. The debugging endpoint is local and uses this dedicated profile.
-    proc = subprocess.Popen([chrome, '--user-data-dir='+str(profile), '--no-first-run',
-                             '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
-                             '--new-window', target], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+    args = ['--user-data-dir='+str(profile), '--no-first-run',
+            '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
+            '--new-window', target]
+    options = {}
+    if background and sys.platform == 'darwin':
+        command = ['/usr/bin/open', '-g', '-n', '-a', str(Path(chrome).parents[2]), '--args', *args]
+    else:
+        command = [chrome, *args]
+        if background and os.name == 'nt':
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+            options['startupinfo'] = startup
+    proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, start_new_session=True, **options)
     deadline = time.monotonic()+timeout
     while time.monotonic()<deadline:
         if cancelled.is_set(): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
         if proc.poll() not in (None,0): raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
         try:
-            session = dict(debug_info(endpoint),confirmed=False,process=proc)
+            session = dict(debug_info(endpoint),confirmed=False,process=proc,startup_url=target)
             save_session(profile,session)
             return session
         except (OSError,ValueError): pass
@@ -218,19 +230,26 @@ def collect_messages(page, cancelled, notify=None):
     raise RuntimeError('会话超过本次滚动读取范围，尚未确认到达底部；旧正文保持不变。请分段导入。')
 
 
-def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagnose=None):
-    browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
+def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagnose=None, capture_page=None, on_login_required=None, browser=None):
+    browser=browser or pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
     if not browser.contexts: raise RuntimeError('无法找到原浏览器会话，登录窗口保持打开，请重试。')
     # Inspect every matching tab, since sign-in may leave an earlier guest tab.
     context=browser.contexts[0]
-    if not any(same_conversation(p.url,target) for ctx in browser.contexts for p in ctx.pages if not p.is_closed()):
+    if capture_page is None and not any(same_conversation(p.url,target) for ctx in browser.contexts for p in ctx.pages if not p.is_closed()):
         page=context.new_page()
         page.goto(target,wait_until='domcontentloaded',timeout=45000)
     start=time.monotonic();deadline=start+timeout;last='';stable=0;last_notify=-10;last_report=[]
     while time.monotonic()<deadline:
         if cancelled.is_set(): raise CaptureCancelled('已停止读取。登录窗口保持打开。')
         candidates=[];report=[]
-        for ctx in browser.contexts:
+        if capture_page is not None and not same_conversation(capture_page.url,target):
+            parsed=urlsplit(capture_page.url)
+            if on_login_required and (parsed.hostname=='accounts.google.com' or (parsed.hostname in ('chatgpt.com','chat.openai.com','auth.openai.com') and re.search(r'auth|login|signin',parsed.path))):
+                on_login_required(capture_page)
+                start=time.monotonic();deadline=start+timeout;stable=0;last=''
+                continue
+        contexts = [SimpleNamespace(pages=[capture_page])] if capture_page is not None else browser.contexts
+        for ctx in contexts:
             for page in ctx.pages:
                 if page.is_closed():continue
                 if not same_conversation(page.url,target):continue
@@ -250,10 +269,14 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
             cancelled.wait(0.5);continue
         _,page,messages,diag=max(candidates,key=lambda c:c[0])
         elapsed=time.monotonic()-start
+        if not messages and all(d.get('login') for _,_,_,d in candidates):
+            if on_login_required:
+                on_login_required(page)
+                start=time.monotonic();deadline=start+timeout;stable=0;last=''
+                continue
+            raise RuntimeError('原窗口当前仍是未登录状态。请先在该窗口登录 ChatGPT，再点读取；程序不会关闭窗口。')
         if not messages and all(d.get('denied') for _,_,_,d in candidates):
             raise RuntimeError('目标页面提示会话不存在、加载失败或没有访问权限。请在原窗口确认账号有权查看这条会话。')
-        if not messages and all(d.get('login') for _,_,_,d in candidates):
-            raise RuntimeError('原窗口当前仍是未登录状态。请先在该窗口登录 ChatGPT，再点读取；程序不会关闭窗口。')
         signature=message_text(messages) if messages else ''
         stable=stable+1 if signature and signature==last and not diag.get('generating') else 0
         last=signature
@@ -273,7 +296,10 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
     raise RuntimeError(f'读取等待达到 {int(timeout)} 秒；最后识别到 {counts} 条消息。'+('页面仍显示正在生成回答。' if any(d.get('generating') for d in last_report) else '页面消息尚未满足采集条件。')+'诊断已保存，原窗口保持打开。')
 
 
-def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None):
+def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, background=False, close_new_tabs=False):
+    if background or close_new_tabs:
+        from .capture_browser import read_managed
+        return read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs)
     target=conversation_url(url)
     try:
         from playwright.sync_api import sync_playwright
