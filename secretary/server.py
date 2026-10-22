@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import base64
 import io
 import json
@@ -101,16 +102,28 @@ class Service:
 
     def capture(self, item_id, stop, force_summary):
         completed = False
+        summary_id = item_id
         try:
             item = self.archive.get(item_id)
             def notify(state, message):
                 self.archive.update(item_id, state=state, error=message)
             settings = self.archive.settings()
             result = browser_reader.read(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id],
-                                         background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'])
+                                         background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'], scope=settings['capture_scope'])
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')
-            self.archive.replace_capture(item_id,result['title'],result['text'])
+            partial = result.get('partial',False)
+            if partial and item['text'] and not item['text'].startswith(browser_reader.PARTIAL_PREFIX):
+                # Keep an existing full archive and give the bounded view its own record.
+                digest=hashlib.sha256(result['text'].encode()).hexdigest()[:20]
+                url=item['url'].split('#')[0]+'#stellar-slice-'+digest
+                summary_id,_=self.archive.add(result['title']+'（部分对话）',result['text'],url=url)
+                self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='最近片段已另存为一份「部分对话」资料，可在最近归档中查看；已有正文保持不变。')
+            else:
+                self.archive.replace_capture(item_id,result['title'],result['text'],partial=partial)
+            if partial:
+                tags=self.archive.get(summary_id)['tags']
+                if '部分对话' not in tags:self.archive.update(summary_id,tags=tags+['部分对话'])
             if self.archive.get(item_id)['state']=='reading':
                 self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='')
             completed = True
@@ -122,7 +135,7 @@ class Service:
             with self.lock:
                 self.captures.pop(item_id, None)
                 self.login_confirmations.pop(item_id, None)
-        if completed: self.queue(item_id, force=force_summary)
+        if completed: self.queue(summary_id, force=force_summary)
 
     def confirm_login(self, item_id):
         item = self.archive.get(item_id)
@@ -266,7 +279,7 @@ def handler(service):
                     return
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/settings':
-                    service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs')); return self.send(200, {'ok':True})
+                    service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
                     if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login))?', path):

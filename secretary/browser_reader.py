@@ -186,12 +186,26 @@ SCROLL_SCRIPT = r"""() => {
     (n===document.scrollingElement||/auto|scroll/.test(getComputedStyle(n).overflowY)));
   const node=scrolls.sort((a,b)=>(b.scrollHeight-b.clientHeight)-(a.scrollHeight-a.clientHeight))[0]||document.scrollingElement;
   const max=Math.max(0,node.scrollHeight-node.clientHeight);
-  node.scrollTop=DIRECTION==='top'?0:Math.min(max,node.scrollTop+Math.max(200,node.clientHeight*.75));
+  const step=Math.max(200,node.clientHeight*.75);
+  node.scrollTop=DIRECTION==='top'?0:DIRECTION==='bottom'?max:DIRECTION==='up'?Math.max(0,node.scrollTop-step):Math.min(max,node.scrollTop+step);
   return {top:node.scrollTop,max,bottom:node.scrollTop>=max-3};
 }"""
 
 
-def collect_messages(page, cancelled, notify=None):
+PARTIAL_PREFIX = '【部分对话归档】'
+
+
+def recent_turns(messages, limit=20):
+    users=0
+    for index in range(len(messages)-1,-1,-1):
+        if messages[index]['role']=='user':
+            users+=1
+            if users==limit:return messages[index:]
+    return messages
+
+
+def collect_messages(page, cancelled, notify=None, scope='full'):
+    if scope not in ('full','recent','loaded'):raise ValueError('无效的会话读取范围')
     collected = {}; ordered = []
     def merge(messages, prepend=False):
         new = []
@@ -204,6 +218,31 @@ def collect_messages(page, cancelled, notify=None):
         else: ordered.extend(new)
     def check():
         if cancelled.is_set(): raise CaptureCancelled('已停止读取。登录窗口保持打开。')
+    if scope=='loaded':
+        check()
+        return validate_messages(page.evaluate(MESSAGES_SCRIPT))
+    if scope=='recent':
+        # Start at the latest messages and walk back only a bounded distance.
+        # Reaching the beginning of the entire history is deliberately unnecessary.
+        for _ in range(3):
+            check()
+            page.evaluate(SCROLL_SCRIPT.replace('DIRECTION',"'bottom'"))
+            page.wait_for_timeout(350)
+            merge(page.evaluate(MESSAGES_SCRIPT))
+        last=None;stable=0
+        for step in range(24):
+            check()
+            current=[collected[k] for k in ordered]
+            if sum(m['role']=='user' for m in current)>=20:break
+            position=page.evaluate(SCROLL_SCRIPT.replace('DIRECTION',"'up'"))
+            page.wait_for_timeout(450)
+            merge(page.evaluate(MESSAGES_SCRIPT),prepend=True)
+            signature=tuple(ordered)
+            at_top=isinstance(position,dict) and position.get('top',1)<=3
+            stable=stable+1 if at_top and signature==last else 0;last=signature
+            if notify and step%4==0:notify('reading',f'正在读取最近对话，已收集 {len(ordered)} 条消息；无需加载全部历史。')
+            if stable>=2:break
+        return validate_messages(recent_turns([collected[k] for k in ordered]))
     # Reach the top first, including asynchronously loaded history. Do not depend
     # on the legacy data-message-author-role node to find the scroll container.
     last=None;stable=0
@@ -231,7 +270,7 @@ def collect_messages(page, cancelled, notify=None):
     raise RuntimeError('会话超过本次滚动读取范围，尚未确认到达底部；旧正文保持不变。请分段导入。')
 
 
-def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagnose=None, capture_page=None, on_login_required=None, browser=None):
+def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagnose=None, capture_page=None, on_login_required=None, browser=None, scope='full'):
     browser=browser or pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
     if not browser.contexts: raise RuntimeError('无法找到原浏览器会话，登录窗口保持打开，请重试。')
     # Inspect every matching tab, since sign-in may leave an earlier guest tab.
@@ -278,8 +317,8 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
             raise RuntimeError('原窗口当前仍是未登录状态。请先在该窗口登录 ChatGPT，再点读取；程序不会关闭窗口。')
         if not messages and all(d.get('denied') for _,_,_,d in candidates):
             raise RuntimeError('目标页面提示会话不存在、加载失败或没有访问权限。请在原窗口确认账号有权查看这条会话。')
-        signature=message_text(messages) if messages else ''
-        stable=stable+1 if signature and signature==last and not diag.get('generating') else 0
+        signature=message_text(messages if scope=='full' else messages[-2:]) if messages else ''
+        stable=stable+1 if signature and (scope!='full' or signature==last) and not diag.get('generating') else 0
         last=signature
         if elapsed-last_notify>=4:
             count=len(messages)
@@ -287,9 +326,13 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
             notify('reading',f'已连接「{diag.get("title") or "目标会话"}」，识别到 {count} 条消息；{state}（{int(elapsed)} 秒）。')
             last_notify=elapsed
         if stable>=2:
-            final=collect_messages(page,cancelled,notify)
+            final=collect_messages(page,cancelled,notify,scope=scope)
             if not final:raise RuntimeError('已识别消息，但收集阶段未取得正文。诊断已保存在本机。')
-            return {'url':target,'title':page.title(),'text':message_text(final),'message_count':len(final)}
+            text=message_text(final)
+            if scope!='full':
+                label='最近可读取的对话（最多20轮）' if scope=='recent' else '当前已加载的内容'
+                text=f'{PARTIAL_PREFIX} 采集范围：{label}，共 {len(final)} 条消息；未读取完整历史。\n\n'+text
+            return {'url':target,'title':page.title(),'text':text,'message_count':len(final),'partial':scope!='full','capture_scope':scope}
         if not messages and elapsed>=20 and diag.get('readyState')=='complete' and diag.get('mainChars',0)>100:
             raise RuntimeError(f'「{diag.get("title") or "目标会话"}」已加载，但未识别出有效助手消息（角色节点 {diag.get("authorNodes",0)}、对话节点 {diag.get("turnNodes",0)}）。读取诊断已保存在本机，当前窗口保持打开。')
         page.wait_for_timeout(1500)
@@ -297,10 +340,10 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
     raise RuntimeError(f'读取等待达到 {int(timeout)} 秒；最后识别到 {counts} 条消息。'+('页面仍显示正在生成回答。' if any(d.get('generating') for d in last_report) else '页面消息尚未满足采集条件。')+'诊断已保存，原窗口保持打开。')
 
 
-def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, background=False, close_new_tabs=False):
+def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, background=False, close_new_tabs=False, scope='full'):
     if background or close_new_tabs:
         from .capture_browser import read_managed
-        return read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs)
+        return read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope=scope)
     target=conversation_url(url)
     try:
         from playwright.sync_api import sync_playwright
@@ -313,7 +356,7 @@ def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, 
     session=manual_login(target,profile,notify,cancelled,confirmed,timeout)
     try:
         with sync_playwright() as pw:
-            result=read_from_browser(pw,session,target,notify,cancelled,min(timeout,90),diagnose=lambda report:(profile.parent/'last-capture-diagnostic.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)))
+            result=read_from_browser(pw,session,target,notify,cancelled,min(timeout,90),diagnose=lambda report:(profile.parent/'last-capture-diagnostic.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)),scope=scope)
         session['confirmed']=True;save_session(profile,session)
         return result
     except Exception:

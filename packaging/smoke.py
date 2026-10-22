@@ -34,7 +34,8 @@ with tempfile.TemporaryDirectory() as data:
         else: raise RuntimeError('Frozen app did not start')
         for path in ('/', '/app.js', '/style.css'):
             assert request(path), path
-        request('/api/settings', {'backend':'codex', 'auto_ai':False}, status['token'])
+        request('/api/settings', {'backend':'codex', 'auto_ai':False, 'capture_scope':'loaded'}, status['token'])
+        assert json.loads(request('/api/status'))['settings']['capture_scope'] == 'loaded'
         request('/api/ingest', {'text':'安装包测试资料，可供检索。'}, status['token'])
         assert len(json.loads(request('/api/items'))) == 1
         backup = request('/api/backup')
