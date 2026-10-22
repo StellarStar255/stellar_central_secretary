@@ -51,3 +51,6 @@ venv/
 .coverage
 htmlcov/
 node_modules/
+build/
+dist/
+.venv-build/

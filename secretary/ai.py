@@ -34,9 +34,13 @@ def run(prompt, backend):
                                 text=True, cwd=cwd, env=env, start_new_session=True)
         try: out, err = proc.communicate(prompt, timeout=240)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGTERM)
+            if os.name == 'nt': proc.terminate()
+            else: os.killpg(proc.pid, signal.SIGTERM)
             try: proc.communicate(timeout=3)
-            except subprocess.TimeoutExpired: os.killpg(proc.pid, signal.SIGKILL); proc.communicate()
+            except subprocess.TimeoutExpired:
+                if os.name == 'nt': proc.kill()
+                else: os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate()
             raise RuntimeError('模型处理超时，请检查网络、登录状态后重试。')
         if proc.returncode:
             message=(err or out or f'{backend} 返回 {proc.returncode}')[-1200:]
