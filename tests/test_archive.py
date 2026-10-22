@@ -83,6 +83,16 @@ class ManualLoginTest(unittest.TestCase):
         messages=browser_reader.collect_messages(page,threading.Event())
         self.assertEqual([m['id'] for m in messages],[str(i) for i in range(1,9)])
         self.assertGreaterEqual(position['step'],6)
+    def test_collection_preserves_repeated_questions_with_distinct_message_ids(self):
+        messages=[{'id':'q1','role':'user','text':'同一个问题'},
+                  {'id':'a1','role':'assistant','text':'第一次回答包含足够长的正文。'},
+                  {'id':'q2','role':'user','text':'同一个问题'},
+                  {'id':'a2','role':'assistant','text':'第二次回答包含足够长的正文。'}]
+        page=Mock()
+        page.evaluate.side_effect=lambda script: messages if script==browser_reader.MESSAGES_SCRIPT else {'bottom':True}
+        captured=browser_reader.collect_messages(page,threading.Event())
+        self.assertEqual([m['id'] for m in captured],['q1','a1','q2','a2'])
+
     def test_start_browser_with_local_connection_keeps_process_alive(self):
         with tempfile.TemporaryDirectory() as directory:
             profile=Path(directory);proc=Mock();proc.poll.return_value=None

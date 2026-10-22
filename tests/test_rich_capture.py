@@ -97,9 +97,20 @@ class BrowserCaptureTest(unittest.TestCase):
                 self.assertEqual(chart['title'], '趋势示例')
                 self.assertIn('方案甲 10', chart['dataText'])
                 self.assertIn('方案甲 10', searchable_text(captured['messages'][1]['text']))
-                page.evaluate("() => document.querySelectorAll('[data-chatgpt-search-unit-key]').forEach(n=>n.removeAttribute('data-chatgpt-search-unit-key'))")
+                page.evaluate("""() => {
+                    const user=document.querySelector('[data-chatgpt-search-unit-key$=":user"]');
+                    const outer=document.createElement('div');
+                    const label=user.querySelector('h4');user.before(outer);outer.append(label,user);
+                    const nested=document.createElement('div');nested.setAttribute('data-content-search-unit-key','fallback-turn-0:0:user');
+                    while(user.firstChild)nested.append(user.firstChild);user.append(nested);
+                }""")
+                captured = page.evaluate('() => {'+extractor+';return extractKnowledgeConversation();}')
+                self.assertEqual(len(captured['messages']), 2)
+                self.assertEqual(captured['messages'][0]['id'], 'fixture-user')
+                page.evaluate("() => document.querySelectorAll('[data-chatgpt-search-unit-key],[data-content-search-unit-key]').forEach(n=>{n.removeAttribute('data-chatgpt-search-unit-key');n.removeAttribute('data-content-search-unit-key')})")
                 captured = page.evaluate('() => {'+extractor+';return extractKnowledgeConversation();}')
                 self.assertEqual(captured['diagnostics']['method'], 'role-heading-dom')
+                self.assertEqual(captured['messages'][0]['id'], 'fixture-user')
                 self.assertEqual(captured['diagnostics']['richCharts'], 1)
 
             finally:

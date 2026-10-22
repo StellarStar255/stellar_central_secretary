@@ -73,7 +73,7 @@ function extractKnowledgeConversation() {
     };
     return walk(clone).replace(/\n{3,}/g,'\n\n').trim();
   };
-  const idOf = (node,index) => node.getAttribute('data-chatgpt-selection-message-id') || node.querySelector('[data-chatgpt-selection-message-id]')?.getAttribute('data-chatgpt-selection-message-id') || node.getAttribute('data-chatgpt-search-message-ids')?.split(/\s+/)[0] || node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || node.getAttribute('data-testid') || '';
+  const idOf = (node,index) => node.getAttribute('data-chatgpt-selection-message-id') || node.querySelector('[data-chatgpt-selection-message-id]')?.getAttribute('data-chatgpt-selection-message-id') || (node.getAttribute('data-chatgpt-search-message-ids') || node.querySelector('[data-chatgpt-search-message-ids]')?.getAttribute('data-chatgpt-search-message-ids'))?.trim().split(/\s+/)[0] || node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || node.getAttribute('data-testid') || '';
   const authorNodes = Array.from(main.querySelectorAll('[data-message-author-role]'));
   const legacy = authorNodes.filter(visible).map((node,index) => ({id:idOf(node,index),role:node.getAttribute('data-message-author-role'),text:textOf(node)}));
   const turns = Array.from(new Set(main.querySelectorAll('[data-testid^="conversation-turn"],article[data-turn],article[aria-label],[role="article"]'))).filter(visible);
@@ -89,7 +89,8 @@ function extractKnowledgeConversation() {
   });
   // Current ChatGPT uses search-unit containers instead of article/author-role nodes.
   const modernNodes=Array.from(main.querySelectorAll('[data-chatgpt-search-unit-key],[data-content-search-unit-key]')).filter(n=>/:(user|assistant)$/.test(n.getAttribute('data-chatgpt-search-unit-key')||n.getAttribute('data-content-search-unit-key')||''));
-  const modernMessages=modernNodes.filter(visible).map((node,index)=>({id:idOf(node,index),role:(node.getAttribute('data-chatgpt-search-unit-key')||node.getAttribute('data-content-search-unit-key')).match(/:(user|assistant)$/)[1],text:textOf(node)}));
+  const modernRole=node=>(node.getAttribute('data-chatgpt-search-unit-key')||node.getAttribute('data-content-search-unit-key')).match(/:(user|assistant)$/)[1];
+  const modernMessages=modernNodes.filter(node=>!modernNodes.some(parent=>parent!==node&&parent.contains(node)&&modernRole(parent)===modernRole(node))).filter(visible).map((node,index)=>({id:idOf(node,index),role:(node.getAttribute('data-chatgpt-search-unit-key')||node.getAttribute('data-content-search-unit-key')).match(/:(user|assistant)$/)[1],text:textOf(node)}));
   // Preserve rich DOM even when only screen-reader role headings are available.
   const headings=Array.from(main.querySelectorAll('h1,h2,h3,h4,h5,h6,[data-conversation-role]')).filter(n=>/^(You said|ChatGPT said|你说|你說|ChatGPT\s*说|ChatGPT\s*說)\s*[:：]$/.test((n.textContent||'').trim()));
   const headingMessages=headings.map((label,index)=>{
