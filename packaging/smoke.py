@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as data:
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or ''})
-        with opener.open(req, timeout=3) as response:
+        with opener.open(req, timeout=30 if path=='/api/update/check' else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -41,6 +41,10 @@ with tempfile.TemporaryDirectory() as data:
         imported = json.loads(request('/api/import', backup, status['token']))
         assert imported == {'imported': 0, 'skipped': 1, 'total': 1}, imported
         assert b'import-backup' in request('/')
+        if os.environ.get('SECRETARY_TLS_TEST') == '1':
+            update = json.loads(request('/api/update/check', {}, status['token']))
+            assert not update.get('error'), update
+            print('PASS: frozen HTTPS update check with certificate verification enabled')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

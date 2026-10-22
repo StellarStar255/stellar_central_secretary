@@ -1,4 +1,5 @@
 import io
+import os
 import json
 from pathlib import Path
 import tempfile
@@ -13,6 +14,15 @@ class InlineThread:
 
 
 class UpdateTest(unittest.TestCase):
+    def test_frozen_mac_uses_system_ca_and_preserves_explicit_trust(self):
+        with patch.object(paths,'FROZEN',True), patch.object(paths.sys,'platform','darwin'), patch.object(Path,'is_file',return_value=True):
+            with patch.dict(os.environ,{},clear=True):
+                paths.configure_tls()
+                self.assertEqual(os.environ['SSL_CERT_FILE'],'/etc/ssl/cert.pem')
+            with patch.dict(os.environ,{'SSL_CERT_FILE':'/custom/trusted.pem'}):
+                paths.configure_tls()
+                self.assertEqual(os.environ['SSL_CERT_FILE'],'/custom/trusted.pem')
+
     def setUp(self):
         self.previous = updater.status()
         self.addCleanup(lambda: updater._set(**self.previous))
