@@ -73,19 +73,19 @@ class Service:
     def runtime(self):
         with self.lock:
             return {'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
-    def queue(self, item_id, force=False):
+    def queue(self, item_id, force=False, full_pdf=False):
         item = self.archive.get(item_id)
         if not item['text'].strip() or (not force and not self.archive.settings()['auto_ai']): return
         with self.lock:
             if item_id in self.busy: return
             self.busy.add(item_id)
-        self.pool.submit(self.process, item_id)
-    def process(self, item_id):
+        self.pool.submit(self.process, item_id, full_pdf)
+    def process(self, item_id, full_pdf=False):
         try:
             with self.ai_lock:
                 item = self.archive.get(item_id)
                 self.archive.update(item_id, state='processing', error='')
-                self.archive.update(item_id, **ai.summary_fields(item, self.archive.settings()['backend']))
+                self.archive.update(item_id, **ai.summary_fields(item, self.archive.settings()['backend'], full_pdf=full_pdf))
         except Exception as exc: self.archive.update(item_id, state='error', error=str(exc)[:1600])
         finally:
             with self.lock: self.busy.discard(item_id)
@@ -329,7 +329,7 @@ def handler(service):
                         if len(text)>2_000_000: raise ValueError('正文超过 200 万字')
                         service.archive.update(item_id, text=text, summary='', tags=[], category='未分类', state='pending' if text.strip() else 'needs_content', error='')
                     if 'title' in body: service.archive.update(item_id, title=str(body['title'])[:300])
-                    service.queue(item_id, force=True); return self.send(200, {'ok':True})
+                    service.queue(item_id, force=True, full_pdf=body.get('full_pdf') is True); return self.send(200, {'ok':True})
                 self.send(404, {'error':'不存在'})
             except (ValueError, KeyError) as exc: self.send(400, {'error':str(exc)})
             except Exception as exc: self.send(500, {'error':str(exc)})
