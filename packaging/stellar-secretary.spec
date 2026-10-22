@@ -18,10 +18,12 @@ a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
              hiddenimports=collect_submodules('secretary') + collect_submodules('pypdf'),
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython'])
 exe = EXE(PYZ(a.pure), a.scripts, [('X utf8', None, 'OPTION')],
-          name=APP, exclude_binaries=True, console=False)
+          name=APP, exclude_binaries=True, console=False,
+          icon=str(ROOT/'secretary/static/icons'/('app.icns' if MAC else 'app.ico')))
 coll = COLLECT(exe, a.binaries, a.datas, name=APP)
 if MAC:
     app = BUNDLE(coll, name=APP+'.app', version=__version__,
+                 icon=str(ROOT/'secretary/static/icons/app.icns'),
                  bundle_identifier='io.github.stellarstar255.stellar-secretary',
                  info_plist={'CFBundleDisplayName': '知识秘书', 'NSHighResolutionCapable': True,
                              'CFBundleShortVersionString': __version__})
