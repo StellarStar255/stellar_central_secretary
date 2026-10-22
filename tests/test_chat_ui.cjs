@@ -102,3 +102,8 @@ assert(vm.runInContext('readerChart(JSON.stringify(chartAttack))',context).inclu
 assert(!vm.runInContext('readerMarkdown("```json\\n{\\"x\\":\\"<svg onload=evil()>\\"}\\n```")',context).includes('<svg'));
 assert.equal(fs.readFileSync('browser-extension/extract.js','utf8'),fs.readFileSync('secretary/static/extract.js','utf8'));
 console.log('PASS: markdown and legacy tables, chart snapshots, untrusted SVG rejection, shared extension extractor');
+
+context.legendChart={...chartFixture,legend:[{label:'系列 <甲>',color:'#123456'}],dataText:'原始数据 <script>test</script>'};
+const withLegend=vm.runInContext('readerChart(JSON.stringify(legendChart))',context);
+assert(withLegend.includes('reader-chart-legend')&&withLegend.includes('系列 &lt;甲&gt;')&&withLegend.includes('查看图表数据与说明'));
+assert(withLegend.includes('&lt;script&gt;test&lt;/script&gt;')&&!withLegend.includes('<script>'));

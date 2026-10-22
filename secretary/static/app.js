@@ -17,7 +17,7 @@ function readerChart(raw){
   if(raw.length>160000)throw Error('size');
   const chart=JSON.parse(raw),tags=new Set(['svg','g','path','line','polyline','polygon','rect','circle','ellipse','text','tspan']);
   const attrs=new Set(['viewBox','width','height','x','y','x1','x2','y1','y2','cx','cy','r','rx','ry','d','points','transform','fill','stroke','stroke-width','stroke-dasharray','opacity','fill-opacity','stroke-opacity','text-anchor','dominant-baseline','font-size','font-weight','dx','dy']);
-  const color=value=>typeof value==='string'&&/^(?:#[a-f\d]{3,8}|rgba?\([\d.,%\s]+\)|[a-z]+)$/i.test(value)?value:'white';
+  const color=value=>typeof value==='string'&&/^(?:#[a-f\d]{3,8}|(?:rgba?|hsla?|oklch|oklab|lab|lch|color)\([a-z\d.,%+\/\s-]+\)|[a-z]+)$/i.test(value)?value:'white';
   let count=0;
   const draw=(node,depth=0)=>{
    if(!node||!tags.has(node.tag)||++count>1500||depth>40)throw Error('shape');
@@ -32,7 +32,8 @@ function readerChart(raw){
   const view=String(chart.tree.attrs?.viewBox||'').trim().split(/[ ,]+/).map(Number);
   if(view.length!==4||!view.every(Number.isFinite)||view[2]<=0||view[3]<=0||view.some(v=>Math.abs(v)>10000))throw Error('bounds');
   chart.tree.children=[{tag:'rect',attrs:{x:view[0],y:view[1],width:view[2],height:view[3],fill:color(chart.background)},children:[]},...(chart.tree.children||[])];
-  return '<figure class="reader-chart"><div class="reader-chart-scroll" role="img" aria-label="归档图表快照">'+draw(chart.tree)+'</div><figcaption>图表快照 · 悬浮提示和交互请打开原链接查看</figcaption></figure>';
+  const legend=(Array.isArray(chart.legend)?chart.legend:[]).slice(0,50).filter(item=>item&&typeof item.label==='string').map(item=>'<span><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="'+readerEscape(color(item.color))+'"></circle></svg>'+readerEscape(item.label.slice(0,200))+'</span>').join('');
+  return '<figure class="reader-chart">'+(typeof chart.title==='string'&&chart.title?'<div class="reader-chart-title">'+readerEscape(chart.title.slice(0,300))+'</div>':'')+'<div class="reader-chart-scroll" role="img" aria-label="归档图表快照">'+draw(chart.tree)+'</div>'+(legend?'<div class="reader-chart-legend">'+legend+'</div>':'')+(typeof chart.dataText==='string'&&chart.dataText?'<details class="reader-chart-data"><summary>查看图表数据与说明</summary><pre>'+readerEscape(chart.dataText.slice(0,60000))+'</pre></details>':'')+'<figcaption>图表快照 · 悬浮提示和交互请打开原链接查看</figcaption></figure>';
  }catch{return '<p class="reader-chart-unavailable">图表快照无法显示，请打开原链接查看。</p>'}
 }
 function readerTable(rows){

@@ -1,6 +1,6 @@
 # Stellar Secretary · 知识秘书
 
-版本 **v0.1.8** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.8.md)
+版本 **v0.1.9** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.9.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -163,7 +163,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.8 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.9 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -174,3 +174,5 @@ macOS 签名公证使用仓库 Secrets：`MACOS_CERT_P12`、`MACOS_CERT_PASSWORD
 v0.1.8 起，登录读取和浏览器扩展会把 HTML 表格保存为结构化文本，在归档详情中显示为可横向滚动的表格；旧正文仍保留制表符时也可直接恢复表格布局。可读取的内联 SVG 图表保存为静态图形快照，保留曲线、坐标和图形文字。读取范围包含完整回答，避免遗漏位于角色正文之外的图表。
 
 图表快照不包含原站的悬浮提示或交互。Canvas、iframe 和跨域嵌入内容暂不转存图形，会显示打开原链接的提示。旧版已经丢失的图形需在资料详情重新「登录并读取对话」；更新浏览器扩展后请在扩展管理页重新加载扩展。快照标签参与检索和摘要，绘图坐标不参与。
+
+v0.1.9 补齐新版 ChatGPT 的 search-unit 消息容器和角色标题 DOM 采集路径；这两种页面结构同样保留表格、SVG 曲线和按钮式图例。图表的原始数据与说明可在图形下方展开，避免图形被散乱文本替代。
