@@ -1,5 +1,6 @@
 """Exercise the frozen server, static assets, archive and authenticated shutdown."""
 import json
+import base64
 import os
 from pathlib import Path
 import socket
@@ -8,6 +9,9 @@ import sys
 import tempfile
 import time
 import urllib.request
+
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'tests'))
+from pdf_fixture import pdf_bytes
 
 with socket.socket() as sock:
     sock.bind(('127.0.0.1', 0))
@@ -42,6 +46,10 @@ with tempfile.TemporaryDirectory() as data:
         imported = json.loads(request('/api/import', backup, status['token']))
         assert imported == {'imported': 0, 'skipped': 1, 'total': 1}, imported
         assert b'import-backup' in request('/')
+        pdf = json.loads(request('/api/ingest', {'filename':'aes-fixture.pdf', 'data':base64.b64encode(pdf_bytes(password='')).decode()}, status['token']))['item']
+        assert 'Encrypted PDF extraction fixture' in pdf['text'] and not pdf['error'], pdf
+        reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
+        assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
             update = json.loads(request('/api/update/check', {}, status['token']))
             assert not update.get('error'), update

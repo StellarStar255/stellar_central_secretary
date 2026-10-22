@@ -154,6 +154,30 @@ class Service:
             stop = self.captures.get(item_id)
             if stop: stop.set()
 
+    def reextract(self, item_id):
+        item=self.archive.get(item_id)
+        if not item['filename']:raise ValueError('这条资料没有可重新解析的原文件')
+        with self.lock:
+            if item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后重试')
+            self.busy.add(item_id)
+        parsed=False
+        try:
+            self.archive.update(item_id,state='processing',error='正在重新解析原文件…')
+            text,warning=extract(item['filename'],(self.archive.root/'files'/item_id).read_bytes())
+            if text.strip():
+                self.archive.replace_capture(item_id,item['title'],text)
+                self.archive.update(item_id,state='ready' if self.archive.get(item_id)['summary'] else 'pending',error=warning)
+                parsed=True
+            else:
+                self.archive.update(item_id,state='ready' if item['text'] else 'needs_content',error=warning or '未提取到正文，原文件已保留。')
+        except Exception as exc:
+            self.archive.update(item_id,state='ready' if item['text'] else 'needs_content',error='重新解析失败，原文件与已有正文已保留：'+str(exc)[:500])
+            raise
+        finally:
+            with self.lock:self.busy.discard(item_id)
+        if parsed:self.queue(item_id)
+        return {'ok':True,'parsed':parsed,'item':self.archive.get(item_id)}
+
     def ingest(self, body):
         name = Path(str(body.get('filename', '')).replace('\\', '/')).name
         url = str(body.get('url', '')).strip(); text = str(body.get('text', '')).strip()
@@ -282,11 +306,13 @@ def handler(service):
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
                     with service.lock:
                         if item_id in service.busy: raise ValueError('资料正在处理，请稍后编辑或重试')
+                    if path.endswith('/reextract'):
+                        return self.send(200,service.reextract(item_id))
                     if path.endswith('/confirm-login'):
                         item=service.confirm_login(item_id)
                         return self.send(200, {'ok':True, 'login_confirmed':True, 'item':item})
