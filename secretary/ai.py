@@ -1,6 +1,7 @@
 """Reuse local CLI authentication; treat archived material as untrusted data."""
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -87,7 +88,7 @@ def summarize(text, title, backend):
                            +json.dumps({'original_title': title, 'source': source}, ensure_ascii=False), backend))
 
 
-def summary_fields(item, backend):
+def summary_fields(item, backend, full_pdf=False):
     item = dict(item, text=searchable_text(item['text']))
     scope_note='';scope_tag=''
     if item['text'].startswith('【部分对话归档】'):
@@ -96,18 +97,26 @@ def summary_fields(item, backend):
         if len(item['text'])>40000:
             scope_note+=' 摘要仅处理该片段最近4万字符。'
             item['text']=scope_note+'\n\n'+item['text'][-40000:]
-    if len(item['text']) > 240_000:
-        if str(item.get('filename','')).lower().endswith('.pdf'):
-            source=item['text'];window=4000;blocks=10
-            excerpts=[]
-            for index in range(blocks):
-                start=round(index*(len(source)-window)/(blocks-1))
-                excerpts.append(f'[采样片段 {index+1}/{blocks}，原文字符 {start+1}—{start+window}]\n'+source[start:start+window])
-            scope_note='【长 PDF 概览】完整正文已保存；以下摘要基于全文分布的10处采样片段，未逐段总结全部内容。'
-            scope_tag='长文概览'
-            item['text']=scope_note+'\n\n'+'\n\n'.join(excerpts)
+    is_pdf=str(item.get('filename','')).lower().endswith('.pdf')
+    if is_pdf and not full_pdf:
+        source=item['text']
+        pages=list(re.finditer(r'^\[第 (\d+) 页\]$',source,re.M))
+        if pages:
+            end=next((page.start() for page in pages if int(page.group(1))>5),len(source))
+            source=source[:end]
+            scope_note='【PDF 前 5 页概览】仅基于文件前 5 页可读取文字，未总结后续页面。'
         else:
-            raise ValueError('正文已完整索引；超长资料请分拆到 24 万字以内再生成 AI 摘要。')
+            source=source[:24000]
+            scope_note='【PDF 开头概览】未取得页码信息，仅基于正文开头最多 2.4 万字符。'
+        if not source.strip():raise ValueError('PDF 前 5 页没有可读取文字，可点击「生成全文摘要」处理后续页面。')
+        if len(source)>40000:
+            source=source[:40000]
+            scope_note+=' 本次仅处理其中前 4 万字符。'
+        item['text']=source;scope_tag='前部概览'
+    elif is_pdf and full_pdf:
+        scope_note='【PDF 全文摘要】基于全部已提取文字分段整理。'
+    elif len(item['text']) > 240_000:
+        raise ValueError('正文已完整索引；超长资料请分拆到 24 万字以内再生成 AI 摘要。')
     result = summarize(item['text'], item['title'], backend)
     tags = result.get('tags', [])
     if not isinstance(tags, list) or not isinstance(result.get('summary'), str) or not result['summary'].strip():

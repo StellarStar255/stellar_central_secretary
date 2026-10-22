@@ -42,13 +42,38 @@ class PdfExtractionTest(unittest.TestCase):
                 self.assertFalse(result['parsed']);self.assertIn('readable text',result['item']['text'])
             finally:service.close()
 
-    def test_long_pdf_overview_is_bounded_and_disclosed(self):
-        text='DOCUMENT START\n'+'body paragraph '*21000+'\nDOCUMENT END'
+    def test_pdf_preview_only_sends_first_five_pages(self):
+        text='\n\n'.join(f'[第 {i} 页]\nPage {i} body '+('readable text '*5000) for i in range(1,9))
         output={'title':'Magazine','summary':'Overview','category':'Science','tags':['Science']}
         with patch('secretary.ai.summarize',return_value=output) as summarize:
             result=ai.summary_fields({'text':text,'title':'Original','filename':'magazine.pdf'},'codex')
         source=summarize.call_args.args[0]
-        self.assertLess(len(source),42000)
-        self.assertIn('DOCUMENT START',source);self.assertIn('DOCUMENT END',source)
-        self.assertTrue(result['summary'].startswith('【长 PDF 概览】'))
-        self.assertIn('长文概览',result['tags']);self.assertNotIn('部分对话',result['tags'])
+        self.assertLessEqual(len(source),40000)
+        self.assertIn('Page 1 body',source);self.assertNotIn('Page 6 body',source)
+        self.assertTrue(result['summary'].startswith('【PDF 前 5 页概览】'))
+        self.assertIn('前部概览',result['tags']);self.assertNotIn('部分对话',result['tags'])
+        short='\n\n'.join(f'[第 {i} 页]\nPage {i} body' for i in range(1,9))
+        with patch('secretary.ai.summarize',return_value=output) as summarize:
+            ai.summary_fields({'text':short,'title':'Original','filename':'magazine.pdf'},'codex')
+        source=summarize.call_args.args[0]
+        self.assertIn('Page 5 body',source);self.assertNotIn('Page 6 body',source)
+
+    def test_explicit_full_pdf_summary_covers_all_extracted_text(self):
+        text='[第 1 页]\n'+('body paragraph '*21000)+'\n[第 100 页]\nDOCUMENT END'
+        output={'title':'Magazine','summary':'Overview','category':'Science','tags':[]}
+        with patch('secretary.ai.summarize',return_value=output) as summarize:
+            result=ai.summary_fields({'text':text,'title':'Original','filename':'magazine.pdf'},'codex',full_pdf=True)
+        self.assertEqual(summarize.call_args.args[0],text)
+        self.assertTrue(result['summary'].startswith('【PDF 全文摘要】'))
+
+    def test_pdf_without_page_labels_discloses_character_limit(self):
+        with patch('secretary.ai.summarize',return_value={'summary':'Overview','tags':[]}) as summarize:
+            result=ai.summary_fields({'text':'text '*10000,'title':'Original','filename':'old.pdf'},'codex')
+        self.assertEqual(len(summarize.call_args.args[0]),24000)
+        self.assertIn('未取得页码信息',result['summary'])
+
+    def test_blank_pdf_front_pages_do_not_summarize_later_pages(self):
+        with patch('secretary.ai.summarize') as summarize:
+            with self.assertRaisesRegex(ValueError,'前 5 页没有可读取文字'):
+                ai.summary_fields({'text':'[第 6 页]\nLater page text','title':'Original','filename':'blank-front.pdf'},'codex')
+        summarize.assert_not_called()
