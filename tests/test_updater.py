@@ -18,7 +18,7 @@ class UpdateTest(unittest.TestCase):
         with patch.object(paths,'FROZEN',True), patch.object(paths.sys,'platform','darwin'), patch.object(Path,'is_file',return_value=True):
             with patch.dict(os.environ,{},clear=True):
                 paths.configure_tls()
-                self.assertEqual(os.environ['SSL_CERT_FILE'],'/etc/ssl/cert.pem')
+                self.assertEqual(os.environ['SSL_CERT_FILE'],str(Path('/etc/ssl/cert.pem')))
             with patch.dict(os.environ,{'SSL_CERT_FILE':'/custom/trusted.pem'}):
                 paths.configure_tls()
                 self.assertEqual(os.environ['SSL_CERT_FILE'],'/custom/trusted.pem')
