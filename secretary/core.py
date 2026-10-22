@@ -36,11 +36,23 @@ def extract(name, data):
     if suffix == '.pdf':
         try:
             from pypdf import PdfReader
+            from pypdf.errors import DependencyError, FileNotDecryptedError, PdfReadError
         except ImportError:
             return '', 'PDF 解析组件未安装，请运行启动脚本安装依赖。'
-        reader = PdfReader(io.BytesIO(data))
-        text = '\n\n'.join(f'[第 {i+1} 页]\n{page.extract_text() or ""}' for i, page in enumerate(reader.pages))
-        return (text, '') if len(text.strip()) > 20 else ('', '此 PDF 没有可读取文字，扫描件需先做 OCR。')
+        try:
+            reader = PdfReader(io.BytesIO(data))
+            if reader.is_encrypted and not reader.decrypt(''):
+                return '', '此 PDF 需要打开密码，请先使用密码打开并导出可读取版本，再重新导入。'
+            pages = [(page.extract_text() or '').strip() for page in reader.pages]
+        except DependencyError:
+            return '', 'PDF 加密读取组件不完整，请升级程序后点击「重新解析原文件」。'
+        except FileNotDecryptedError:
+            return '', '此 PDF 需要打开密码，请先使用密码打开并导出可读取版本，再重新导入。'
+        except PdfReadError:
+            return '', 'PDF 文件损坏或结构无法读取，请确认原文件能正常打开后重试。'
+        if sum(len(text) for text in pages)<20:
+            return '', '此 PDF 没有足够的可读取文字，可能是扫描件，需要先做 OCR。'
+        return '\n\n'.join(f'[第 {i+1} 页]\n{text}' for i,text in enumerate(pages) if text), ''
     if suffix in ('.docx', '.pptx', '.xlsx', '.odt'):
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             if sum(i.file_size for i in z.infolist()) > 100_000_000: raise ValueError('解压内容超过 100 MB')
