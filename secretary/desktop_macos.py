@@ -91,7 +91,7 @@ def run(address, service=None, server=None, open_browser=True):
             if label != self.last_label:
                 button = self.status_item.button()
                 button.setImage_(self.images[label['icon']])
-                button.setTitle_(' '+label['title'])
+                button.setTitle_('')
                 button.setToolTip_('知识秘书 · '+label['detail'])
                 self.status_label.setTitle_(label['detail'])
                 app.dockTile().setBadgeLabel_(label['badge'])

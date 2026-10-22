@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as temp:
         else:raise RuntimeError('Native desktop did not become ready')
         desktop=status['desktop']
         assert desktop['menu_bar'] and desktop['dock'] and desktop['activation_policy']==0, desktop
-        assert desktop['label']==' 就绪' and desktop['dock_badge']=='',desktop
+        assert desktop['label']=='' and desktop['dock_badge']=='',desktop
         request=urllib.request.Request(f'http://127.0.0.1:{port}/api/shutdown',data=b'{}',
                 headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
         opener.open(request,timeout=3).close()

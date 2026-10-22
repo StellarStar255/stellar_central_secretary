@@ -1,6 +1,6 @@
 # Stellar Secretary · 知识秘书
 
-版本 **v0.1.15** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.15.md)
+版本 **v0.1.16** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.16.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -11,7 +11,7 @@
 - **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
 - **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
 
-安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面通过本机浏览器打开。macOS 安装版常驻菜单栏和 Dock：菜单栏显示启动、就绪、处理中和异常状态，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 关闭页面后后台继续运行，再次双击应用可重新打开页面。
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面通过本机浏览器打开。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 关闭页面后后台继续运行，再次双击应用可重新打开页面。
 
 在「模型与设置 → 版本与升级」点击「检查更新」，有正式新版时点击「一键升级并重启」。程序验证 SHA256，macOS 额外验证开发者签名，安装后重启；有读取或摘要任务时请先等待完成。macOS 请先把应用拖到「应用程序」，从 DMG 直接运行时会转为手动安装。
 
@@ -167,7 +167,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.15 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.16 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
