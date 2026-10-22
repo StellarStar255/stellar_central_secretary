@@ -35,6 +35,24 @@ class ArchiveTest(unittest.TestCase):
         self.archive.add('毛衣清洗','羊毛衣服怎么清洗？')
         self.assertEqual([r['id'] for r in self.archive.list(q='毛泽东')],[item])
         self.assertEqual([r['id'] for r in self.archive.list(q='毛主席')],[item])
+    def test_library_search_requires_all_keywords_in_any_order_across_fields(self):
+        wanted,_=self.archive.add('科学美国人杂志','本期主题包含神经科学与天文。',filename='SciAm_06_2026.pdf')
+        self.archive.update(wanted,summary='2026年6月刊概览',tags=['Science'],category='科学')
+        self.archive.add('科学美国人往期','2026年5月刊')
+        self.archive.add('美国市场','6月经济与收入分析')
+        for query in ('科学美国人 6月','6月 科学美国人','  科学美国人　\t6月  ','SCIENCE\n6月','SciAm_06 6月','神经科学 6月'):
+            results=self.archive.list(q=query)
+            self.assertEqual([r['id'] for r in results],[wanted],query)
+            self.assertNotIn('text',results[0])
+        self.assertEqual(self.archive.list(q='科学美国人 不存在'),[])
+        self.assertEqual(self.archive.list(q='科学美国人 6月',kind='link'),[])
+        self.assertEqual(self.archive.list(q='科学美国人 6月',category='历史'),[])
+        self.assertEqual(len(self.archive.list(q='科学美国人 6月',kind='file',category='科学')),1)
+        self.assertEqual(len(self.archive.list(q=' \t　')),3)
+    def test_library_search_matches_keywords_across_body_chunks(self):
+        wanted,_=self.archive.add('长文','深海探索'+('正文内容。'*3000)+'人工智能')
+        self.archive.add('无关资料','深海研究与机器学习')
+        self.assertEqual([r['id'] for r in self.archive.list(q='人工智能 深海探索')],[wanted])
     def test_longer_capture_replaces_body_and_preserves_old_version(self):
         item,_=self.archive.add('原版','用户：\n提问\n\nChatGPT：\n旧回答')
         self.archive.update(item,summary='旧摘要',state='ready')

@@ -48,6 +48,10 @@ with tempfile.TemporaryDirectory() as data:
         assert b'import-backup' in request('/')
         pdf = json.loads(request('/api/ingest', {'filename':'aes-fixture.pdf', 'data':base64.b64encode(pdf_bytes(password='')).decode()}, status['token']))['item']
         assert 'Encrypted PDF extraction fixture' in pdf['text'] and not pdf['error'], pdf
+        for query in ('Encrypted%20readable','readable%20Encrypted'):
+            matches=json.loads(request('/api/items?q='+query+'&kind=file'))
+            assert [item['id'] for item in matches]==[pdf['id']], matches
+        assert json.loads(request('/api/items?q=Encrypted%20nonexistent'))==[]
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
         assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
