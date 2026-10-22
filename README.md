@@ -1,12 +1,25 @@
 # Stellar Secretary · 知识秘书
 
-版本 **v0.1.6** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.6.md)
+版本 **v0.1.7** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.7.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
-## 启动
+## 安装与升级
 
-下载 Release 源码并解压，或克隆仓库后进入项目目录。macOS 下使用以下启动方式；本版发布源码，不包含独立安装包。
+从 [GitHub Releases](https://github.com/StellarStar255/stellar_central_secretary/releases/latest) 下载安装包：
+
+- **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
+- **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
+
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面通过本机浏览器打开；关闭页面后后台继续运行，再次双击应用可重新打开页面。
+
+在「模型与设置 → 版本与升级」点击「检查更新」，有正式新版时点击「一键升级并重启」。程序验证 SHA256，macOS 额外验证开发者签名，安装后重启；有读取或摘要任务时请先等待完成。macOS 请先把应用拖到「应用程序」，从 DMG 直接运行时会转为手动安装。
+
+安装版数据目录：macOS 为 `~/Library/Application Support/Stellar Secretary`，Windows 为 `%LOCALAPPDATA%\Stellar Secretary`。升级和卸载保留资料。首次从源码版迁移时，先停止旧服务并备份，将原项目 `data` 目录的全部内容复制到对应安装版目录，再启动应用；不要同时启动两版。浏览器中的对话记录仍由同一 `http://127.0.0.1:8768` 地址下的本地存储保留。
+
+## 源码启动
+
+下载 Release 源码并解压，或克隆仓库后进入项目目录。macOS 下使用以下启动方式：
 
 更新程序代码后，双击 **重启知识秘书.command** 可停止当前项目的旧服务并启动新版。重启脚本仅处理默认端口 8768，并验证进程确属本项目。
 
@@ -141,3 +154,17 @@ v0.1.4 改为通过 CDP 连接仍在运行的浏览器，不再关闭重开窗�
 会话补读会先加载顶部历史，再逐屏向下收集，到达底部且消息稳定后保存。超出范围或仍未稳定时报告失败并保留原正文。替换前的正文、摘要及标签保存在 `data/capture-history/`；新正文显著短于旧版时不会覆盖。该过程只能确认页面中可加载的消息，网页未提供的历史仍需导出文件补充。
 
 搜索支持少量有上下文约束的简称规则，例如“四人帮／文革”语境下的“反对毛”“毛的支持”可通过“毛泽东”检索；普通“毛衣”等词不会据此匹配。此功能不是通用语义向量检索。
+
+## 构建与发布安装包
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt -r packaging/requirements-build.txt
+bash packaging/build_macos.sh
+```
+
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.7 packaging/windows_installer.iss`。
+
+GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
+
+macOS 签名公证使用仓库 Secrets：`MACOS_CERT_P12`、`MACOS_CERT_PASSWORD`、`MACOS_SIGN_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`。本地可设置 `MACOS_SIGN_IDENTITY` 和 `NOTARY_PROFILE`。自动替换只接受与 `secretary/updater.py` 中 `TEAM_ID` 一致的签名。未配置证书时能生成临时签名 DMG，但无法作为一键替换的更新目标；首次打开需在系统设置的「隐私与安全性」中允许。Windows 安装程序未做代码签名。

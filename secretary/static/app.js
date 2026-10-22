@@ -251,10 +251,26 @@ async function detail(id){const item=await api('/api/items/'+id);selectedId=id;d
  $('#edit-content').disabled=isReading(item);
  $('#edit-content').onclick=()=>{const editor=document.createElement('div');editor.innerHTML='<label>标题<input id="detail-title"></label><label>正文<textarea class="edit-text" id="detail-edit"></textarea></label><button class="primary" id="save-content">保存并重新整理</button>';$('#detail-content').append(editor);$('#detail-title').value=item.title;$('#detail-edit').value=item.text;$('#detail-edit').focus();$('#edit-content').disabled=true;$('#save-content').onclick=()=>busy($('#save-content'),async()=>{await api('/api/items/'+id,{title:$('#detail-title').value,text:$('#detail-edit').value});await detail(id);await refresh();toast('正文已保存并重新索引')})};
 }
-$('#settings-open').onclick=()=>$('#settings-dialog').showModal();
-async function loadStatus(){const data=await api('/api/status');token=data.token;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?'已找到 CLI（登录状态需调用验证）':'未找到')).join('　');$('#data-dir').textContent='本机资料目录：'+data.data_dir}
+$('#settings-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
+async function loadStatus(){const data=await api('/api/status');token=data.token;if(data.update)renderUpdate(data.update);supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?'已找到 CLI（登录状态需调用验证）':'未找到')).join('　');$('#data-dir').textContent='本机资料目录：'+data.data_dir}
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked});$('#settings-dialog').close();toast('设置已保存；等待中的资料可手动重新整理')});
-$('#model-open').onclick=()=>$('#settings-dialog').showModal();
+$('#model-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
 function updateModelLabel(){$('#model-label').textContent=$('#backend').value==='claude'?'Claude':'ChatGPT · Codex'}
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked});updateModelLabel();$('#settings-dialog').close();toast('设置已保存')});
 (async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text='上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。'}}renderSidebar();renderChat();updateSend();try{await loadStatus();updateModelLabel();await refresh();setInterval(()=>{if(!document.hidden)refresh().catch(()=>{})},5000)}catch(e){toast('无法连接本地服务：'+e.message)}})();
+
+let updateTimer;
+function renderUpdate(s){
+ const labels={checking:'正在检查更新…',downloading:'正在下载 '+s.progress+'%',verifying:'正在校验安装包…',installing:'正在升级，程序即将重启，请稍后刷新页面。',manual:'安装包已打开，请完成安装。'};
+ $('#update-status').textContent='当前版本 '+s.current+' · '+(s.error||labels[s.phase]||(s.available?'发现新版本 '+s.latest:s.supported?'已是最新版本或尚未检查':'源码运行；安装版支持一键升级'));
+ const active=['checking','downloading','verifying','installing'].includes(s.phase);
+ $('#update-check').disabled=active;
+ $('#update-install').hidden=!s.supported||!s.available;
+ $('#update-install').disabled=active;
+}
+$('#update-check').onclick=()=>busy($('#update-check'),async()=>renderUpdate(await api('/api/update/check',{})));
+$('#update-install').onclick=()=>busy($('#update-install'),async()=>{
+ renderUpdate(await api('/api/update/install',{}));
+ clearInterval(updateTimer);
+ updateTimer=setInterval(async()=>{try{const s=await api('/api/update');renderUpdate(s);if(['error','manual','idle'].includes(s.phase))clearInterval(updateTimer)}catch(e){clearInterval(updateTimer);$('#update-status').textContent='服务正在重启，请稍后刷新页面。'}},1000);
+});

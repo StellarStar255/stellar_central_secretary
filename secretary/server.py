@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader
+from . import ai, browser_reader, paths, updater
 from . import __version__
 
 STATIC = Path(__file__).parent / 'static'
@@ -213,7 +213,8 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'version':__version__, 'capabilities':{'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'update':updater.status(), 'capabilities':{'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/items':
                     q = urllib.parse.parse_qs(parsed.query)
                     return self.send(200, service.archive.list(**{k:q.get(k,[''])[0] for k in ('q','category','kind')}))
@@ -237,6 +238,16 @@ def handler(service):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                if path=='/api/update/check': return self.send(200, updater.check())
+                if path=='/api/update/install':
+                    with service.lock:
+                        if service.busy or service.captures: raise ValueError('请等待摘要和会话读取完成后再升级')
+                    updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start())
+                    return self.send(200, updater.status())
+                if path=='/api/shutdown':
+                    self.send(200, {'ok':True})
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/settings':
                     service.archive.configure(body['backend'], body['auto_ai']); return self.send(200, {'ok':True})
@@ -273,7 +284,7 @@ def handler(service):
 def main():
     parser = argparse.ArgumentParser(description='Stellar Secretary · 知识秘书')
     parser.add_argument('--port', type=int, default=8768)
-    parser.add_argument('--data-dir', default=str(Path(__file__).resolve().parent.parent/'data'))
+    parser.add_argument('--data-dir', default=str(paths.DATA_DIR))
     parser.add_argument('--no-browser', action='store_true'); args = parser.parse_args()
     service = Service(args.data_dir)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), handler(service))
@@ -283,6 +294,7 @@ def main():
     address = f'http://127.0.0.1:{server.server_port}'
     print(f'Stellar Secretary：{address}\n资料目录：{service.archive.root}', flush=True)
     if not args.no_browser: webbrowser.open(address)
+    updater.check_periodically()
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close(); service.close()
