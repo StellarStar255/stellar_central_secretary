@@ -116,11 +116,15 @@ class Archive:
         with self.db() as db: values = dict(db.execute('SELECT key,value FROM settings').fetchall())
         return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
                 'capture_background': values.get('capture_background', 'true') == 'true',
-                'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true'}
-    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None):
+                'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
+                'capture_scope': values.get('capture_scope', 'recent')}
+    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None):
         if backend not in ('codex', 'claude'): raise ValueError('未知模型后端')
         with self.db() as db:
             pairs=[('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())]
+            if capture_scope is not None:
+                if capture_scope not in ('recent','loaded','full'):raise ValueError('无效的会话读取范围')
+                pairs.append(('capture_scope',capture_scope))
             for key,value in (('capture_background',capture_background),('capture_close_tabs',capture_close_tabs)):
                 if value is not None:
                     if not isinstance(value,bool): raise ValueError('浏览器选项格式无效')
@@ -164,10 +168,12 @@ class Archive:
         with self.lock, self.db() as db:
             db.execute('UPDATE items SET '+','.join(k+'=?' for k in values)+' WHERE id=?', (*values.values(), item_id))
             if 'text' in values: self._index(db, item_id, values['text'])
-    def replace_capture(self, item_id, title, text):
+    def replace_capture(self, item_id, title, text, partial=False):
         previous = self.get(item_id)
         if not text.strip(): raise ValueError('新采集正文为空，原正文已保留。')
-        if previous['text'] and len(searchable_text(text))<len(searchable_text(previous['text']))*.85:
+        if partial and (not text.startswith('【部分对话归档】') or previous['text'] and not previous['text'].startswith('【部分对话归档】')):
+            raise ValueError('部分采集不能覆盖已有完整正文。')
+        if not partial and previous['text'] and len(searchable_text(text))<len(searchable_text(previous['text']))*.85:
             raise ValueError('新采集正文显著短于原正文，可能仍有消息未加载；原正文已保留。')
         if text==previous['text']: return False
         if previous['text']:

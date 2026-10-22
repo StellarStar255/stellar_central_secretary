@@ -1,6 +1,6 @@
 # Stellar Secretary · 知识秘书
 
-版本 **v0.1.16** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.16.md)
+版本 **v0.1.17** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.17.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -40,6 +40,8 @@
 ## 使用
 
 左下角「导入知识库备份」或「知识库 → 导入知识库备份」可导入本程序导出的 ZIP。导入会合并资料、摘要、标签和原文件，并跳过重复项；当前资料保留。普通文件仍从输入框「＋」导入。
+
+「模型与设置 → 会话读取范围」默认快速读取最近最多 20 轮；也可选择当前已加载内容或完整会话。部分采集会标注范围，已有完整正文会保留并将最近片段另存。部分摘要仅处理最近片段，超长片段最多使用最近 4 万字符。
 
 「模型与设置」可选择后台打开读取浏览器，以及读取后自动关闭本次新开的网页，默认均开启。需要重新登录时会显示任务标签页并等待确认；已有标签页和登录状态保留。
 
@@ -167,7 +169,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.16 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.17 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 

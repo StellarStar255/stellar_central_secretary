@@ -31,7 +31,7 @@ def create_task_page(browser, session, background):
         cdp.detach()
 
 
-def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs):
+def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope='full'):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -65,7 +65,7 @@ def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, b
                 notify('confirming_login', '已收到登录确认，继续读取本次任务页面。')
             result = reader.read_from_browser(pw, session, target, notify, cancelled, min(timeout,90),
                          diagnose=lambda report:(profile.parent/'last-capture-diagnostic.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)),
-                         capture_page=page, on_login_required=login, browser=browser)
+                         capture_page=page, on_login_required=login, browser=browser, scope=scope)
             session['confirmed'] = True
             reader.save_session(profile, session)
             return result

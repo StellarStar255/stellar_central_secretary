@@ -89,12 +89,20 @@ def summarize(text, title, backend):
 
 def summary_fields(item, backend):
     item = dict(item, text=searchable_text(item['text']))
+    scope_note=''
+    if item['text'].startswith('【部分对话归档】'):
+        scope_note=item['text'].splitlines()[0]
+        if len(item['text'])>40000:
+            scope_note+=' 摘要仅处理该片段最近4万字符。'
+            item['text']=scope_note+'\n\n'+item['text'][-40000:]
     if len(item['text']) > 240_000:
         raise ValueError('正文已完整索引；超长资料请分拆到 24 万字以内再生成 AI 摘要。')
     result = summarize(item['text'], item['title'], backend)
     tags = result.get('tags', [])
     if not isinstance(tags, list) or not isinstance(result.get('summary'), str) or not result['summary'].strip():
         raise ValueError('摘要格式不正确，请重试')
-    return dict(title=str(result.get('title') or item['title'])[:300], summary=result['summary'],
+    tags=[str(t)[:60] for t in tags[:6]]
+    if scope_note:tags=list(dict.fromkeys(tags[:5]+['部分对话']))
+    return dict(title=str(result.get('title') or item['title'])[:300], summary=(scope_note+'\n\n' if scope_note else '')+result['summary'],
                 category=str(result.get('category') or '未分类')[:80],
-                tags=[str(t)[:60] for t in tags[:6]], state='ready', error='')
+                tags=tags, state='ready', error='')
