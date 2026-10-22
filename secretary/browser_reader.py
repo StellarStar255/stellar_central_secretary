@@ -184,7 +184,7 @@ def collect_messages(page, cancelled, notify=None):
         new = []
         for m in messages:
             if not isinstance(m,dict) or not m.get('text'): continue
-            key = m.get('id') or m['role']+'\0'+m['text']
+            key = m['role']+'\0'+(m.get('id') or m['text'])
             if key not in collected: new.append(key)
             collected[key] = m
         if prepend: ordered[:0] = new
