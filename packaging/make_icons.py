@@ -28,4 +28,9 @@ app.save(root/'app.png')
 app.save(root/'app.icns')
 app.save(root/'app.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
 for name,color in {'ready':'#72ba96','busy':'#efab59','error':'#ef756f','starting':'#a0a0a0'}.items():
-    mark(72,color).save(root/f'tray-{name}.png')
+    # Preserve the Dock brand; only the small status indicator changes color.
+    tray=mark(288,'#ef9b62',True)
+    draw=ImageDraw.Draw(tray)
+    draw.ellipse((190,190,282,282),fill='#242323')
+    draw.ellipse((202,202,270,270),fill=color)
+    tray.resize((72,72),Image.Resampling.LANCZOS).save(root/f'tray-{name}.png')

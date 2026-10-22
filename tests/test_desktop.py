@@ -71,7 +71,7 @@ class NativeDesktopTest(unittest.TestCase):
                     self.assertEqual(service.desktop['dock_badge'],'')
                     with service.lock:service.busy.add('fixture')
                     wait_for(lambda:service.desktop.get('dock_badge')=='整理')
-                    self.assertEqual(service.desktop['label'],' 处理中')
+                    self.assertEqual(service.desktop['label'],'')
                     with service.lock:service.busy.clear();service.captures['fixture']=threading.Event()
                     wait_for(lambda:service.desktop.get('dock_badge')=='读取')
                     with service.lock:service.captures.clear()
