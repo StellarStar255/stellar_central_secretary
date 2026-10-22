@@ -29,7 +29,16 @@ function extractKnowledgeConversation() {
     tree.attrs.width=String(box.width);tree.attrs.height=String(box.height);
     let background='white';
     for(let n=svg;n;n=n.parentElement){const color=getComputedStyle(n).backgroundColor;if(color&&color!=='transparent'&&color!=='rgba(0, 0, 0, 0)'){background=color;break}}
-    const result={version:1,background,tree};
+    const legendRoot=svg.closest('.recharts-wrapper')?.querySelector('.recharts-legend-wrapper');
+    const legend=legendRoot?Array.from(legendRoot.querySelectorAll('.Chart_LegendItem,.recharts-legend-item,li')).slice(0,50).map(item=>{
+      const marker=item.querySelector('.Chart_LegendItemMarker,svg path,svg circle');
+      const style=marker&&getComputedStyle(marker);
+      return {label:(item.textContent||'').trim().slice(0,200),color:style?(marker.namespaceURI==='http://www.w3.org/2000/svg'?style.fill:style.backgroundColor):'gray'};
+    }).filter(item=>item.label):[];
+    const widget=svg.closest('[data-testid="chatgpt-chart-content-reference"]');
+    const title=(widget?.querySelector('h1,h2,h3,h4,h5,h6')?.textContent||'').trim().slice(0,300);
+    const dataText=(widget?.innerText||'').trim().slice(0,60000);
+    const result={version:1,background,tree,legend,title,dataText};
     return JSON.stringify(result).length<=160000?result:null;
   };
   const textOf = node => {
@@ -37,11 +46,14 @@ function extractKnowledgeConversation() {
     const clone = node.cloneNode(true);
     const originals=Array.from(node.querySelectorAll('svg'));
     Array.from(clone.querySelectorAll('svg')).forEach((svg,i)=>{
+      if(!clone.contains(svg))return;
       const chart=snapshotChart(originals[i]);
-      svg.replaceWith(document.createTextNode(chart?'\n\n```stellar-chart\n'+JSON.stringify(chart)+'\n```\n\n':''));
+      const widget=svg.closest('[data-testid="chatgpt-chart-content-reference"]');
+      const target=chart&&widget&&Array.from(originals[i].closest('[data-testid="chatgpt-chart-content-reference"]').querySelectorAll('svg')).filter(n=>n.getBoundingClientRect().width>=240&&n.getBoundingClientRect().height>=100).length===1?widget:svg;
+      target.replaceWith(document.createTextNode(chart?'\n\n```stellar-chart\n'+JSON.stringify(chart)+'\n```\n\n':''));
     });
     clone.querySelectorAll('canvas,iframe').forEach(n=>n.replaceWith(document.createTextNode('\n[此嵌入图表未能保存，请打开原链接查看。]\n')));
-    clone.querySelectorAll('button,nav,textarea,input,script,style,[aria-hidden="true"],h5.sr-only,h6.sr-only').forEach(n => n.remove());
+    clone.querySelectorAll('button,nav,textarea,input,script,style,[aria-hidden="true"],h1.sr-only,h2.sr-only,h3.sr-only,h4.sr-only,h5.sr-only,h6.sr-only').forEach(n => n.remove());
     const blocks = new Set(['P','DIV','LI','PRE','BLOCKQUOTE','H1','H2','H3','H4','H5','H6','TR','UL','OL']);
     const walk = n => {
       if(n.nodeType === 3) return n.textContent;
@@ -61,7 +73,7 @@ function extractKnowledgeConversation() {
     };
     return walk(clone).replace(/\n{3,}/g,'\n\n').trim();
   };
-  const idOf = (node,index) => node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || node.getAttribute('data-testid') || '';
+  const idOf = (node,index) => node.getAttribute('data-chatgpt-selection-message-id') || node.querySelector('[data-chatgpt-selection-message-id]')?.getAttribute('data-chatgpt-selection-message-id') || node.getAttribute('data-chatgpt-search-message-ids')?.split(/\s+/)[0] || node.getAttribute('data-message-id') || node.closest('[data-message-id]')?.getAttribute('data-message-id') || node.getAttribute('data-testid') || '';
   const authorNodes = Array.from(main.querySelectorAll('[data-message-author-role]'));
   const legacy = authorNodes.filter(visible).map((node,index) => ({id:idOf(node,index),role:node.getAttribute('data-message-author-role'),text:textOf(node)}));
   const turns = Array.from(new Set(main.querySelectorAll('[data-testid^="conversation-turn"],article[data-turn],article[aria-label],[role="article"]'))).filter(visible);
@@ -75,13 +87,24 @@ function extractKnowledgeConversation() {
     }
     return {id:idOf(author || node,index),role,text:textOf(node)};
   });
+  // Current ChatGPT uses search-unit containers instead of article/author-role nodes.
+  const modernNodes=Array.from(main.querySelectorAll('[data-chatgpt-search-unit-key],[data-content-search-unit-key]')).filter(n=>/:(user|assistant)$/.test(n.getAttribute('data-chatgpt-search-unit-key')||n.getAttribute('data-content-search-unit-key')||''));
+  const modernMessages=modernNodes.filter(visible).map((node,index)=>({id:idOf(node,index),role:(node.getAttribute('data-chatgpt-search-unit-key')||node.getAttribute('data-content-search-unit-key')).match(/:(user|assistant)$/)[1],text:textOf(node)}));
+  // Preserve rich DOM even when only screen-reader role headings are available.
+  const headings=Array.from(main.querySelectorAll('h1,h2,h3,h4,h5,h6,[data-conversation-role]')).filter(n=>/^(You said|ChatGPT said|你说|你說|ChatGPT\s*说|ChatGPT\s*說)\s*[:：]$/.test((n.textContent||'').trim()));
+  const headingMessages=headings.map((label,index)=>{
+    const node=label.parentElement;
+    if(!node||!visible(node))return null;
+    const role=label.getAttribute('data-conversation-role')||(/ChatGPT/.test(label.textContent)?'assistant':'user');
+    return {id:idOf(node,index),role,text:textOf(node)};
+  }).filter(Boolean);
   const rawMain = main.innerText || '';
   const labeled=[];
   const pattern=/(?:^|\n)(You said|ChatGPT said|你说|你說|ChatGPT\s*说|ChatGPT\s*說)\s*[:：]\s*(?:\n|$)/g;
   const matches=Array.from(rawMain.matchAll(pattern));
   matches.forEach((match,index) => labeled.push({id:'',role:/ChatGPT/i.test(match[1])?'assistant':'user',text:rawMain.slice(match.index+match[0].length,index+1<matches.length?matches[index+1].index:rawMain.length).replace(/^(?:Worked for|Thought for|已思考|思考了)\s+[^\n]{1,60}$/gm,'').trim()}));
-  const strategies=[['author-role',legacy],['conversation-turn',turnMessages],['visible-role-labels',labeled]].map(([name,messages]) => ({name,messages:messages.filter(m=>['user','assistant'].includes(m.role)&&m.text)}));
-  const rank = strategy => strategy.messages.length + (strategy.name==='conversation-turn'?.5:0) + (strategy.messages.some(m=>m.role==='assistant')?10000:0);
+  const strategies=[['search-unit',modernMessages],['role-heading-dom',headingMessages],['author-role',legacy],['conversation-turn',turnMessages],['visible-role-labels',labeled]].map(([name,messages]) => ({name,messages:messages.filter(m=>['user','assistant'].includes(m.role)&&m.text)}));
+  const rank = strategy => strategy.messages.length + (strategy.name==='search-unit'?.8:strategy.name==='conversation-turn'?.6:strategy.name==='role-heading-dom'?.4:0) + (strategy.messages.some(m=>m.role==='assistant')?10000:0);
   strategies.sort((a,b)=>rank(b)-rank(a));
   const chosen=strategies[0];
   const stopButtons=Array.from(document.querySelectorAll('[data-testid="stop-button"],button[aria-label="Stop generating"],button[aria-label="停止生成"]'));
@@ -90,5 +113,5 @@ function extractKnowledgeConversation() {
   const login=loginNodes.some(visible) || Array.from(document.querySelectorAll('button')).some(n=>visible(n)&&/^(Log in|Login|登录|登入)$/i.test(n.innerText.trim()));
   const pageText=(document.body.innerText||'').slice(0,8000);
   const denied=/Unable to load conversation|Conversation not found|You do not have access|无法加载对话|无法加载会话|找不到对话|没有权限/i.test(pageText);
-  return {messages:chosen.messages,text:chosen.messages.length?'':textOf(main),diagnostics:{url:location.origin+location.pathname,title:document.title,readyState:document.readyState,method:chosen.name,authorNodes:authorNodes.length,turnNodes:turns.length,messages:chosen.messages.length,assistantMessages:chosen.messages.filter(m=>m.role==='assistant').length,mainChars:rawMain.length,hints:Array.from(main.querySelectorAll('article,[data-testid],[data-turn],[data-message-author-role],[role="article"]')).slice(0,25).map(n=>({tag:n.tagName,testid:n.getAttribute('data-testid'),turn:n.getAttribute('data-turn'),author:n.getAttribute('data-message-author-role'),role:n.getAttribute('role'),textChars:(n.innerText||'').length})),stopButtons:stopButtons.length,visibleStopButtons:stopButtons.filter(visible).length,generating,login,denied}};
+  return {messages:chosen.messages,text:chosen.messages.length?'':textOf(main),diagnostics:{url:location.origin+location.pathname,title:document.title,readyState:document.readyState,method:chosen.name,authorNodes:authorNodes.length,turnNodes:turns.length,messages:chosen.messages.length,assistantMessages:chosen.messages.filter(m=>m.role==='assistant').length,mainChars:rawMain.length,richCharts:chosen.messages.reduce((count,m)=>count+(m.text.match(/```stellar-chart/g)||[]).length,0),svgCharts:Array.from(main.querySelectorAll('svg')).filter(n=>n.getBoundingClientRect().width>=240&&n.getBoundingClientRect().height>=100).length,hints:Array.from(main.querySelectorAll('article,[data-testid],[data-turn],[data-message-author-role],[role="article"]')).slice(0,25).map(n=>({tag:n.tagName,testid:n.getAttribute('data-testid'),turn:n.getAttribute('data-turn'),author:n.getAttribute('data-message-author-role'),role:n.getAttribute('role'),textChars:(n.innerText||'').length})),stopButtons:stopButtons.length,visibleStopButtons:stopButtons.filter(visible).length,generating,login,denied}};
 }

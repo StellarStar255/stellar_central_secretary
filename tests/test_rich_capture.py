@@ -64,6 +64,44 @@ class BrowserCaptureTest(unittest.TestCase):
                 self.assertEqual(page.locator('.reader-chart path').count(), 1)
                 self.assertEqual(page.locator('.reader-chart text').count(), 4)
                 page.screenshot(path='/tmp/secretary-rich-preview.png', full_page=True)
+                # Real current ChatGPT structure: search-unit divs and sr-only h4 labels,
+                # with neither author-role nodes nor conversation-turn articles.
+                page.set_content(fixture)
+                page.evaluate("""() => {
+                  for(const article of [...document.querySelectorAll('article')]){
+                    const role=article.getAttribute('data-turn');
+                    const node=document.createElement('div');
+                    node.setAttribute('data-chatgpt-search-unit-key','fallback-turn-0:0:'+role);
+                    node.setAttribute('data-chatgpt-search-message-ids','fixture-'+role);
+                    node.innerHTML=article.innerHTML;
+                    for(const author of node.querySelectorAll('[data-message-author-role]'))author.removeAttribute('data-message-author-role');
+                    const label=document.createElement('h4');label.className='sr-only';label.textContent=role==='user'?'You said:':'ChatGPT said:';
+                    if(role==='assistant')label.setAttribute('data-conversation-role','assistant');
+                    node.prepend(label);article.replaceWith(node);
+                  }
+                  const svg=document.querySelector('svg');
+                  const widget=document.createElement('div');widget.setAttribute('data-testid','chatgpt-chart-content-reference');
+                  svg.before(widget);widget.innerHTML='<h3>趋势示例</h3><div class="recharts-wrapper"><div class="recharts-legend-wrapper"><button class="Chart_LegendItem"><div class="Chart_LegendItemMarker" style="background:#e99a65"></div><span>方案甲</span></button></div></div><div class="sr-only">2023: 方案甲 10; 2024: 方案甲 20</div>';
+                  widget.querySelector('.recharts-wrapper').prepend(svg);
+                }""")
+                captured = page.evaluate('() => {'+extractor+';return extractKnowledgeConversation();}')
+                self.assertEqual(captured['diagnostics']['method'], 'search-unit')
+                self.assertEqual(captured['diagnostics']['richCharts'], 1)
+                self.assertEqual(captured['diagnostics']['authorNodes'], 0)
+                self.assertEqual(captured['diagnostics']['turnNodes'], 0)
+                self.assertEqual([m['id'] for m in captured['messages']], ['fixture-user','fixture-assistant'])
+                self.assertNotIn('ChatGPT said:', captured['messages'][1]['text'])
+                import re
+                chart = json.loads(re.search(r'```stellar-chart\n(.*?)\n```', captured['messages'][1]['text'], re.S).group(1))
+                self.assertEqual(chart['legend'][0]['label'], '方案甲')
+                self.assertEqual(chart['title'], '趋势示例')
+                self.assertIn('方案甲 10', chart['dataText'])
+                self.assertIn('方案甲 10', searchable_text(captured['messages'][1]['text']))
+                page.evaluate("() => document.querySelectorAll('[data-chatgpt-search-unit-key]').forEach(n=>n.removeAttribute('data-chatgpt-search-unit-key'))")
+                captured = page.evaluate('() => {'+extractor+';return extractKnowledgeConversation();}')
+                self.assertEqual(captured['diagnostics']['method'], 'role-heading-dom')
+                self.assertEqual(captured['diagnostics']['richCharts'], 1)
+
             finally:
                 browser.close()
 
