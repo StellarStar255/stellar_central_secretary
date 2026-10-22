@@ -1,1 +1,2 @@
 pyinstaller>=6.10,<7
+pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'

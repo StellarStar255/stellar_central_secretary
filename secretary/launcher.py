@@ -9,6 +9,9 @@ from . import paths
 
 
 def main():
+    explicit_desktop = '--desktop' in sys.argv
+    if explicit_desktop: sys.argv.remove('--desktop')
+    desktop = sys.platform == 'darwin' and (explicit_desktop or '--no-browser' not in sys.argv)
     paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
     log = open(paths.DATA_DIR / 'app.log', 'a', encoding='utf-8', buffering=1)
     sys.stdout = sys.stderr = log
@@ -21,6 +24,10 @@ def main():
             with opener.open('http://127.0.0.1:8768/api/status', timeout=2) as response:
                 status = json.load(response)
             if status.get('application') == 'stellar-central-secretary':
+                if desktop and not status.get('desktop', {}).get('enabled'):
+                    from .desktop_macos import run
+                    run('http://127.0.0.1:8768', open_browser='--no-browser' not in sys.argv)
+                    return
                 if '--no-browser' not in sys.argv:
                     webbrowser.open('http://127.0.0.1:8768')
                 return
@@ -28,7 +35,7 @@ def main():
             pass
     try:
         from .server import main as serve
-        serve()
+        serve(desktop=desktop)
     except Exception:
         traceback.print_exc()
         raise
