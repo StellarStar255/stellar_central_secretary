@@ -9,6 +9,7 @@ from . import paths
 
 
 def main():
+    paths.configure_tls()
     explicit_desktop = '--desktop' in sys.argv
     if explicit_desktop: sys.argv.remove('--desktop')
     desktop = sys.platform == 'darwin' and (explicit_desktop or '--no-browser' not in sys.argv)
