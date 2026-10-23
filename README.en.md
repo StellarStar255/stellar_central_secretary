@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.28
+[简体中文](README.md) · **English** · v0.1.29
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 

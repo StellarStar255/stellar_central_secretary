@@ -61,7 +61,7 @@ class CaptureRangesTest(unittest.TestCase):
                     service.archive.replace_capture(original,'部分',sliced,partial=True)
                 stop=threading.Event();service.captures[original]=stop;service.login_confirmations[original]=threading.Event()
                 result={'title':'最近片段','text':sliced,'partial':True,'capture_scope':'recent'}
-                with patch('secretary.server.browser_reader.read',return_value=result):
+                with patch('secretary.capture_worker.run',return_value=result):
                     service.capture(original,stop,False)
                 after=service.archive.get(original)
                 self.assertEqual(after['text'],before['text']);self.assertEqual(after['summary'],before['summary'])

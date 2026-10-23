@@ -69,7 +69,7 @@ class WebReaderTest(unittest.TestCase):
                 item,_=service.archive.add('Original','Saved body '*30,url=URL)
                 service.archive.update(item,summary='Saved summary',state='ready')
                 stop=threading.Event();service.captures[item]=stop;service.login_confirmations[item]=threading.Event()
-                with patch.object(web_reader,'read',side_effect=RuntimeError('No permission')) as read,patch('secretary.browser_reader.read') as chat:
+                with patch('secretary.capture_worker.run',side_effect=RuntimeError('No permission')) as read,patch('secretary.browser_reader.read') as chat:
                     service.capture(item,stop,False)
                     read.assert_called_once();chat.assert_not_called()
                 saved=service.archive.get(item)

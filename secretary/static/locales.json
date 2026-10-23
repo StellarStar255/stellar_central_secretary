@@ -435,5 +435,16 @@
   "目标网页发生跳转，请返回原网页后重新读取": "The page redirected. Return to the original webpage and retry.",
   "页面仍是登录界面，请完成登录并打开目标内容后再确认": "The page is still a sign-in screen. Sign in and open the target content, then confirm.",
   "网页提示没有访问权限，请确认当前账号有权查看目标内容": "The webpage reports no access. Make sure your account can view this content.",
-  "页面未取得稳定的可读正文，请等待加载完成、展开目标内容后重试；文件链接请下载后导入": "No stable readable text was found. Wait for loading and expand the content, then retry. Download file links and import them instead."
+  "页面未取得稳定的可读正文，请等待加载完成、展开目标内容后重试；文件链接请下载后导入": "No stable readable text was found. Wait for loading and expand the content, then retry. Download file links and import them instead.",
+  "等待读取": "Queued for capture",
+  "读取任务已排队，可随时停止。": "Capture is queued. You can stop it at any time.",
+  "已停止读取，已有资料保持不变。": "Capture stopped. Saved material is unchanged.",
+  "浏览器读取进程已结束，请重试。": "The capture process ended. Please retry.",
+  "程序正在退出，请稍后重新启动。": "The app is quitting. Please restart it shortly.",
+  "任务已停止，已有资料保持不变。": "Task stopped. Saved material is unchanged.",
+  "继续运行": "Keep running",
+  "停止任务并退出": "Stop tasks and quit",
+  "可以停止当前读取、整理和问答并退出。已保存的资料会保留，未完成的结果不会入库，已有浏览器窗口保持打开。": "Stop capture, summaries and answers, then quit. Saved material is kept, unfinished results are discarded, and existing browser windows remain open.",
+  "正在安装升级": "Installing update",
+  "安装程序正在替换应用文件，请等待完成后退出。": "The installer is replacing application files. Wait for it to finish before quitting."
 }

@@ -101,7 +101,7 @@ def debug_info(endpoint):
 
 def save_session(profile, session):
     path = profile/'.reader-session.json'
-    temporary = profile/'.reader-session.tmp'
+    temporary = profile/f'.reader-session-{os.getpid()}-{threading.get_ident()}.tmp'
     temporary.write_text(json.dumps({k:session[k] for k in ('endpoint','websocket','confirmed')}))
     if os.name != 'nt': temporary.chmod(0o600)
     temporary.replace(path)
@@ -123,6 +123,27 @@ def free_loopback_port():
 
 
 def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False, proxy=None):
+    # Capture workers share a profile, but Chrome startup must be serialized.
+    profile=Path(profile);profile.mkdir(parents=True,exist_ok=True)
+    with (profile/'.reader-start.lock').open('a+b') as lock:
+        if os.name=='nt':
+            import msvcrt
+            lock.write(b'0');lock.flush();lock.seek(0)
+        else:import fcntl
+        while True:
+            if cancelled.is_set():raise CaptureCancelled('已停止读取，已有资料保持不变。')
+            try:
+                if os.name=='nt':msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
+                else:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                break
+            except OSError:cancelled.wait(.1)
+        try:return _start_or_reuse_browser(target,profile,cancelled,timeout,background,proxy)
+        finally:
+            if os.name=='nt':lock.seek(0);msvcrt.locking(lock.fileno(),msvcrt.LK_UNLCK,1)
+            else:fcntl.flock(lock,fcntl.LOCK_UN)
+
+
+def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False, proxy=None):
     current = existing_session(profile)
     if current: return current
     chrome = chrome_executable()

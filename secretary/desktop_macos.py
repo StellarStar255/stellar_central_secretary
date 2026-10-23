@@ -50,6 +50,7 @@ def run(address, service=None, server=None, open_browser=True):
         @objc.python_method
         def setup(self):
             self.quitting = False
+            self.force_shutdown = False
             self.finished = False
             self.accept_reopen = False
             self.last_label = None
@@ -177,13 +178,20 @@ def run(address, service=None, server=None, open_browser=True):
             if self.quitting: return
             value = state['value']
             runtime = service.runtime() if service is not None else value.get('runtime', {})
-            if not value.get('error') and (any(runtime.values()) or value.get('update', {}).get('phase') in ('downloading', 'verifying', 'installing')):
+            phase=value.get('update',{}).get('phase')
+            if phase=='installing':
+                alert=NSAlert.alloc().init()
+                alert.setMessageText_(translate('正在安装升级',self.language))
+                alert.setInformativeText_(translate('安装程序正在替换应用文件，请等待完成后退出。',self.language))
+                alert.addButtonWithTitle_(translate('知道了',self.language));alert.runModal();return
+            if any(runtime.values()) or phase in ('downloading','verifying'):
                 alert = NSAlert.alloc().init()
                 alert.setMessageText_(translate('仍有任务正在进行',self.language))
-                alert.setInformativeText_(translate('请等待整理、问答或升级完成；会话读取可在网页中停止后再退出。',self.language))
-                alert.addButtonWithTitle_(translate('知道了',self.language))
-                alert.runModal()
-                return
+                alert.setInformativeText_(translate('可以停止当前读取、整理和问答并退出。已保存的资料会保留，未完成的结果不会入库，已有浏览器窗口保持打开。',self.language))
+                alert.addButtonWithTitle_(translate('继续运行',self.language))
+                alert.addButtonWithTitle_(translate('停止任务并退出',self.language))
+                if alert.runModal()!=1001:return
+                self.force_shutdown=True
             self.quitting = True
             self.refresh()
             threading.Thread(target=self.shutdown, name='knowledge-shutdown', daemon=True).start()
@@ -192,13 +200,14 @@ def run(address, service=None, server=None, open_browser=True):
         def shutdown(self):
             try:
                 if server is not None:
+                    if self.force_shutdown and service is not None:service.close()
                     server.shutdown()
                 elif state['value'].get('error'):
                     self.finished = True
                     return
                 else:
                     value = state['value']
-                    request = urllib.request.Request(address+'/api/shutdown', data=b'{}',
+                    request = urllib.request.Request(address+'/api/shutdown', data=json.dumps({'force':self.force_shutdown}).encode(),
                               headers={'Content-Type':'application/json', 'X-Knowledge-Token':value.get('token','')})
                     with opener.open(request, timeout=5): pass
                 self.finished = True

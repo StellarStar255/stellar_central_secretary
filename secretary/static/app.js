@@ -97,7 +97,7 @@ function renderArchivedBody(item){
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const states = new Proxy({pending:'等待整理',processing:'正在整理',ready:'已整理',error:'待重试',needs_content:'待补正文',confirming_login:'正在准备读取',waiting_browser_close:'等待专用窗口退出',opening_browser:'正在打开浏览器',waiting_login:'等待你登录',reading:'正在读取正文'},{get:(values,key)=>t(values[key]||'')});
+const states = new Proxy({queued_capture:'等待读取',pending:'等待整理',processing:'正在整理',ready:'已整理',error:'待重试',needs_content:'待补正文',confirming_login:'正在准备读取',waiting_browser_close:'等待专用窗口退出',opening_browser:'正在打开浏览器',waiting_login:'等待你登录',reading:'正在读取正文'},{get:(values,key)=>t(values[key]||'')});
 const captureActions=new Map();
 let lastMessageMarkup='';
 let supportsCapture=false;
@@ -221,7 +221,7 @@ async function readFile(file){return new Promise((resolve,reject)=>{const reader
 function canReadChatGPT(url){try{const u=new URL(url);return u.protocol==='https:'&&['chatgpt.com','chat.openai.com'].includes(u.hostname)&&/^\/(c|share)\/[a-zA-Z0-9_-]+\/?$/.test(u.pathname)}catch{return false}}
 function canReadWebPage(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!/\.(pdf|zip|rar|7z|dmg|exe|docx?|xlsx?|pptx?|png|jpe?g|gif|mp[34])$/i.test(u.pathname)}catch{return false}}
 function itemState(item){return item.state==='waiting_login'&&!canReadChatGPT(item.url)?t('等待页面确认'):states[item.state]}
-function isReading(item){return ['opening_browser','waiting_login','confirming_login','waiting_browser_close','reading'].includes(item.state)}
+function isReading(item){return ['queued_capture','opening_browser','waiting_login','confirming_login','waiting_browser_close','reading'].includes(item.state)}
 function captureControls(item){
  if(!canReadChatGPT(item.url))return webCaptureControls(item);
  const action=captureActions.get(item.id);
@@ -230,7 +230,7 @@ function captureControls(item){
  const feedback=action?`<span class="capture-feedback ${action.error?'capture-error':''}" role="status">${esc(action.text)}</span>`:'';
  const pending=action?.pending||action?.accepted&&item.state==='waiting_login';
  const disabled=pending||item.state==='processing'?'disabled aria-busy="true"':'';
- if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='opening_browser'?t('正在启动普通 Chrome…'):item.state==='waiting_login'?t('请在普通 Chrome 中登录并打开目标会话，然后点击下方确认。'):item.state==='confirming_login'?t('已收到登录确认，正在连接原窗口读取正文…'):item.state==='waiting_browser_close'?t('请关闭本项目的专用 Chrome 窗口，程序会自动继续；你的登录资料会保留。'):esc(item.error||t('正在读取会话正文…'))}</span>${item.state==='waiting_login'&&supportsCapture?`<button class="confirm-login" data-confirm-login="${item.id}" ${disabled}>${pending?t('确认中…'):t('我已登录，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${action?.pending?'disabled':''}>停止读取</button></div>`;
+ if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='queued_capture'?t('读取任务已排队，可随时停止。'):item.state==='opening_browser'?t('正在启动普通 Chrome…'):item.state==='waiting_login'?t('请在普通 Chrome 中登录并打开目标会话，然后点击下方确认。'):item.state==='confirming_login'?t('已收到登录确认，正在连接原窗口读取正文…'):item.state==='waiting_browser_close'?t('请关闭本项目的专用 Chrome 窗口，程序会自动继续；你的登录资料会保留。'):esc(item.error||t('正在读取会话正文…'))}</span>${item.state==='waiting_login'&&supportsCapture?`<button class="confirm-login" data-confirm-login="${item.id}" ${disabled}>${pending?t('确认中…'):t('我已登录，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${action?.pending?'disabled':''}>停止读取</button></div>`;
  return ui`<div class="capture-actions">${feedback}${item.error&&!item.error.startsWith('会话链接已收藏')?`<span class="capture-error">${esc(StellarI18n.message(item.error.slice(0,450)))}</span>`:''}${summaryButton}<button data-capture="${item.id}" ${disabled}>${!supportsCapture?t('后台需要重启'):item.state==='needs_content'?t('打开普通浏览器登录'):t('重新读取网页')}</button><button data-extension-help>使用常用浏览器采集</button></div>`;
 }
 function webCaptureControls(item){
@@ -247,7 +247,7 @@ async function performCaptureAction(id,action){
  try{
   if(action==='summary'){try{await api('/api/items/'+id,{})}catch(e){if(!(e.originalMessage||e.message).includes('正在处理'))throw e}captureActions.set(id,{text:t('摘要任务已提交，使用已保存的正文，无需重新读取网页。')});await refresh()}
   else if(action==='confirm')await confirmLogin(id);
-  else if(action==='cancel'){await api('/api/items/'+id+'/cancel-capture',{});captureActions.set(id,{text:t('已发送停止请求，浏览器窗口将保持打开。')});await refresh()}
+  else if(action==='cancel'){const result=await api('/api/items/'+id+'/cancel-capture',{});captureActions.set(id,{text:result.stopped===true?t('已停止读取，已有资料保持不变。'):t('正在停止读取…')});await refresh()}
   else{await requestCapture(id);captureActions.delete(id)}
  }catch(e){captureActions.set(id,{error:true,text:t('操作失败：')+e.message});toast(e.message)}
  finally{const state=captureActions.get(id);if(state)state.pending=false;refreshCaptureUI()}
@@ -288,6 +288,7 @@ async function confirmLogin(id){
 function archiveReply(result){const i=result.item;
  if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请双击项目里的「启动知识秘书.command」重启服务，再刷新此页面。');
  if(!canReadChatGPT(i.url)&&isReading(i))return t('正在准备浏览器采集。请在任务网页完成登录并展开要保存的内容，再点击「页面已打开，开始读取」。仅采集已加载内容，成功后按设置关闭本次新开的标签页。');
+ if(i.state==='queued_capture')return t('读取任务已排队，可随时停止。');
  if(i.state==='opening_browser')return t('读取任务已提交，正在启动专用浏览器。窗口打开后会提示你登录。');
  if(i.state==='waiting_login')return t('普通 Chrome 已启动。请在该窗口中登录 ChatGPT 并打开目标会话，然后回到这里点击「我已登录，开始读取」。确认后直接从这个浏览器实例读取，窗口会保持打开。');
  if(i.state==='confirming_login')return t('后台已收到登录确认，正在连接原浏览器实例，窗口保持打开。');
