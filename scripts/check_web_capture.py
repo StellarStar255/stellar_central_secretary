@@ -30,13 +30,13 @@ with tempfile.TemporaryDirectory() as temp:
   confirmation=threading.Event()
   def notify(state,message):
    if state=='waiting_login':confirmation.set()
-  with patch.object(web_reader,'validate_public_url',side_effect=lambda url:url),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
+  with patch.object(web_reader,'browser_proxy',return_value=None),patch.object(web_reader,'validate_public_url',side_effect=lambda url:url),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
    result=web_reader.read(target,root/'profile',notify,threading.Event(),login_complete=confirmation,background=True,close_new_tabs=True,language='en')
   assert result['url']==target and result['text'].startswith(web_reader.PREFIX_EN)
   assert '| Priority | High |' in result['text'] and 'Status: in progress' in result['text']
   for secret in ('PRIVATE NAVIGATION','HIDDEN MATERIAL','DRAFT SECRET','FORM SECRET','UNSENT DRAFT'):assert secret not in result['text'],secret
   assert {tab['id'] for tab in tabs()}==existing,'close only the newly opened successful task tab'
-  with patch.object(web_reader,'validate_public_url',side_effect=lambda url:url),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
+  with patch.object(web_reader,'browser_proxy',return_value=None),patch.object(web_reader,'validate_public_url',side_effect=lambda url:url),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
    try:web_reader.read(target.replace('/issue','/denied'),root/'profile',notify,threading.Event(),login_complete=confirmation,close_new_tabs=True)
    except RuntimeError as error:assert '访问权限' in str(error)
    else:raise AssertionError('permission page should not be saved')

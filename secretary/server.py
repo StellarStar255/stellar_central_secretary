@@ -144,7 +144,8 @@ class Service:
             try: browser_reader.conversation_url(item['url'])
             except ValueError: capture_reader=web_reader.read; options={'language':settings.get('ui_language','zh')}
             else: capture_reader=browser_reader.read; options={'scope':settings['capture_scope']}
-            result = capture_reader(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id],
+            profile_name='browser-live-profile' if capture_reader is browser_reader.read else 'web-browser-profile'
+            result = capture_reader(item['url'], self.archive.root/profile_name, notify, stop, login_complete=self.login_confirmations[item_id],
                                     background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'], **options)
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')

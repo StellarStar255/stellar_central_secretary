@@ -5,10 +5,11 @@ import socket
 import threading
 import time
 import uuid
+import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
-from . import browser_reader as reader
+from . import browser_reader as reader, network
 from .capture_browser import create_task_page
 
 PREFIX_ZH='【网页已加载内容归档】'
@@ -34,11 +35,34 @@ def capture_url(url):
     return url
 
 
+_PROXY_CACHE=(0,None)
+def browser_proxy():
+    """Use a verified local HTTP proxy only, without changing system settings."""
+    global _PROXY_CACHE
+    if time.monotonic()-_PROXY_CACHE[0]<30:return _PROXY_CACHE[1]
+    configured=urllib.request.getproxies()
+    candidates=[configured.get('https'),configured.get('http'),*network.running_proxy_candidates()]
+    for candidate in dict.fromkeys(filter(None,candidates)):
+        try:
+            p=urlsplit(candidate)
+            if p.scheme!='http' or p.hostname not in ('localhost','127.0.0.1','::1') or p.username or p.password:continue
+            if network.http_proxy_works(candidate):
+                route='http://'+('['+p.hostname+']' if ':' in p.hostname else p.hostname)+':'+str(p.port or 80)
+                _PROXY_CACHE=(time.monotonic(),route);return route
+        except ValueError:continue
+    _PROXY_CACHE=(time.monotonic(),None);return None
+
+
 def validate_public_url(url):
     capture_url(url)
     parsed=urlsplit(url)
     answers=socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
-    if not answers or any(not ipaddress.ip_address(answer[4][0]).is_global for answer in answers):
+    addresses=[ipaddress.ip_address(answer[4][0]) for answer in answers]
+    # Some local proxy DNS modes return benchmark-range virtual addresses.
+    # Permit these DNS answers only for a domain, via a verified local proxy.
+    fake=ipaddress.ip_network('198.18.0.0/15')
+    if addresses and all(address.version==4 and address in fake for address in addresses) and browser_proxy():return url
+    if not addresses or any(not address.is_global for address in addresses):
         raise ValueError('浏览器采集仅支持公开网页地址')
     return url
 
@@ -81,7 +105,7 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
     if os.name!='nt':profile.chmod(0o700)
     notify('opening_browser','正在打开浏览器以读取网页')
     marker='about:blank#stellar-web-capture-'+uuid.uuid4().hex
-    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background)
+    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=browser_proxy())
     confirmed=login_complete if login_complete is not None else threading.Event()
     page=None;completed=False;guard=None
     with sync_playwright() as pw:
