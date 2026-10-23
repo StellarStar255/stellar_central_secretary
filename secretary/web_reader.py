@@ -74,22 +74,92 @@ def same_page(actual,target):
     except ValueError:return False
 
 
+def frame_allowed(url,parent_url):
+    """Read only visible same-origin frames or Feishu/Lark's document family."""
+    if url in ('about:blank','about:srcdoc'):return True
+    try:
+        frame,parent=urlsplit(url),urlsplit(parent_url)
+        if frame.scheme not in ('http','https') or frame.username or frame.password:return False
+        import re
+        if re.search(r'(?:^|[./_-])(?:login|signin|passport|accounts?|captcha|verify)(?:[./_-]|$)',(frame.hostname or '')+frame.path,re.I):return False
+        origin=lambda parsed:(parsed.scheme,parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
+        if origin(frame)==origin(parent):return True
+        family=lambda host:any(host==domain or host.endswith('.'+domain) for domain in ('feishu.cn','feishu.link','larksuite.com','larkoffice.com'))
+        return family(frame.hostname or '') and family(parent.hostname or '')
+    except ValueError:return False
+
+
+FRAME_VISIBILITY="""el=>{for(let n=el;n;n=n.parentElement||n.getRootNode()?.host){const s=getComputedStyle(n);if(n.hidden||n.getAttribute('aria-hidden')==='true'||s.display==='none'||['hidden','collapse'].includes(s.visibility)||s.opacity==='0')return false}const r=el.getBoundingClientRect();return r.width>=80&&r.height>=40}"""
+
+
+def snapshot_page(page,language):
+    result=dict(page.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':120000}))
+    actual=result.get('url',page.url)
+    validate_public_url(actual)
+    if not same_page(actual,page.url):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
+    texts=[result.get('text','')];readable=result.get('readable_characters',len(texts[0]));remaining=120000-len(texts[0]);captured=0
+    frames=getattr(page,'frames',[])
+    if not isinstance(frames,list):frames=[]
+    for frame in frames[1:21]:
+        if captured>=4 or remaining<200:break
+        try:
+            if not frame_allowed(frame.url,actual):continue
+            if not frame.url.startswith('about:'):validate_public_url(frame.url)
+            ancestor=frame;visible=True
+            while ancestor.parent_frame is not None:
+                if not ancestor.frame_element().evaluate(FRAME_VISIBILITY):visible=False;break
+                ancestor=ancestor.parent_frame
+            if not visible:continue
+            child=frame.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':min(40000,remaining)})
+            if not frame_allowed(child.get('url',frame.url),actual):continue
+            if not child.get('url',frame.url).startswith('about:'):validate_public_url(child.get('url',frame.url))
+            text=child.get('text','').strip()
+            if child.get('login') or child.get('denied') or len(text)<40 or text in texts:continue
+            captured+=1;label=f'[Embedded content {captured}]' if language=='en' else f'【可见嵌入内容 {captured}】'
+            texts.append(label+'\n'+text);readable+=child.get('readable_characters',len(text));remaining-=len(text)
+            result['document']=result.get('document',False) or child.get('document',False)
+            result['truncated']=result.get('truncated',False) or child.get('truncated',False)
+        except reader.CaptureCancelled:raise
+        except Exception:continue  # Detached, hidden, unrelated or inaccessible frames are skipped.
+    result['text']='\n\n'.join(texts)[:120000];result['readable_characters']=readable;result['captured_frames']=captured
+    if captured and readable>=80:result['busy']=False
+    return result
+
+
+def nearly_same_text(previous,current):
+    if previous is None:return False
+    if previous==current:return True
+    size=max(len(previous),len(current))
+    if size<80 or abs(len(previous)-len(current))>size*.03:return False
+    prefix=0
+    for left,right in zip(previous,current):
+        if left!=right:break
+        prefix+=1
+    suffix=0
+    for left,right in zip(previous[prefix:][::-1],current[prefix:][::-1]):
+        if left!=right:break
+        suffix+=1
+    return (prefix+suffix)/size>=.97
+
+
 def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
     validate_public_url(page.url)
     if not same_page(page.url,target):raise RuntimeError('请先在浏览器返回目标网页，再确认读取')
-    deadline=time.monotonic()+timeout;last=None;stable=0
+    deadline=time.monotonic()+timeout;last=None;stable=0;result={}
     while time.monotonic()<deadline:
         if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
         if page.is_closed():raise RuntimeError('任务网页已关闭，请重新打开后再试')
         validate_public_url(page.url)
         if not same_page(page.url,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
-        result=page.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':120000})
+        result=snapshot_page(page,language)
         actual=result.get('url',page.url)
         validate_public_url(actual)
         if not same_page(actual,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
         if result['login']:raise RuntimeError('页面仍是登录界面，请完成登录并打开目标内容后再确认')
         if result['denied']:raise RuntimeError('网页提示没有访问权限，请确认当前账号有权查看目标内容')
-        text=result['text'].strip();stable=stable+1 if text==last and len(text)>=80 and not result['busy'] and result['ready'] else 0;last=text
+        text=result['text'].strip();minimum=40 if result.get('document') else 80
+        readable=result.get('readable_characters',len(text))>=minimum
+        stable=stable+1 if nearly_same_text(last,text) and readable and not result['busy'] and result['ready'] else 0;last=text
         if stable>=3:
             if language=='en':
                 scope=PREFIX_EN+' Scope: content already loaded when you confirmed. Collapsed, paginated and unloaded content is not included.'
@@ -97,9 +167,13 @@ def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
             else:
                 scope=PREFIX_ZH+' 采集范围：确认时网页中已加载的可读内容；未展开、分页及尚未加载的内容不包含。'
                 if result['truncated']:scope+=' 本次最多保留前 12 万字符。'
+            if result.get('captured_frames'):
+                scope+=(' Includes visible embedded content from the same site or Feishu/Lark document domains.' if language=='en' else ' 包含同站点或飞书/Lark 文档域中可见嵌入页面的已加载文字。')
             return {'url':target,'title':result['title'] or urlsplit(target).hostname,'text':scope+'\n\n'+text,'web_capture':True,'capture_scope':'loaded_page'}
         if cancelled.wait(.8):raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
-    raise RuntimeError('页面未取得稳定的可读正文，请等待加载完成、展开目标内容后重试；文件链接请下载后导入')
+    counts=f"readable characters: {result.get('readable_characters',0)}, embedded pages: {result.get('captured_frames',0)}" if language=='en' else f"可读字符：{result.get('readable_characters',0)}，嵌入页面：{result.get('captured_frames',0)}"
+    message='No stable readable document was found. Wait for loading or expand the content, then retry.' if language=='en' else '页面未取得稳定的可读正文，请等待加载完成、展开目标内容后重试。'
+    raise RuntimeError(message+' ('+counts+')')
 
 
 def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,background=False,close_new_tabs=False,language='zh'):

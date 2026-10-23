@@ -84,6 +84,31 @@ class WebReaderTest(unittest.TestCase):
                 self.assertEqual(saved['state'],'ready')
             finally:service.close()
 
+    def test_frame_allowlist_and_auth_frame_exclusion(self):
+        parent='https://example.feishu.cn/wiki/fixture'
+        self.assertTrue(web_reader.frame_allowed('https://docs.feishu.cn/docx/fixture',parent))
+        self.assertTrue(web_reader.frame_allowed('https://example.test/embed','https://example.test/page'))
+        self.assertFalse(web_reader.frame_allowed('https://unrelated.test/embed',parent))
+        self.assertFalse(web_reader.frame_allowed('https://passport.feishu.cn/login',parent))
+        self.assertFalse(web_reader.frame_allowed('https://docs.feishu.cn/docx/fixture','https://unrelated.test/page'))
+        self.assertFalse(web_reader.frame_allowed('file:///tmp/private',parent))
+
+    def test_unrelated_and_hidden_frames_are_not_evaluated(self):
+        page=Mock(url=URL);main=Mock();frame=Mock();page.frames=[main,frame]
+        page.evaluate.return_value={'url':URL,'text':'Visible main body','busy':False}
+        frame.url='https://unrelated.test/embedded'
+        with patch.object(web_reader,'validate_public_url'):result=web_reader.snapshot_page(page,'en')
+        frame.evaluate.assert_not_called();self.assertEqual(result['captured_frames'],0)
+        frame.url='https://example.test/embedded';frame.parent_frame=main;frame.frame_element.return_value.evaluate.return_value=False
+        with patch.object(web_reader,'validate_public_url'):web_reader.snapshot_page(page,'en')
+        frame.evaluate.assert_not_called()
+
+    def test_small_live_status_changes_do_not_prevent_capture(self):
+        body='The saved document content stays unchanged. '*30
+        self.assertTrue(web_reader.nearly_same_text(body+'revision 1',body+'revision 2'))
+        self.assertFalse(web_reader.nearly_same_text(body,'An entirely different document.'*30))
+        self.assertFalse(web_reader.nearly_same_text(None,body))
+
     def test_summary_retains_scope(self):
         text=web_reader.PREFIX_EN+' Loaded content only.\n\nExample project body.'
         with patch.object(ai,'summarize',return_value={'summary':'Summary','tags':[]}) as summarize:
