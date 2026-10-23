@@ -21,4 +21,4 @@
 
 .detail-title-button{font:inherit;font-weight:inherit;line-height:inherit;text-align:left;padding:0;border-radius:5px;overflow-wrap:anywhere}.detail-title-button span{font-size:.55em;font-weight:400;color:var(--muted);white-space:nowrap}.detail-title-button:hover{color:var(--brand-color)}#title-editor input{width:100%;margin:8px 0 12px}#title-editor .detail-actions{margin-top:0}
 
-@media(max-width:1100px){.header-model{display:none}#interface-toggle{font-size:11px;padding:8px}}
+@media(max-width:1100px){.header-model{display:none}}
