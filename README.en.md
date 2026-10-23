@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.26
+[简体中文](README.md) · **English** · v0.1.27
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -45,6 +45,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - PDF overviews use the first five pages by default. The full extracted text and original are retained. Select **Summarize full document** when needed.
 - AES-encrypted PDFs without an opening password are supported. Password-protected documents must first be exported as accessible copies. Scanned PDFs need OCR.
 - On macOS, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app in the menu bar; click the Dock icon to reopen it.
+- For authenticated or dynamic webpages, choose **Read webpage in browser**, sign in and expand the content, then click **Page is ready, start reading**. Failed direct text fetches open this flow automatically. Capture includes loaded text and HTML tables, with an explicit scope note; it does not load all comments or pages. Success closes only the new task tab according to settings; failure leaves it open. Canvas, iframe and restricted content may require the extension or manual text.
 - The browser extension is an alternative for capturing conversations from an already signed-in browser.
 
 ## Data and backups

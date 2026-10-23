@@ -101,6 +101,7 @@ const states = new Proxy({pending:'等待整理',processing:'正在整理',ready
 const captureActions=new Map();
 let lastMessageMarkup='';
 let supportsCapture=false;
+let supportsWebCapture=false;
 let latestStatus=null,lastUpdateState=null,uiLanguageRevision=0,languageChanging=false;
 let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
 const storageKey='stellar.conversations.v1';
@@ -140,7 +141,7 @@ function renderSidebar(){
  bindDetails($('#recent-items'));
 }
 function bindDetails(container){container.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>detail(b.dataset.id).catch(e=>toast(e.message)))}
-function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${states[item.state]||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}</button>${captureControls(item)}`}
+function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}</button>${captureControls(item)}`}
 function renderChat(scroll=true){
  const chat=currentChat();const messages=chat?.messages||[];
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
@@ -179,7 +180,7 @@ async function renderLibrary(){
  if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(c=>`<option value="${esc(c)}" ${c===category?'selected':''}>${esc(displayCategory(c))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(items.length,'份资料','item','items');$('#empty').hidden=items.length>0;
- $('#items').innerHTML=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p></div><small>${states[i.state]}<br>${date(i.created)}</small></button>`).join('');bindDetails($('#items'));
+ $('#items').innerHTML=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p></div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');bindDetails($('#items'));
 }
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
@@ -218,9 +219,11 @@ window.addEventListener('drop',e=>{if(e.dataTransfer.files.length){e.preventDefa
 document.querySelectorAll('[data-suggestion]').forEach(b=>b.onclick=()=>{if(b.dataset.suggestion==='file')$('#file-input').click();else{$('#message-input').value=b.dataset.suggestion==='archive'?'':t('帮我找一下之前收藏的资料：');$('#message-input').placeholder=b.dataset.suggestion==='archive'?t('在这里粘贴链接，然后按 Enter…'):t('输入你想找的资料或问题…');resizeInput();$('#message-input').focus()}});
 async function readFile(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error(t('无法读取 ')+file.name));reader.readAsDataURL(file)})}
 function canReadChatGPT(url){try{const u=new URL(url);return u.protocol==='https:'&&['chatgpt.com','chat.openai.com'].includes(u.hostname)&&/^\/(c|share)\/[a-zA-Z0-9_-]+\/?$/.test(u.pathname)}catch{return false}}
+function canReadWebPage(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!/\.(pdf|zip|rar|7z|dmg|exe|docx?|xlsx?|pptx?|png|jpe?g|gif|mp[34])$/i.test(u.pathname)}catch{return false}}
+function itemState(item){return item.state==='waiting_login'&&!canReadChatGPT(item.url)?t('等待页面确认'):states[item.state]}
 function isReading(item){return ['opening_browser','waiting_login','confirming_login','waiting_browser_close','reading'].includes(item.state)}
 function captureControls(item){
- if(!canReadChatGPT(item.url))return '';
+ if(!canReadChatGPT(item.url))return webCaptureControls(item);
  const action=captureActions.get(item.id);
  const hasText=item.text_length>0||item.text?.trim()||(item.text_length===undefined&&['error','ready','processing','pending'].includes(item.state));
  const summaryButton=hasText?`<button data-summarize="${item.id}" ${item.state==='processing'?'disabled':''}>${item.state==='processing'?t('摘要生成中…'):item.summary?t('重新生成摘要'):t('重试摘要')}</button>`:'';
@@ -229,6 +232,13 @@ function captureControls(item){
  const disabled=pending||item.state==='processing'?'disabled aria-busy="true"':'';
  if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='opening_browser'?t('正在启动普通 Chrome…'):item.state==='waiting_login'?t('请在普通 Chrome 中登录并打开目标会话，然后点击下方确认。'):item.state==='confirming_login'?t('已收到登录确认，正在连接原窗口读取正文…'):item.state==='waiting_browser_close'?t('请关闭本项目的专用 Chrome 窗口，程序会自动继续；你的登录资料会保留。'):esc(item.error||t('正在读取会话正文…'))}</span>${item.state==='waiting_login'&&supportsCapture?`<button class="confirm-login" data-confirm-login="${item.id}" ${disabled}>${pending?t('确认中…'):t('我已登录，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${action?.pending?'disabled':''}>停止读取</button></div>`;
  return ui`<div class="capture-actions">${feedback}${item.error&&!item.error.startsWith('会话链接已收藏')?`<span class="capture-error">${esc(StellarI18n.message(item.error.slice(0,450)))}</span>`:''}${summaryButton}<button data-capture="${item.id}" ${disabled}>${!supportsCapture?t('后台需要重启'):item.state==='needs_content'?t('打开普通浏览器登录'):t('重新读取网页')}</button><button data-extension-help>使用常用浏览器采集</button></div>`;
+}
+function webCaptureControls(item){
+ if(!canReadWebPage(item.url))return '';
+ const action=captureActions.get(item.id),disabled=action?.pending||item.state==='processing'?'disabled':'';
+ const feedback=action?`<span class="capture-feedback" role="status">${esc(action.text)}</span>`:'';
+ if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='waiting_login'?t('请在浏览器完成登录并展开目标内容，然后确认读取；只保存已加载的内容。'):esc(StellarI18n.message(item.error||t('正在读取网页…')))}</span>${item.state==='waiting_login'?`<button data-confirm-login="${item.id}" ${disabled}>${t('页面已打开，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${disabled}>停止读取</button></div>`;
+ return ui`<div class="capture-actions">${feedback}<button data-capture="${item.id}" ${disabled}>浏览器读取网页</button><button data-extension-help>使用常用浏览器采集</button></div>`;
 }
 function refreshCaptureUI(){renderChat(false);if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden))detail(selectedId).catch(()=>{})}
 async function performCaptureAction(id,action){
@@ -255,15 +265,16 @@ document.addEventListener('click',event=>{
 });
 
 async function requestCapture(id){
- const status=await api('/api/status');token=status.token;supportsCapture=status.capabilities?.conversation_capture===true&&status.capabilities?.manual_browser_login===true&&status.capabilities?.in_place_browser_read===true;
+ const status=await api('/api/status');token=status.token;supportsWebCapture=status.capabilities?.generic_page_capture===true;supportsCapture=status.capabilities?.conversation_capture===true&&status.capabilities?.manual_browser_login===true&&status.capabilities?.in_place_browser_read===true;
  $('#service-alert').hidden=supportsCapture;
- if(!supportsCapture)throw Error(t('后台仍是旧版本，没有启动浏览器。请双击「启动知识秘书.command」重启服务，再刷新此页面。'));
+ if(!(canReadChatGPT(allItems.find(i=>i.id===id)?.url)?supportsCapture:supportsWebCapture))throw Error(t('后台仍是旧版本，没有启动浏览器。请双击「启动知识秘书.command」重启服务，再刷新此页面。'));
  const result=await api('/api/items/'+id+'/capture',{});
  if(result.capture_started!==true)throw Error(t('后台未确认读取任务，浏览器未启动。请重启知识秘书后重试。'));
  if(['needs_content','error'].includes(result.item?.state))throw Error(result.item.error||t('浏览器启动失败，请查看资料详情。'));
  await refresh();
  const current=allItems.find(i=>i.id===id)||result.item;
  if(['needs_content','error'].includes(current?.state))throw Error(current.error||t('浏览器启动失败。'));
+ if(!canReadChatGPT(current?.url)){toast(t('请在任务浏览器中登录并展开内容，然后点击「页面已打开，开始读取」。'));return}
  toast(current?.state==='waiting_login'?t('已请求 Chrome 打开会话。请登录后点击「我已登录，开始读取」。'):t('读取任务已提交，正在启动普通 Chrome…'));
 }
 async function confirmLogin(id){
@@ -276,12 +287,13 @@ async function confirmLogin(id){
 
 function archiveReply(result){const i=result.item;
  if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请双击项目里的「启动知识秘书.command」重启服务，再刷新此页面。');
+ if(!canReadChatGPT(i.url)&&isReading(i))return t('正在准备浏览器采集。请在任务网页完成登录并展开要保存的内容，再点击「页面已打开，开始读取」。仅采集已加载内容，成功后按设置关闭本次新开的标签页。');
  if(i.state==='opening_browser')return t('读取任务已提交，正在启动专用浏览器。窗口打开后会提示你登录。');
  if(i.state==='waiting_login')return t('普通 Chrome 已启动。请在该窗口中登录 ChatGPT 并打开目标会话，然后回到这里点击「我已登录，开始读取」。确认后直接从这个浏览器实例读取，窗口会保持打开。');
  if(i.state==='confirming_login')return t('后台已收到登录确认，正在连接原浏览器实例，窗口保持打开。');
  if(i.state==='waiting_browser_close')return t('登录确认已收到。专用浏览器仍占用配置目录，请关闭该专用窗口，程序会等待并继续；登录资料会保留。');
  if(i.state==='reading')return i.error||t('已确认登录，正在识别目标会话消息。');
- if(i.state==='needs_content')return i.url?t('这条资料目前只收藏了链接，还没有读到正文，因此尚未生成总结。')+(canReadChatGPT(i.url)?t('点击下方按钮重新读取；长对话默认只读取最近最多 20 轮，无需加载全部历史。可在「模型与设置」切换范围，需要登录时程序会提示。'):t('可以用浏览器扩展采集已登录页面，或点击资料补充正文。')):t('原件已保存，但暂未取得正文。')+(i.error?t('原因：')+i.error:t('请在资料详情中查看解析状态。'))+t(' 可打开资料后重新解析原文件，或手动补充正文。');
+ if(i.state==='needs_content')return i.url?t('这条资料目前只收藏了链接，还没有读到正文，因此尚未生成总结。')+(canReadChatGPT(i.url)?t('点击下方按钮重新读取；长对话默认只读取最近最多 20 轮，无需加载全部历史。可在「模型与设置」切换范围，需要登录时程序会提示。'):t('可点击「浏览器读取网页」登录并采集已加载内容，也可用扩展或手动补充正文。')):t('原件已保存，但暂未取得正文。')+(i.error?t('原因：')+i.error:t('请在资料详情中查看解析状态。'))+t(' 可打开资料后重新解析原文件，或手动补充正文。');
  if(i.state==='error')return t('正文已保存并建立检索索引，但自动总结失败了。具体原因在资料详情中，可以重新整理。');
  if(i.summary)return t('已整理这份资料：\n\n')+i.summary;
  if(!result.created&&!result.updated)return t('正文已在知识库中。')+(i.state==='processing'?t('正在生成总结，请稍候。'):t('尚未生成总结，可点击资料中的「重新整理」。'));
@@ -312,7 +324,7 @@ $('#composer-form').onsubmit=async event=>{
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
 async function detail(id){const item=await api('/api/items/'+id);selectedId=id;detailVersion=item.updated;
- $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${states[item.state]}</p><div class="tags">${item.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${renderArchivedBody(item)}`;
+ $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags">${item.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${renderArchivedBody(item)}`;
  const cancelTitle=()=>{$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  $('#edit-title').onclick=()=>{$('#rename-title').value=item.title;$('#title-editor').hidden=false;$('#edit-title').hidden=true;$('#edit-content').disabled=true;$('#rename-title').focus();$('#rename-title').select()};
  $('#cancel-title').onclick=cancelTitle;
@@ -334,7 +346,7 @@ async function applyUILanguage(language){
 }
 $('#ui-language').onchange=async()=>{const select=$('#ui-language'),previous=StellarI18n.language,language=select.value;uiLanguageRevision++;languageChanging=true;select.disabled=true;try{await api('/api/language',{language});await applyUILanguage(language);toast(t('语言已切换'))}catch(error){select.value=previous;toast(error.message)}finally{languageChanging=false;select.disabled=false}};
 $('#settings-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
-async function loadStatus(){const revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').textContent=t('本机资料目录：')+data.data_dir}
+async function loadStatus(){const revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsWebCapture=data.capabilities?.generic_page_capture===true;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').textContent=t('本机资料目录：')+data.data_dir}
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value});$('#settings-dialog').close();toast(t('设置已保存；等待中的资料可手动重新整理'))});
 $('#model-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
 function updateModelLabel(){$('#model-label').textContent=$('#backend').value==='claude'?'Claude':'ChatGPT · Codex'}

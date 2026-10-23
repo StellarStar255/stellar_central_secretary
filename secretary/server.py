@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, paths, updater
+from . import ai, browser_reader, web_reader, paths, updater
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 
@@ -123,7 +123,8 @@ class Service:
             with self.lock: self.busy.discard(item_id)
     def start_capture(self, item_id, force_summary=False):
         item = self.archive.get(item_id)
-        browser_reader.conversation_url(item['url'])
+        try: browser_reader.conversation_url(item['url'])
+        except ValueError: web_reader.validate_public_url(item['url'])
         with self.lock:
             if item_id in self.captures or item_id in self.busy: return
             stop = threading.Event()
@@ -140,8 +141,11 @@ class Service:
             def notify(state, message):
                 self.archive.update(item_id, state=state, error=message)
             settings = self.archive.settings()
-            result = browser_reader.read(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id],
-                                         background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'], scope=settings['capture_scope'])
+            try: browser_reader.conversation_url(item['url'])
+            except ValueError: capture_reader=web_reader.read; options={'language':settings.get('ui_language','zh')}
+            else: capture_reader=browser_reader.read; options={'scope':settings['capture_scope']}
+            result = capture_reader(item['url'], self.archive.root/'browser-live-profile', notify, stop, login_complete=self.login_confirmations[item_id],
+                                    background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'], **options)
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')
             partial = result.get('partial',False)
@@ -258,10 +262,9 @@ class Service:
         item = self.archive.get(item_id)
         enriched = not created and bool(text.strip()) and item['state']=='pending' and item['text']==text
         if created or enriched: self.queue(item_id)
-        if not item['text'].strip() and url:
-            try: browser_reader.conversation_url(url)
-            except ValueError: pass
-            else: self.start_capture(item_id)
+        if not item['text'].strip() and url and '请下载文件后拖入知识库' not in warning:
+            try: self.start_capture(item_id)
+            except (ValueError, OSError): pass
         return {'item': self.archive.get(item_id), 'created': created, 'updated': enriched}
     def ask(self, question):
         if not question.strip(): raise ValueError('请输入问题')
@@ -318,7 +321,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/items':
