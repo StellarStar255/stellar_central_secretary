@@ -111,9 +111,18 @@ def existing_session(profile):
     try:
         saved = json.loads((profile/'.reader-session.json').read_text())
         actual = debug_info(saved['endpoint'])
-        if actual['websocket'] != saved['websocket']: return None
-        return dict(actual,confirmed=bool(saved.get('confirmed')),process=None)
-    except (OSError, ValueError, KeyError): return None
+        if actual['websocket'] == saved['websocket']:
+            return dict(actual,confirmed=bool(saved.get('confirmed')),process=None)
+    except (OSError,ValueError,KeyError,TypeError):pass
+    # A restarted Chrome has a new websocket nonce. Rebind only after verifying
+    # the exact dedicated profile and loopback port, never an arbitrary browser.
+    from .browser_session import discover
+    current=discover(profile,chrome_executable(),debug_info)
+    if current:
+        current=dict(current,confirmed=False,process=None)
+        save_session(profile,current)
+        return current
+    return None
 
 
 def free_loopback_port():
@@ -169,6 +178,7 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
     proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, start_new_session=True, **options)
     deadline = time.monotonic()+timeout
+    rediscover_at=time.monotonic()+1
     while time.monotonic()<deadline:
         if cancelled.is_set(): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
         if proc.poll() not in (None,0): raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
@@ -178,6 +188,10 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
             save_session(profile,session)
             return session
         except (OSError,ValueError): pass
+        if time.monotonic()>=rediscover_at:
+            current=existing_session(profile)
+            if current:return current
+            rediscover_at=time.monotonic()+1
         if cancelled.wait(0.25): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
     raise RuntimeError('浏览器已请求打开，但未能建立本地连接。请使用常用浏览器采集扩展；程序不会关闭你的登录窗口。')
 

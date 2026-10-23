@@ -195,6 +195,8 @@ class Service:
                 session=browser_reader.existing_session(self.archive.root/name)
                 if not session:continue
                 from playwright.sync_api import sync_playwright
+                from .browser_session import owned_processes
+                old_pids={process['pid'] for process in owned_processes(self.archive.root/name,browser_reader.chrome_executable())}
                 with sync_playwright() as pw:
                     browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=3000)
                     pages=[page for context in browser.contexts for page in context.pages]
@@ -203,6 +205,11 @@ class Service:
                     except Exception:
                         if browser.is_connected():raise
                     closed+=1
+                import time
+                deadline=time.monotonic()+8
+                while old_pids and time.monotonic()<deadline:
+                    if not old_pids & {process['pid'] for process in owned_processes(self.archive.root/name,browser_reader.chrome_executable())}:break
+                    time.sleep(.1)
         return {'closed':closed}
 
     def confirm_login(self, item_id):
