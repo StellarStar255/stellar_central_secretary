@@ -81,6 +81,8 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      - name: Tutorial downloads
+        run: cp docs/demo.gif docs/tutorial.html artifacts/
       - name: Checksums
         working-directory: artifacts
         run: sha256sum -- * > SHA256SUMS.txt

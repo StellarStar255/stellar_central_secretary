@@ -303,11 +303,11 @@ def handler(service):
     token = secrets.token_urlsafe(32)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args): pass
-        def send(self, status, data, media='application/json; charset=utf-8', extra=None):
+        def send(self, status, data, media='application/json; charset=utf-8', extra=None, policy=None):
             if not isinstance(data, bytes): data = json.dumps(data, ensure_ascii=False).encode()
             self.send_response(status); self.send_header('Content-Type', media); self.send_header('Content-Length', str(len(data)))
             self.send_header('X-Content-Type-Options', 'nosniff'); self.send_header('Cache-Control', 'no-store')
-            policy="default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            policy=policy or ("default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
             self.send_header('Content-Security-Policy',policy)
             for key, value in (extra or {}).items(): self.send_header(key, value)
             self.end_headers(); self.wfile.write(data)
@@ -335,7 +335,9 @@ def handler(service):
                         data = (service.archive.root/'files'/item['id']).read_bytes()
                         return self.send(200, data, 'application/octet-stream', {'Content-Disposition':"attachment; filename*=UTF-8''"+urllib.parse.quote(item['filename'], safe='')})
                     return self.send(200, item)
-                assets = {'/':'index.html', '/app.js':'app.js', '/style.css':'style.css'}
+                if path in ('/tutorial','/tutorial.html'):
+                    return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+                assets = {'/':'index.html', '/app.js':'app.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
