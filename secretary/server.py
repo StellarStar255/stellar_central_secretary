@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, paths, updater
+from . import ai, browser_reader, web_reader, capture_worker, paths, updater
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 
@@ -67,8 +67,10 @@ def fetch_page(url):
 class Service:
     def __init__(self, root):
         self.archive = Archive(root); self.pool = ThreadPoolExecutor(max_workers=2)
-        self.capture_pool = ThreadPoolExecutor(max_workers=1)
+        self.capture_pool = ThreadPoolExecutor(max_workers=4)
         self.captures = {}
+        self.capture_futures = {}
+        self.stopping = False
         self.login_confirmations = {}
         self.busy = set(); self.lock = threading.Lock(); self.ai_lock = threading.Lock()
         self.questions = 0
@@ -107,6 +109,7 @@ class Service:
             return {'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
     def queue(self, item_id, force=False, full_pdf=False):
         item = self.archive.get(item_id)
+        if self.stopping:return
         if not item['text'].strip() or (not force and not self.archive.settings()['auto_ai']): return
         with self.lock:
             if item_id in self.busy: return
@@ -115,6 +118,7 @@ class Service:
     def process(self, item_id, full_pdf=False):
         try:
             with self.ai_lock:
+                if self.stopping:return
                 item = self.archive.get(item_id)
                 self.archive.update(item_id, state='processing', error='')
                 self.archive.update(item_id, **ai.summary_fields(item, self.archive.settings()['backend'], full_pdf=full_pdf))
@@ -126,27 +130,30 @@ class Service:
         try: browser_reader.conversation_url(item['url'])
         except ValueError: web_reader.validate_public_url(item['url'])
         with self.lock:
+            if self.stopping:raise ValueError('程序正在退出，请稍后重新启动。')
             if item_id in self.captures or item_id in self.busy: return
             stop = threading.Event()
             self.captures[item_id] = stop
             self.login_confirmations[item_id] = threading.Event()
-            self.archive.update(item_id, state='opening_browser', error='正在打开专用浏览器；登录有效时会自动读取。')
-        self.capture_pool.submit(self.capture, item_id, stop, force_summary)
+            self.archive.update(item_id, state='queued_capture', error='读取任务已排队，可随时停止。')
+            self.capture_futures[item_id]=self.capture_pool.submit(self.capture, item_id, stop, force_summary)
 
     def capture(self, item_id, stop, force_summary):
         completed = False
         summary_id = item_id
         try:
+            if stop.is_set():raise browser_reader.CaptureCancelled('已停止读取，已有资料保持不变。')
             item = self.archive.get(item_id)
             def notify(state, message):
-                self.archive.update(item_id, state=state, error=message)
+                if not stop.is_set():self.archive.update(item_id, state=state, error=message)
+            notify('opening_browser','正在打开专用浏览器；登录有效时会自动读取。')
             settings = self.archive.settings()
             try: browser_reader.conversation_url(item['url'])
-            except ValueError: capture_reader=web_reader.read; options={'language':settings.get('ui_language','zh')}
-            else: capture_reader=browser_reader.read; options={'scope':settings['capture_scope']}
-            profile_name='browser-live-profile' if capture_reader is browser_reader.read else 'web-browser-profile'
-            result = capture_reader(item['url'], self.archive.root/profile_name, notify, stop, login_complete=self.login_confirmations[item_id],
-                                    background=settings['capture_background'], close_new_tabs=settings['capture_close_tabs'], **options)
+            except ValueError: kind='web'; options={'language':settings.get('ui_language','zh')}
+            else: kind='chatgpt'; options={'scope':settings['capture_scope']}
+            profile_name='browser-live-profile' if kind=='chatgpt' else 'web-browser-profile'
+            result = capture_worker.run(kind,item['url'],self.archive.root/profile_name,notify,stop,self.login_confirmations[item_id],
+                                        background=settings['capture_background'],close_new_tabs=settings['capture_close_tabs'],**options)
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')
             partial = result.get('partial',False)
@@ -172,6 +179,7 @@ class Service:
             with self.lock:
                 self.captures.pop(item_id, None)
                 self.login_confirmations.pop(item_id, None)
+                self.capture_futures.pop(item_id,None)
         if completed: self.queue(summary_id, force=force_summary)
 
     def confirm_login(self, item_id):
@@ -186,10 +194,19 @@ class Service:
         return self.archive.get(item_id)
 
     def cancel_capture(self, item_id):
-        self.archive.get(item_id)
+        item=self.archive.get(item_id)
         with self.lock:
-            stop = self.captures.get(item_id)
-            if stop: stop.set()
+            stop=self.captures.get(item_id)
+            if stop:stop.set()
+            future=self.capture_futures.get(item_id)
+            if future and future.cancel():
+                self.captures.pop(item_id,None);self.login_confirmations.pop(item_id,None);self.capture_futures.pop(item_id,None)
+            if stop:
+                self.archive.update(item_id,state='ready' if item['summary'] else ('pending' if item['text'] else 'needs_content'),error='已停止读取，已有资料保持不变。')
+        if future and not future.cancelled():
+            try:future.result(timeout=3)
+            except Exception:pass
+        return {'ok':True,'stopped':item_id not in self.captures}
 
     def pdf_original(self,item_id):
         item=self.archive.get(item_id)
@@ -281,7 +298,11 @@ class Service:
         return {'answer':answer, 'sources':[dict(p, number=i+1) for i,p in enumerate(passages)]}
     def close(self):
         with self.lock:
-            for stop in self.captures.values(): stop.set()
+            self.stopping=True
+            ids=list(self.captures)
+            for stop in self.captures.values():stop.set()
+        for item_id in ids:self.cancel_capture(item_id)
+        ai.cancel_all()
         self.capture_pool.shutdown(wait=False, cancel_futures=True)
         self.pool.shutdown(wait=False, cancel_futures=True)
 
@@ -367,6 +388,7 @@ def handler(service):
                     updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start())
                     return self.send(200, updater.status())
                 if path=='/api/shutdown':
+                    if body.get('force'):service.close()
                     self.send(200, {'ok':True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                     return
@@ -394,8 +416,7 @@ def handler(service):
                         service.start_capture(item_id, force_summary=True)
                         return self.send(200, {'ok':True, 'capture_started':True, 'item':service.archive.get(item_id)})
                     if path.endswith('/cancel-capture'):
-                        service.cancel_capture(item_id)
-                        return self.send(200, {'ok':True})
+                        return self.send(200, service.cancel_capture(item_id))
                     with service.lock:
                         if item_id in service.captures: raise ValueError('正在读取会话，请先停止读取再编辑。')
                     if path.endswith('/title'):

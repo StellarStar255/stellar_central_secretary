@@ -268,7 +268,7 @@ class ServiceTest(unittest.TestCase):
     def test_login_capture_indexes_and_summarizes(self):
         item_id, _ = self.service.archive.add('会话', url='https://chatgpt.com/c/example')
         result = {'title':'知识管理讨论', 'text':'用户：怎么归档？\nChatGPT：使用分段索引、来源链接和摘要。'}
-        with patch('secretary.browser_reader.read', return_value=result), patch('secretary.ai.summarize', return_value={'title':'知识管理讨论','summary':'使用分段索引并保存来源。','category':'知识管理','tags':['归档']}):
+        with patch('secretary.capture_worker.run', return_value=result), patch('secretary.ai.summarize', return_value={'title':'知识管理讨论','summary':'使用分段索引并保存来源。','category':'知识管理','tags':['归档']}):
             self.service.start_capture(item_id, force_summary=True)
             self.service.capture_pool.shutdown(wait=True)
             self.service.pool.shutdown(wait=True)
@@ -293,7 +293,7 @@ class ServiceTest(unittest.TestCase):
     def test_capture_failure_preserves_previous_archive(self):
         item_id, _ = self.service.archive.add('会话', text='已经归档的对话正文', url='https://chatgpt.com/c/example')
         self.service.archive.update(item_id, summary='原有总结', state='ready')
-        with patch('secretary.browser_reader.read', side_effect=RuntimeError('登录超时')):
+        with patch('secretary.capture_worker.run', side_effect=RuntimeError('登录超时')):
             self.service.start_capture(item_id, force_summary=True)
             self.service.capture_pool.shutdown(wait=True)
         saved = self.service.archive.get(item_id)
