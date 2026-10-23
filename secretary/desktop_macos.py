@@ -52,6 +52,9 @@ def run(address, service=None, server=None, open_browser=True):
             self.finished = False
             self.accept_reopen = False
             self.last_label = None
+            self.window_controller=None
+            self.mode=service.archive.settings()['interface_mode'] if service is not None else 'browser'
+            self.handled_interface=None
             self.images = {}
             self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
             for name in ('ready', 'busy', 'error', 'starting'):
@@ -68,6 +71,8 @@ def run(address, service=None, server=None, open_browser=True):
             self.menu.addItem_(version)
             self.menu.addItem_(NSMenuItem.separatorItem())
             for title, action, key in [('打开知识秘书', 'openMain:', 'o'),
+                                        ('切换到桌面窗口', 'openDesktop:', ''),
+                                        ('切换到网页模式', 'openBrowser:', ''),
                                         ('打开资料文件夹', 'openFiles:', ''),
                                         ('查看运行日志', 'openLog:', ''),
                                         ('退出知识秘书', 'requestQuit:', 'q')]:
@@ -79,6 +84,10 @@ def run(address, service=None, server=None, open_browser=True):
             app_menu = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('知识秘书', None, '')
             app_menu.setSubmenu_(self.menu)
             main_menu.addItem_(app_menu)
+            edit=NSMenu.alloc().initWithTitle_('编辑')
+            for title,selector,key in [('撤销','undo:','z'),('剪切','cut:','x'),('复制','copy:','c'),('粘贴','paste:','v'),('全选','selectAll:','a')]:
+                edit.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title,selector,key))
+            edit_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('编辑',None,'');edit_item.setSubmenu_(edit);main_menu.addItem_(edit_item)
             app.setMainMenu_(main_menu)
             self.refresh()
 
@@ -96,11 +105,12 @@ def run(address, service=None, server=None, open_browser=True):
                 self.status_label.setTitle_(label['detail'])
                 app.dockTile().setBadgeLabel_(label['badge'])
                 self.last_label = label
-                if service is not None:
-                    service.desktop = {'enabled':True, 'menu_bar':True, 'dock':True,
-                                       'state':label['icon'], 'label':button.title(),
-                                       'dock_badge':app.dockTile().badgeLabel() or '',
-                                       'activation_policy':int(app.activationPolicy())}
+            if service is not None:
+                service.desktop = {'enabled':True,'menu_bar':True,'dock':True,'supports_window':True,
+                    'state':label['icon'],'label':self.status_item.button().title(),
+                    'dock_badge':app.dockTile().badgeLabel() or '', 'activation_policy':int(app.activationPolicy()),
+                    'mode':self.mode,'window_visible':bool(self.window_controller and self.window_controller[0].isVisible()),
+                    'window_loaded':bool(self.window_controller and self.window_controller[2].loaded)}
 
         def tick_(self, timer):
             if self.finished or state.get('exit') or (worker is not None and not worker.is_alive()):
@@ -110,10 +120,28 @@ def run(address, service=None, server=None, open_browser=True):
                 app.postEvent_atStart_(event, True)
                 return
             self.accept_reopen = True
+            request=state['value'].get('interface_request',{})
+            if request.get('id') and request['id']!=self.handled_interface:
+                self.handled_interface=request['id'];self.set_mode(request['mode'])
             self.refresh()
 
-        def openMain_(self, sender):
-            webbrowser.open(address)
+        @objc.python_method
+        def set_mode(self,mode):
+            self.mode=mode
+            if service is not None:service.archive.set_interface_mode(mode)
+            if mode=='desktop':
+                if self.window_controller is None:
+                    from .desktop_window import create_window
+                    self.window_controller=create_window(address)
+                self.window_controller[0].makeKeyAndOrderFront_(None);app.activateIgnoringOtherApps_(True)
+            else:
+                if self.window_controller:self.window_controller[0].orderOut_(None)
+                webbrowser.open(address)
+            self.refresh()
+
+        def openDesktop_(self,sender):self.set_mode('desktop')
+        def openBrowser_(self,sender):self.set_mode('browser')
+        def openMain_(self, sender):self.set_mode(self.mode)
 
         def openFiles_(self, sender):
             directory = Path(state['value'].get('data_dir', paths.DATA_DIR))
@@ -171,7 +199,7 @@ def run(address, service=None, server=None, open_browser=True):
     timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(.5, delegate, 'tick:', None, True)
     NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSRunLoopCommonModes)
     threading.Thread(target=poll, name='knowledge-status', daemon=True).start()
-    if open_browser: webbrowser.open(address)
+    if open_browser: delegate.openMain_(None)
     try:
         app.run()
     finally:

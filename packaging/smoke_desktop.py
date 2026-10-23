@@ -27,11 +27,19 @@ with tempfile.TemporaryDirectory() as temp:
         desktop=status['desktop']
         assert desktop['menu_bar'] and desktop['dock'] and desktop['activation_policy']==0, desktop
         assert desktop['label']=='' and desktop['dock_badge']=='',desktop
+        request=urllib.request.Request(f'http://127.0.0.1:{port}/api/interface',data=b'{"mode":"desktop"}',headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
+        opener.open(request,timeout=3).close()
+        for _ in range(120):
+            with opener.open(f'http://127.0.0.1:{port}/api/status',timeout=2) as response:status=json.load(response)
+            if status['desktop'].get('window_visible') and status['desktop'].get('window_loaded'):break
+            time.sleep(.25)
+        else:raise RuntimeError('Frozen WKWebView did not load: '+str(status['desktop']))
+        assert status['settings']['interface_mode']=='desktop'
         request=urllib.request.Request(f'http://127.0.0.1:{port}/api/shutdown',data=b'{}',
                 headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
         opener.open(request,timeout=3).close()
         assert proc.wait(timeout=15)==0
-        print('PASS: frozen Cocoa menu bar, regular Dock application, ready state and authenticated shutdown')
+        print('PASS: frozen Cocoa menu bar, regular Dock application, loaded native WebKit window, persisted mode and authenticated shutdown')
     finally:
         if proc.poll() is None:proc.kill();proc.wait()
         log=Path(temp)/'app.log'

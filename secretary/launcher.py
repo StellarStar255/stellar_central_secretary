@@ -30,7 +30,10 @@ def main():
                     run('http://127.0.0.1:8768', open_browser='--no-browser' not in sys.argv)
                     return
                 if '--no-browser' not in sys.argv:
-                    webbrowser.open('http://127.0.0.1:8768')
+                    if status.get('desktop',{}).get('supports_window'):
+                        request=urllib.request.Request('http://127.0.0.1:8768/api/interface',data=json.dumps({'mode':status['settings'].get('interface_mode','desktop')}).encode(),headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
+                        opener.open(request,timeout=3).close()
+                    else:webbrowser.open('http://127.0.0.1:8768')
                 return
         except (OSError, ValueError):
             pass

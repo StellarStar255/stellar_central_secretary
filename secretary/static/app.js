@@ -103,10 +103,18 @@ let supportsCapture=false;
 let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
 const storageKey='stellar.conversations.v1';
 let conversations=[], activeId='';
+let sharedChatsReady=false,sharedChatSaves=Promise.resolve();
 try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); conversations=Array.isArray(saved.conversations)?saved.conversations:[];activeId=saved.activeId||''; } catch {}
 const uid=()=>crypto.randomUUID();
 function currentChat(){return conversations.find(c=>c.id===activeId)}
-function saveChats(){try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast('浏览器对话记录存储空间已满；归档资料仍保存在知识库中。')}}
+function writeLocalChats(){try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast('本机对话记录存储空间已满；归档资料仍保存在知识库中。')}}
+function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId}));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast('对话同步未完成：'+e.message))}}
+function mergeChats(remote){const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
+async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;writeLocalChats()}
+async function pullSharedChats(){if(!sharedChatsReady||sending)return;await sharedChatSaves;mergeChats(await api('/api/conversations'))}
+async function switchInterface(mode){if(sending){toast('请等待当前消息处理完成后再切换');return}await sharedChatSaves;await api('/api/conversations',{conversations,activeId});await api('/api/interface',{mode});toast(mode==='desktop'?'正在打开桌面窗口':'正在打开网页模式')}
+$('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterface((globalThis.location?.search||'').includes('desktop=1')?'browser':'desktop'));
+
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),4200)}
 async function api(path,body,retry=true){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),path==='/api/ask'?300000:path==='/api/ingest'?90000:12000);
@@ -139,9 +147,10 @@ function renderChat(scroll=true){
  bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast('已复制')).catch(()=>toast('复制失败，请手动选择文字'))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
-function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);saveChats();if(chat.id===activeId)renderChat();return message}
-function updateMessage(chat,message,values){Object.assign(message,values);saveChats();if(chat.id===activeId)renderChat()}
+function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
+function updateMessage(chat,message,values){Object.assign(message,values);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat()}
 async function refresh(){
+ try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast('对话同步未完成，知识库仍可使用：'+e.message)}
  allItems=await api('/api/items');
  for(const [id,action] of captureActions){
   const item=allItems.find(i=>i.id===id);
@@ -152,7 +161,7 @@ async function refresh(){
  for(const chat of conversations)for(const m of chat.messages){
   if(m.role==='assistant'&&!m.pending&&m.archiveOnly&&m.items?.length){
    const text=m.items.map(id=>allItems.find(i=>i.id===id)).filter(Boolean).map(item=>archiveReply({item,created:true})).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
-   if(text&&text!==m.text){m.text=text;changed=true}
+   if(text&&text!==m.text){m.text=text;chat.updated=Date.now();changed=true}
   }
  }
  if(changed)saveChats();
@@ -315,12 +324,12 @@ async function detail(id){const item=await api('/api/items/'+id);selectedId=id;d
  $('#edit-content').onclick=()=>{$('#edit-title').disabled=true;const editor=document.createElement('div');editor.innerHTML='<label>标题<input id="detail-title"></label><label>正文<textarea class="edit-text" id="detail-edit"></textarea></label><button class="primary" id="save-content">保存并重新整理</button>';$('#detail-content').append(editor);$('#detail-title').value=item.title;$('#detail-edit').value=item.text;$('#detail-edit').focus();$('#edit-content').disabled=true;$('#save-content').onclick=()=>busy($('#save-content'),async()=>{await api('/api/items/'+id,{title:$('#detail-title').value,text:$('#detail-edit').value});await detail(id);await refresh();toast('正文已保存并重新索引')})};
 }
 $('#settings-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
-async function loadStatus(){const data=await api('/api/status');token=data.token;if(data.update)renderUpdate(data.update);supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?'已找到 CLI（登录状态需调用验证）':'未找到')).join('　');$('#data-dir').textContent='本机资料目录：'+data.data_dir}
+async function loadStatus(){const data=await api('/api/status');token=data.token;$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-toggle').textContent=(globalThis.location?.search||'').includes('desktop=1')?'切到网页模式':'切到桌面模式';if(data.update)renderUpdate(data.update);supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?'已找到 CLI（登录状态需调用验证）':'未找到')).join('　');$('#data-dir').textContent='本机资料目录：'+data.data_dir}
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value});$('#settings-dialog').close();toast('设置已保存；等待中的资料可手动重新整理')});
 $('#model-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
 function updateModelLabel(){$('#model-label').textContent=$('#backend').value==='claude'?'Claude':'ChatGPT · Codex'}
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value});updateModelLabel();$('#settings-dialog').close();toast('设置已保存')});
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text='上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。'}}renderSidebar();renderChat();updateSend();try{await loadStatus();updateModelLabel();await refresh();setInterval(()=>{if(!document.hidden)refresh().catch(()=>{})},5000)}catch(e){toast('无法连接本地服务：'+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text='上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。'}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast('对话同步未完成，已保留浏览器记录：'+e.message)}updateModelLabel();await refresh();setInterval(()=>{if(!document.hidden)refresh().catch(()=>{})},5000)}catch(e){toast('无法连接本地服务：'+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
