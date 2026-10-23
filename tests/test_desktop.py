@@ -56,6 +56,7 @@ class NativeDesktopTest(unittest.TestCase):
             service=Service(temp)
             server=ThreadingHTTPServer(('127.0.0.1',0),handler(service))
             address=f'http://127.0.0.1:{server.server_port}'
+            service.chat_history({'conversations':[{'id':'shared-fixture','title':'共享历史记录','updated':1,'messages':[{'id':'m1','role':'user','text':'两种模式都能看到这条记录'}]}],'activeId':'shared-fixture'})
             errors=[]
             def wait_for(check):
                 deadline=time.monotonic()+15
@@ -77,7 +78,38 @@ class NativeDesktopTest(unittest.TestCase):
                     with service.lock:service.captures.clear()
                     wait_for(lambda:service.desktop.get('state')=='ready')
                     delegate=NSApplication.sharedApplication().delegate()
+                    delegate.performSelectorOnMainThread_withObject_waitUntilDone_('openDesktop:',None,True)
+                    wait_for(lambda:service.desktop.get('window_visible'))
+                    from PyObjCTools.AppHelper import callAfter
+                    def evaluate(script):
+                        done=threading.Event();result=[]
+                        def invoke():
+                            def complete(value,error):
+                                result.append((value,error));done.set()
+                            delegate.window_controller[1].evaluateJavaScript_completionHandler_(script,complete)
+                        callAfter(invoke)
+                        self.assertTrue(done.wait(10),'WebKit JavaScript timeout')
+                        self.assertIsNone(result[0][1],str(result[0][1]));return result[0][0]
+                    deadline=time.monotonic()+20
+                    while time.monotonic()<deadline:
+                        if evaluate("document.readyState==='complete' && document.querySelector('#model-label')?.textContent==='ChatGPT · Codex'"):break
+                        time.sleep(.2)
+                    else:raise AssertionError('Desktop page did not load')
+                    self.assertEqual(evaluate("document.querySelector('#interface-toggle').textContent"),'切到网页模式')
+                    self.assertEqual(evaluate("currentChat()?.title"),'共享历史记录')
+                    self.assertTrue(evaluate("typeof refresh==='function' && typeof crypto.randomUUID==='function'"))
+                    # Closing the content window must not stop the local server.
+                    callAfter(lambda:delegate.window_controller[0].performClose_(None))
+                    wait_for(lambda:not service.desktop.get('window_visible'))
+                    self.assertEqual(service.desktop['state'],'ready')
                     delegate.performSelectorOnMainThread_withObject_waitUntilDone_('openMain:',None,True)
+                    wait_for(lambda:service.desktop.get('window_visible'))
+                    service.switch_interface('browser')
+                    wait_for(lambda:service.desktop.get('mode')=='browser')
+                    self.assertFalse(service.desktop['window_visible'])
+                    service.switch_interface('desktop')
+                    wait_for(lambda:service.desktop.get('mode')=='desktop' and service.desktop.get('window_visible'))
+                    self.assertEqual(service.archive.settings()['interface_mode'],'desktop')
                     delegate.performSelectorOnMainThread_withObject_waitUntilDone_('requestQuit:',None,True)
                 except BaseException as exc:
                     errors.append(exc)

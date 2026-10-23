@@ -73,6 +73,35 @@ class Service:
         self.busy = set(); self.lock = threading.Lock(); self.ai_lock = threading.Lock()
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
+        self.interface_request={}
+    def chat_history(self,body=None):
+        path=self.archive.root/'conversations.json'
+        with self.lock:
+            saved=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'conversations':[],'activeId':''}
+            if body is None:return saved
+            if not isinstance(body,dict) or len(json.dumps(body,ensure_ascii=False).encode())>8_000_000:raise ValueError('对话记录格式无效或超过 8 MB')
+            chats=body.get('conversations');active=body.get('activeId','')
+            if not isinstance(chats,list) or len(chats)>500 or not isinstance(active,str):raise ValueError('对话记录格式无效')
+            merged={c['id']:c for c in saved['conversations']}
+            for chat in chats:
+                if not isinstance(chat,dict) or not isinstance(chat.get('id'),str) or not isinstance(chat.get('messages'),list) or not isinstance(chat.get('title'),str):raise ValueError('对话记录格式无效')
+                updated=chat.get('updated',0)
+                if not isinstance(updated,(int,float)) or not 0<=updated<=10**15:raise ValueError('对话时间格式无效')
+                for message in chat['messages']:
+                    if not isinstance(message,dict) or message.get('role') not in ('user','assistant') or not isinstance(message.get('id'),str) or not isinstance(message.get('text',''),str):raise ValueError('消息格式无效')
+                if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):merged[chat['id']]=chat
+            result={'conversations':sorted(merged.values(),key=lambda c:c.get('updated',0),reverse=True),'activeId':active}
+            encoded=json.dumps(result,ensure_ascii=False)
+            if len(encoded.encode())>8_000_000 or len(merged)>500:raise ValueError('共享对话存储已满，原有记录保持不变')
+            temporary=path.with_suffix('.tmp');temporary.write_text(encoded,encoding='utf-8');temporary.replace(path)
+            return result
+
+    def switch_interface(self,mode):
+        if not self.desktop.get('supports_window'):raise ValueError('独立桌面窗口需要 macOS 安装版，请从应用程序启动知识秘书')
+        self.archive.set_interface_mode(mode)
+        self.interface_request={'mode':mode,'id':secrets.token_hex(16)}
+        return {'ok':True,'mode':mode}
+
     def runtime(self):
         with self.lock:
             return {'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
@@ -289,7 +318,8 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'update':updater.status(), 'capabilities':{'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/items':
                     q = urllib.parse.parse_qs(parsed.query)
@@ -335,6 +365,8 @@ def handler(service):
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/settings':
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
+                if path=='/api/conversations':return self.send(200,service.chat_history(body))
+                if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
                     if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|open-file))?', path):
