@@ -2,7 +2,7 @@
 
 **简体中文** · [English](README.en.md)
 
-版本 **v0.1.26** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.26.md)
+版本 **v0.1.27** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.27.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -70,6 +70,12 @@ PDF 支持无需打开密码的 AES 加密文档与特殊字体文字提取。�
 - 点击资料卡片可打开原链接、复制地址、下载原件、补充正文或重新整理。摘要在后台生成，卡片会自动更新。
 
 对话记录保存在当前浏览器的本地存储中，刷新后恢复；知识库正文、原件和摘要独立保存在本机数据库中。切换浏览器或清除站点数据会清除该浏览器的对话记录，归档资料仍保留。ZIP 备份覆盖知识库资料，不包含浏览器对话记录。
+
+### 登录后采集普通网页
+
+飞书项目等需要登录或动态加载的网页，直接抓取没有正文时会打开专用 Chrome。也可在资料卡片或详情中点击「浏览器读取网页」。请手动登录、展开工作项及目标评论，再点击「页面已打开，开始读取」。链接的查询参数和片段保留。
+
+只归档确认时已经加载的可读文字及 HTML 表格；不自动遍历分页、展开全部评论或读取未加载内容。摘要标注「网页已加载内容归档」。画布、内嵌页面和站点访问限制可能需要扩展或手动补充。成功后按设置关闭本次新开的标签页，失败时保留页面；不关闭已有标签页。网页账号登录和 AI CLI 登录相互独立。
 
 ### 在同一浏览器窗口中登录和读取 ChatGPT
 
@@ -183,7 +189,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.26 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.27 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 

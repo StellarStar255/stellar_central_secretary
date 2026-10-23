@@ -97,6 +97,9 @@ def summary_fields(item, backend, full_pdf=False):
         if len(item['text'])>40000:
             scope_note+=' 摘要仅处理该片段最近4万字符。'
             item['text']=scope_note+'\n\n'+item['text'][-40000:]
+    if item['text'].startswith(('【网页已加载内容归档】','[Loaded webpage capture]')):
+        scope_note=item['text'].splitlines()[0]
+        scope_tag='网页片段' if item['text'].startswith('【') else 'Loaded webpage'
     is_pdf=str(item.get('filename','')).lower().endswith('.pdf')
     if is_pdf and not full_pdf:
         source=item['text']
