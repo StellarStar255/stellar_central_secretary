@@ -7,6 +7,9 @@ import os
 import re
 import secrets
 import signal
+import shutil
+import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -154,6 +157,29 @@ class Service:
             stop = self.captures.get(item_id)
             if stop: stop.set()
 
+    def pdf_original(self,item_id):
+        item=self.archive.get(item_id)
+        if not str(item['filename']).lower().endswith('.pdf'):raise ValueError('这份资料不是 PDF 文件')
+        path=self.archive.root/'files'/item_id
+        if not path.is_file():raise KeyError('PDF 原文件不存在')
+        with path.open('rb') as stream:
+            if b'%PDF-' not in stream.read(1024):raise ValueError('原文件不是有效的 PDF，请确认文件格式')
+        return item,path
+
+    def open_pdf(self,item_id):
+        item,source=self.pdf_original(item_id)
+        directory=self.archive.root/'open-files'/item_id;directory.mkdir(parents=True,exist_ok=True)
+        target=directory/Path(item['filename'].replace('\\','/')).name
+        temporary=directory/(secrets.token_hex(16)+'.tmp')
+        try:
+            shutil.copyfile(source,temporary);temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        if sys.platform=='darwin':subprocess.run(['/usr/bin/open',str(target.resolve())],check=True,timeout=15)
+        elif os.name=='nt':os.startfile(str(target.resolve()))
+        else:subprocess.run(['xdg-open',str(target.resolve())],check=True,timeout=15)
+        return {'ok':True}
+
     def reextract(self, item_id):
         item=self.archive.get(item_id)
         if not item['filename']:raise ValueError('这条资料没有可重新解析的原文件')
@@ -252,7 +278,8 @@ def handler(service):
             if not isinstance(data, bytes): data = json.dumps(data, ensure_ascii=False).encode()
             self.send_response(status); self.send_header('Content-Type', media); self.send_header('Content-Length', str(len(data)))
             self.send_header('X-Content-Type-Options', 'nosniff'); self.send_header('Cache-Control', 'no-store')
-            self.send_header('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+            policy="default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            self.send_header('Content-Security-Policy',policy)
             for key, value in (extra or {}).items(): self.send_header(key, value)
             self.end_headers(); self.wfile.write(data)
         def trusted(self):
@@ -270,6 +297,9 @@ def handler(service):
                 if path=='/api/backup': return self.send(200, service.backup(), 'application/zip', {'Content-Disposition':'attachment; filename="stellar-knowledge-backup.zip"'})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
+                    if len(parts)==5 and parts[4]=='preview':
+                        item,original=service.pdf_original(item['id'])
+                        return self.send(200,original.read_bytes(),'application/pdf',{'Content-Disposition':"inline; filename*=UTF-8''"+urllib.parse.quote(item['filename'],safe='')})
                     if len(parts)==5 and parts[4]=='file':
                         if not item['filename']: raise KeyError('没有原文件')
                         data = (service.archive.root/'files'/item['id']).read_bytes()
@@ -280,6 +310,7 @@ def handler(service):
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
             except KeyError as exc: self.send(404, {'error':str(exc)})
+            except ValueError as exc: self.send(400, {'error':str(exc)})
             except Exception as exc: self.send(500, {'error':str(exc)})
         def do_POST(self):
             if not self.trusted() or self.headers.get('X-Knowledge-Token') != token: return self.send(403, {'error':'请求验证失败，请刷新页面'})
@@ -306,9 +337,10 @@ def handler(service):
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|open-file))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
+                    if path.endswith('/open-file'):return self.send(200,service.open_pdf(item_id))
                     with service.lock:
                         if item_id in service.busy: raise ValueError('资料正在处理，请稍后编辑或重试')
                     if path.endswith('/reextract'):
