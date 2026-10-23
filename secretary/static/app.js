@@ -239,7 +239,7 @@ function webCaptureControls(item){
  const action=captureActions.get(item.id),disabled=action?.pending||item.state==='processing'?'disabled':'';
  const feedback=action?`<span class="capture-feedback" role="status">${esc(action.text)}</span>`:'';
  if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='waiting_login'?t('请在浏览器完成登录并展开目标内容，然后确认读取；只保存已加载的内容。'):esc(StellarI18n.message(item.error||t('正在读取网页…')))}</span>${item.state==='waiting_login'?`<button data-confirm-login="${item.id}" ${disabled}>${t('页面已打开，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${disabled}>停止读取</button></div>`;
- return ui`<div class="capture-actions">${feedback}<button data-capture="${item.id}" ${disabled}>浏览器读取网页</button><button data-extension-help>使用常用浏览器采集</button></div>`;
+ return ui`<div class="capture-actions">${feedback}${item.error?`<span class="capture-error">${esc(StellarI18n.message(item.error.slice(0,450)))}</span>`:''}<button data-capture="${item.id}" ${disabled}>浏览器读取网页</button><button data-extension-help>使用常用浏览器采集</button></div>`;
 }
 function refreshCaptureUI(){renderChat(false);if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId))detail(selectedId).catch(()=>{})}
 async function performCaptureAction(id,action){
