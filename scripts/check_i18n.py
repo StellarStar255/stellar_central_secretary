@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as temp:
     page.screenshot(path='/tmp/secretary-english-settings.png',full_page=True)
     page.locator('#settings-dialog .dialog-head button').click();assert page.locator('#chat-scroll').bounding_box()['height']>150;page.screenshot(path='/tmp/secretary-english-home.png');page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click()
     page.locator('#edit-title').wait_for();assert page.locator('#edit-title').inner_text().strip()=='知识库 ✎'
-    assert page.locator('#detail-content h3').first.inner_text()=='Summary'
+    assert page.get_by_role('heading',name='Summary',exact=True).count()==1
     assert '保留这段中文摘要' in page.locator('#detail-content .detail-text').first.inner_text()
     assert '这段原文叫模型与设置' in page.locator('#detail-content').inner_text()
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()

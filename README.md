@@ -2,7 +2,7 @@
 
 **简体中文** · [English](README.en.md)
 
-版本 **v0.1.29** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.29.md)
+版本 **v0.1.30** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.30.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -189,7 +189,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.29 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.30 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -216,3 +216,9 @@ python scripts/check_tutorial.py
 ```
 
 重新录制动图需 macOS 桌面会话与 Google Chrome，安装 `scripts/requirements-demo.txt` 后运行 `python scripts/make_demo.py --lang zh` 或 `python scripts/make_demo.py --lang en`。录制使用临时资料库、虚构 PDF 和预置摘要，不读取已安装应用的数据、不调用模型。输出为 `docs/demo.gif` 与 `docs/demo-en.gif`。
+
+资料详情中可点击「＋ 添加标签」，输入后按 Enter 添加，点击标签旁的 × 删除。标签支持空格分隔多关键词搜索，也参与资料问答检索；手动维护后不会被 AI 重新整理覆盖，备份恢复也会保留。每份资料最多 50 个标签，每个最多 60 字符。
+
+「资料摘要」上方的「我的速记」支持文字、粘贴/拖入/选择图片，修改后自动保存在本机，也可点击「保存速记」。速记文字参与知识库搜索，速记和图片不参与 AI 摘要或问答，重新解析和整理原文不会覆盖速记；ZIP 备份包含速记及图片。每份最多 8 张 PNG/JPEG/GIF/WebP 图片，每张不超过 5 MB，文字最多 20000 字符。
+
+勾选读取后关闭网页时，没有其他页面的空闲专用浏览器也会退出。在「模型与设置」点击「关闭专用浏览器」可关闭知识秘书的专用实例及其页面；登录目录保留，个人日常浏览器不受影响。

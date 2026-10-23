@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, capture_worker, paths, updater
+from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 
@@ -181,6 +181,29 @@ class Service:
                 self.login_confirmations.pop(item_id, None)
                 self.capture_futures.pop(item_id,None)
         if completed: self.queue(summary_id, force=force_summary)
+        if self.archive.settings()['capture_close_tabs']:
+            try:self.close_capture_browsers(only_empty=True)
+            except Exception:pass
+
+    def close_capture_browsers(self,only_empty=False):
+        closed=0
+        with self.lock:
+            if self.captures:
+                if only_empty:return {'closed':0}
+                raise ValueError('请先停止所有网页读取，再关闭专用浏览器。')
+            for name in ('browser-live-profile','web-browser-profile'):
+                session=browser_reader.existing_session(self.archive.root/name)
+                if not session:continue
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as pw:
+                    browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=3000)
+                    pages=[page for context in browser.contexts for page in context.pages]
+                    if only_empty and any(page.url not in ('about:blank','') and not page.url.startswith('about:blank#stellar-') for page in pages):continue
+                    try:browser.new_browser_cdp_session().send('Browser.close')
+                    except Exception:
+                        if browser.is_connected():raise
+                    closed+=1
+        return {'closed':closed}
 
     def confirm_login(self, item_id):
         item = self.archive.get(item_id)
@@ -332,7 +355,7 @@ def handler(service):
             if not isinstance(data, bytes): data = json.dumps(data, ensure_ascii=False).encode()
             self.send_response(status); self.send_header('Content-Type', media); self.send_header('Content-Length', str(len(data)))
             self.send_header('X-Content-Type-Options', 'nosniff'); self.send_header('Cache-Control', 'no-store')
-            policy=policy or ("default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+            policy=policy or ("default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
             self.send_header('Content-Security-Policy',policy)
             for key, value in (extra or {}).items(): self.send_header(key, value)
             self.end_headers(); self.wfile.write(data)
@@ -344,6 +367,10 @@ def handler(service):
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
                 if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                image_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})',path)
+                if image_match:
+                    image,source=notes.note_image(service.archive,*image_match.groups())
+                    return self.send(200,source.read_bytes(),image['media'])
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/items':
@@ -364,7 +391,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -392,6 +419,7 @@ def handler(service):
                     self.send(200, {'ok':True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                     return
+                if path=='/api/browser/close':return self.send(200,service.close_capture_browsers())
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/language':
                     service.archive.set_language(body.get('language'));return self.send(200,{'ok':True,'language':body['language']})
@@ -401,9 +429,13 @@ def handler(service):
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|open-file))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
+                    if path.endswith('/notes'):
+                        return self.send(200,{'ok':True,'item':notes.set_note(service.archive,item_id,body.get('text'),body.get('images'),body.get('version'))})
+                    if path.endswith('/tags'):
+                        return self.send(200,{'ok':True,'item':service.archive.set_tags(item_id,body.get('tags'),body.get('expected_tags'))})
                     if path.endswith('/open-file'):return self.send(200,service.open_pdf(item_id))
                     with service.lock:
                         if item_id in service.busy: raise ValueError('资料正在处理，请稍后编辑或重试')
