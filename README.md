@@ -2,7 +2,7 @@
 
 **简体中文** · [English](README.en.md)
 
-版本 **v0.1.33** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.33.md)
+版本 **v0.1.34** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.34.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -189,7 +189,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.33 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.34 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -226,3 +226,5 @@ python scripts/check_tutorial.py
 通用网页读取不拦截浏览器网络请求。等待登录或确认期间，页面的异步接口、嵌入页面和链接跳转可正常运行；程序在采集时核对实际页面地址，再读取已加载内容。
 
 专用 Chrome 重启后，程序会核对专用资料目录与本地端口，自动更新失效的读取连接；不会清理登录资料或接管日常浏览器。普通网页读取失败的原因也会直接显示在资料卡片下方。
+
+通用网页读取支持结构化富文档编辑器、`display: contents` 容器与开放 Shadow DOM。确认读取后，最多追加 4 个可见的同源或飞书/Lark 文档域嵌入页面，仍受总字符预算限制；隐藏、无关跨域、登录验证嵌入页面及普通表单/评论草稿不采集。文档当前显示内容可读取，不自动展开未加载段落，也不支持画布文字 OCR。少量状态文字变化不再阻止正文采集；摘要保留已加载内容的范围说明。
