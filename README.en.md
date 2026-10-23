@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.31
+[简体中文](README.md) · **English** · v0.1.32
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -84,3 +84,5 @@ In item details, use **+ Add tag** or the × on a tag to maintain your own searc
 **My quick notes**, above Summary, autosaves text and pasted, dropped or selected images locally. Notes and images stay separate from AI content and are included in ZIP backups. Note text is searchable in the library and excluded from AI summaries and questions. Limits: 20,000 characters, 8 PNG/JPEG/GIF/WebP images, 5 MB each.
 
 Idle dedicated browsers with no other pages exit after capture when automatic tab closing is enabled. **Models & settings → Close capture browsers** also closes the dedicated instances and their pages while keeping sign-in data. Your regular browser stays open.
+
+Generic capture does not intercept browser requests. APIs, embedded pages and navigation continue while waiting for confirmation. Capture validates the actual page address before saving loaded content.
