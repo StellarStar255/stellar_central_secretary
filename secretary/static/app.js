@@ -212,6 +212,7 @@ function attach(files){for(const file of files){if(file.size>50*1024*1024){toast
 $('#attach-button').onclick=()=>$('#file-input').click();$('#file-input').onchange=e=>{attach([...e.target.files]);e.target.value=''};
 $('#message-input').addEventListener('paste',e=>{if(e.clipboardData.files.length){e.preventDefault();attach([...e.clipboardData.files])}});
 let dragDepth=0;
+window.addEventListener('drop',()=>{dragDepth=0;$('#drag-overlay').hidden=true},true);
 window.addEventListener('dragenter',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();dragDepth++;$('#drag-overlay').hidden=false}});
 window.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('Files'))e.preventDefault()});
 window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('#drag-overlay').hidden=true});
