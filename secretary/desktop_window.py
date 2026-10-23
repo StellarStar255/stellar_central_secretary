@@ -13,7 +13,7 @@ def create_window(address):
                         NSWindowStyleMaskMiniaturizable,NSWindowStyleMaskResizable,NSBackingStoreBuffered,
                         NSOpenPanel,NSSavePanel,NSModalResponseOK,NSAlert)
     from Foundation import NSObject,NSURL,NSURLRequest
-    from WebKit import WKWebView,WKWebViewConfiguration,WKWebsiteDataStore
+    from WebKit import WKWebView,WKWebViewConfiguration,WKWebsiteDataStore,WKUserScript
     origin=urllib.parse.urlsplit(address)
 
     class WindowDelegate(NSObject):
@@ -69,6 +69,8 @@ def create_window(address):
             return None
 
     configuration=WKWebViewConfiguration.alloc().init()
+    script=WKUserScript.alloc().initWithSource_injectionTime_forMainFrameOnly_('window.__stellarDesktop=true;',0,True)
+    configuration.userContentController().addUserScript_(script)
     configuration.setWebsiteDataStore_(WKWebsiteDataStore.defaultDataStore())
     view=WKWebView.alloc().initWithFrame_configuration_(((0,0),(1200,820)),configuration)
     delegate=WindowDelegate.alloc().init();delegate.loaded=False;view.setNavigationDelegate_(delegate);view.setUIDelegate_(delegate)
