@@ -336,8 +336,10 @@ def handler(service):
                         return self.send(200, data, 'application/octet-stream', {'Content-Disposition':"attachment; filename*=UTF-8''"+urllib.parse.quote(item['filename'], safe='')})
                     return self.send(200, item)
                 if path in ('/tutorial','/tutorial.html'):
+                    if not urllib.parse.parse_qs(parsed.query).get('lang'):
+                        return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css'}
+                assets = {'/':'index.html', '/app.js':'app.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -365,6 +367,8 @@ def handler(service):
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                     return
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
+                if path=='/api/language':
+                    service.archive.set_language(body.get('language'));return self.send(200,{'ok':True,'language':body['language']})
                 if path=='/api/settings':
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))

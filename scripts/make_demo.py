@@ -4,6 +4,7 @@ Requires a macOS desktop session, Chrome, Playwright and Pillow. No model is cal
 Output contains only the isolated example archive, never the installed user's data.
 """
 import io
+import argparse
 import json
 import math
 import os
@@ -20,6 +21,9 @@ from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT))
 from secretary.core import Archive
+from secretary.i18n import translate
+
+parser=argparse.ArgumentParser();parser.add_argument('--lang',choices=('zh','en'),default='zh');LANG=parser.parse_args().lang
 
 frames=[];durations=[];pointer=[200,200]
 with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
@@ -36,7 +40,7 @@ def decorate(page,caption):
     page.evaluate('''caption=>{
       let label=document.querySelector('#demo-caption');if(!label){label=document.createElement('div');label.id='demo-caption';Object.assign(label.style,{position:'fixed',top:'12px',left:'50%',transform:'translateX(-50%)',padding:'9px 16px',borderRadius:'12px',background:'#171918ed',color:'white',margin:'0',border:'0',width:'max-content',right:'auto',bottom:'auto',font:'600 16px -apple-system,BlinkMacSystemFont,sans-serif',zIndex:2147483647,boxShadow:'0 4px 22px #0003',whiteSpace:'nowrap',pointerEvents:'none'});label.popover='manual';document.body.append(label)}label.textContent=caption;if(label.matches(':popover-open'))label.hidePopover();label.showPopover();
       let cursor=document.querySelector('#demo-pointer');if(!cursor){cursor=document.createElement('div');cursor.id='demo-pointer';Object.assign(cursor.style,{position:'fixed',width:'22px',height:'22px',border:'3px solid #e89a5c',borderRadius:'50%',background:'#f5b37d55',margin:'0',padding:'0',right:'auto',bottom:'auto',pointerEvents:'none',zIndex:2147483647,left:'200px',top:'200px',boxShadow:'0 0 0 2px white'});cursor.popover='manual';document.body.append(cursor)}if(cursor.matches(':popover-open'))cursor.hidePopover();cursor.showPopover();
-    }''',caption)
+    }''',translate(caption,LANG))
 
 def move_to(page,selector):
     locator=page.locator(selector);locator.scroll_into_view_if_needed();box=locator.bounding_box();assert box,selector
@@ -68,26 +72,28 @@ with tempfile.TemporaryDirectory(prefix='secretary-demo-') as temp:
             except OSError:pass
             time.sleep(.2)
         else:raise RuntimeError('Demo host timeout')
-        token=status['token'];request('/api/settings',{'backend':'codex','auto_ai':False})
+        token=status['token'];request('/api/settings',{'backend':'codex','auto_ai':False});request('/api/language',{'language':LANG})
         with sync_playwright() as p:
             browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
             try:
                 context=browser.new_context(viewport={'width':1200,'height':750},color_scheme='light',bypass_csp=True)
-                page=context.new_page();page.goto(base+'/tutorial');pdf_text=page.evaluate('makePdf()');pdf=Path(temp)/'科学月刊_2026年6月.pdf';pdf.write_text(pdf_text,encoding='ascii')
-                page.goto(base);page.locator('#model-label').wait_for();page.wait_for_function('document.querySelector("#model-label").textContent.length>0')
+                page=context.new_page();page.goto(base+'/tutorial');pdf_text=page.evaluate('makePdf()');pdf=Path(temp)/('Science_Monthly_June2026.pdf' if LANG=='en' else '科学月刊_2026年6月.pdf');pdf.write_text(pdf_text,encoding='ascii')
+                page.goto(base);page.locator('#model-label').wait_for();page.wait_for_function('(language)=>document.documentElement.lang===language && document.querySelector("#model-label").textContent==="ChatGPT · Codex"',arg='en' if LANG=='en' else 'zh-CN')
                 decorate(page,'知识秘书：存下资料，随时找回');capture(page,1600)
                 decorate(page,'① 拖入文件或点「＋」，原件保存在本机')
                 move_to(page,'#attach-button');capture(page,500);page.locator('#file-input').set_input_files(pdf);capture(page,1000)
                 click(page,'#send-button');page.wait_for_function('document.querySelectorAll(".archive-card").length===1')
                 items=request('/api/items');assert len(items)==1;item_id=items[0]['id']
                 archive=Archive(temp,recover=False)
-                archive.update(item_id,title='科学月刊 · 2026年6月',summary='【PDF 前 5 页概览】教程预置示例：六月月刊介绍月球探索、机器人与清洁能源。原文件已完整保存，可在详情中阅读和下载。',category='科学与技术',tags=['科学月刊','6月','前部概览'],state='ready',error='')
-                page.evaluate('refresh()');page.wait_for_function('document.querySelector(".archive-card strong").textContent.includes("科学月刊")')
+                demo_title='Science Monthly · June 2026' if LANG=='en' else '科学月刊 · 2026年6月'
+                renamed_title='My June Science Monthly' if LANG=='en' else '我的六月科学月刊'
+                archive.update(item_id,title=demo_title,summary=('Tutorial overview: this fictional June issue covers the Moon, robots and clean energy. The original PDF is saved and ready to read. This summary is prewritten for the demo.' if LANG=='en' else '【PDF 前 5 页概览】教程预置示例：六月月刊介绍月球探索、机器人与清洁能源。原文件已完整保存，可在详情中阅读和下载。'),category='Science & technology' if LANG=='en' else '科学与技术',tags=['Science Monthly','June','Opening overview'] if LANG=='en' else ['科学月刊','6月','前部概览'],state='ready',error='')
+                page.evaluate('refresh()');page.wait_for_function('(title)=>document.querySelector(".archive-card strong").textContent===title',arg=demo_title)
                 decorate(page,'② 原件与概览放在一起（示例摘要已预置）');capture(page,2000)
                 click(page,'#library-open');decorate(page,'③ 多个关键词用空格分隔，全部包含、顺序不限')
-                type_text(page,'#search','6月 科学月刊');page.wait_for_function('document.querySelectorAll("#items .library-row").length===1');capture(page,1700)
+                type_text(page,'#search','June Science Monthly' if LANG=='en' else '6月 科学月刊');page.wait_for_function('document.querySelectorAll("#items .library-row").length===1');capture(page,1700)
                 click(page,'#items .library-row');decorate(page,'④ 点击标题或小铅笔，自己修改名称');capture(page,1100)
-                click(page,'#edit-title');type_text(page,'#rename-title','我的六月科学月刊');capture(page,600);click(page,'#save-title');page.wait_for_function('document.querySelector("#edit-title").textContent.includes("我的六月")');capture(page,1300)
+                click(page,'#edit-title');type_text(page,'#rename-title',renamed_title);capture(page,600);click(page,'#save-title');page.wait_for_function('(title)=>document.querySelector("#edit-title").textContent.includes(title)',arg=renamed_title);capture(page,1300)
                 decorate(page,'⑤ 直接在浏览器或系统默认程序中打开 PDF')
                 move_to(page,'#open-pdf-browser');capture(page,900)
                 with page.expect_popup() as opened:page.locator('#open-pdf-browser').click()
@@ -96,8 +102,8 @@ with tempfile.TemporaryDirectory(prefix='secretary-demo-') as temp:
                 viewer.locator('pdf-viewer').wait_for(state='attached');pdf_page.wait_for_timeout(1200)
                 decorate(pdf_page,'PDF 原件在新标签页中阅读');capture(pdf_page,2000);pdf_page.close()
                 page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()
-                decorate(page,'⑥ 桌面 / 网页切换，收在「模型与设置」里')
-                click(page,'#settings-open');move_to(page,'#interface-toggle');capture(page,2000)
+                decorate(page,'⑥ 中英文与桌面/网页模式，都在「模型与设置」里')
+                click(page,'#settings-open');move_to(page,'#ui-language');capture(page,900);move_to(page,'#interface-toggle');capture(page,1700)
                 decorate(page,'还有互动教程：跟着示例动手练习，不改动你的资料')
                 move_to(page,'#tutorial-open');capture(page,1000)
                 with page.expect_popup() as opened:page.locator('#tutorial-open').click()
@@ -116,5 +122,5 @@ for index in range(12):
     contact.paste(frame,((index%4)*480,(index//4)*300))
 palette=contact.quantize(colors=192,method=Image.Quantize.MEDIANCUT)
 encoded=[frame.quantize(palette=palette,dither=Image.Dither.NONE) for frame in frames]
-output=ROOT/'docs/demo.gif';encoded[0].save(output,save_all=True,append_images=encoded[1:],duration=durations,loop=0,optimize=True,disposal=2)
-print(json.dumps({'file':'docs/demo.gif','frames':Image.open(output).n_frames,'duration_seconds':sum(durations)/1000,'size_bytes':output.stat().st_size,'data':'synthetic PDF and prewritten summary; no model called'},ensure_ascii=False))
+output=ROOT/('docs/demo-en.gif' if LANG=='en' else 'docs/demo.gif');encoded[0].save(output,save_all=True,append_images=encoded[1:],duration=durations,loop=0,optimize=True,disposal=2)
+print(json.dumps({'file':str(output.relative_to(ROOT)),'language':LANG,'frames':Image.open(output).n_frames,'duration_seconds':sum(durations)/1000,'size_bytes':output.stat().st_size,'data':'synthetic PDF and prewritten summary; no model called'},ensure_ascii=False))

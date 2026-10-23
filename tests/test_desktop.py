@@ -116,6 +116,11 @@ class NativeDesktopTest(unittest.TestCase):
                     service.switch_interface('desktop')
                     wait_for(lambda:service.desktop.get('mode')=='desktop' and service.desktop.get('window_visible'))
                     self.assertEqual(service.archive.settings()['interface_mode'],'desktop')
+                    service.archive.set_language('en')
+                    wait_for(lambda:service.desktop.get('language')=='en')
+                    wait_for(lambda:evaluate("document.documentElement.lang==='en'"))
+                    self.assertTrue(any(str(item.title())=='Switch to desktop window' for item,_ in delegate.localized_items))
+                    self.assertEqual(evaluate("document.querySelector('#settings-save').textContent"),'Save settings')
                     delegate.performSelectorOnMainThread_withObject_waitUntilDone_('requestQuit:',None,True)
                 except BaseException as exc:
                     errors.append(exc)

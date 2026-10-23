@@ -23,7 +23,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else throw Error('unexpected API '+path);
  return{ok:true,json:async()=>data};
 }};
-vm.createContext(context);vm.runInContext(fs.readFileSync('secretary/static/app.js','utf8'),context);
+vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
 const sample='用户：\n解释一下 ETF\n\nChatGPT：\n## 基金\n\n**重点**\n\n1. 第一项\n2. 第二项\n\n```text\n用户：\n<script>alert(1)</script>\n```\n\n用户：\n继续\n\nClaude：\n[原件](https://example.com)';
 context.readerSample=sample;
 assert.equal(vm.runInContext('parseArchivedConversation(readerSample).length',context),4);
