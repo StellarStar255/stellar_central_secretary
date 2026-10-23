@@ -122,7 +122,7 @@ def free_loopback_port():
         return sock.getsockname()[1]
 
 
-def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False):
+def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False, proxy=None):
     current = existing_session(profile)
     if current: return current
     chrome = chrome_executable()
@@ -134,6 +134,7 @@ def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=Fa
     args = ['--user-data-dir='+str(profile), '--no-first-run',
             '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
             *(['--no-startup-window'] if background else ['--new-window', target])]
+    if proxy: args.append('--proxy-server='+proxy)
     options = {}
     if background and sys.platform == 'darwin':
         command = ['/usr/bin/open', '-g', '-n', '-a', str(Path(chrome).parents[2]), '--args', *args]

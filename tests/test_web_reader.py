@@ -19,6 +19,15 @@ class WebReaderTest(unittest.TestCase):
         with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]):
             with self.assertRaises(ValueError):web_reader.validate_public_url(URL)
 
+    def test_fake_dns_requires_verified_proxy_and_never_accepts_literal_private_ip(self):
+        with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('198.18.0.8',443))]):
+            with patch.object(web_reader,'browser_proxy',return_value=None),self.assertRaises(ValueError):web_reader.validate_public_url(URL)
+            with patch.object(web_reader,'browser_proxy',return_value='http://127.0.0.1:1234'):
+                self.assertEqual(web_reader.validate_public_url(URL),URL)
+                with self.assertRaises(ValueError):web_reader.validate_public_url('https://198.18.0.8/test')
+        with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]),patch.object(web_reader,'browser_proxy',return_value='http://127.0.0.1:1234'):
+            with self.assertRaises(ValueError):web_reader.validate_public_url(URL)
+
     def test_login_and_permission_pages_do_not_become_body(self):
         for field in ('login','denied'):
             page=Mock(url=URL);page.is_closed.return_value=False
