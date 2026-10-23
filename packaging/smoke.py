@@ -36,8 +36,9 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css'):
             assert request(path), path
+        assert b'tutorial-open' in request('/')
         request('/api/settings', {'backend':'codex', 'auto_ai':False, 'capture_scope':'loaded'}, status['token'])
         assert json.loads(request('/api/status'))['settings']['capture_scope'] == 'loaded'
         request('/api/ingest', {'text':'安装包测试资料，可供检索。'}, status['token'])

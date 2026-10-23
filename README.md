@@ -1,8 +1,14 @@
 # Stellar Secretary · 知识秘书
 
-版本 **v0.1.24** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.24.md)
+版本 **v0.1.25** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.25.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
+
+![操作演示：导入 PDF、组合搜索、改标题、阅读原件和打开交互教程](docs/demo.gif)
+
+<sub>动图使用虚构 PDF 和预置摘要，等待过程已加速；不代表真实模型处理速度。</sub>
+
+**交互教程**：安装后打开「模型与设置 → 使用教程」，或下载 [离线教程 HTML](docs/tutorial.html) 后直接用浏览器打开。六个可点击练习涵盖归档、组合搜索、标题修改、PDF 阅读、模式切换与备份；不访问你的知识库、不改程序设置，也不调用模型。
 
 ## 安装与升级
 
@@ -11,11 +17,11 @@
 - **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
 - **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
 
-安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面通过本机浏览器打开。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 关闭页面后后台继续运行，再次双击应用可重新打开页面。
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面支持网页模式，macOS 安装版也可使用独立桌面窗口。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 关闭页面后后台继续运行，再次双击应用可重新打开页面。
 
 在「模型与设置 → 版本与升级」点击「检查更新」，有正式新版时点击「一键升级并重启」。程序验证 SHA256，macOS 额外验证开发者签名，安装后重启；有读取或摘要任务时请先等待完成。macOS 请先把应用拖到「应用程序」，从 DMG 直接运行时会转为手动安装。
 
-安装版数据目录：macOS 为 `~/Library/Application Support/Stellar Secretary`，Windows 为 `%LOCALAPPDATA%\Stellar Secretary`。升级和卸载保留资料。首次从源码版迁移时，先停止旧服务并备份，将原项目 `data` 目录的全部内容复制到对应安装版目录，再启动应用；不要同时启动两版。浏览器中的对话记录仍由同一 `http://127.0.0.1:8768` 地址下的本地存储保留。
+安装版数据目录：macOS 为 `~/Library/Application Support/Stellar Secretary`，Windows 为 `%LOCALAPPDATA%\Stellar Secretary`。升级和卸载保留资料。首次从源码版迁移时，先停止旧服务并备份，将原项目 `data` 目录的全部内容复制到对应安装版目录，再启动应用；不要同时启动两版。对话记录使用本机共享存储，供网页与桌面共用；首次刷新新版网页时会迁移该浏览器的原有历史，本地浏览器记录继续作为后备。
 
 ## 源码启动
 
@@ -171,7 +177,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.24 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.25 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -186,3 +192,14 @@ v0.1.8 起，登录读取和浏览器扩展会把 HTML 表格保存为结构化�
 v0.1.9 补齐新版 ChatGPT 的 search-unit 消息容器和角色标题 DOM 采集路径；这两种页面结构同样保留表格、SVG 曲线和按钮式图例。图表的原始数据与说明可在图形下方展开，避免图形被散乱文本替代。
 
 macOS 安装版支持独立桌面窗口和网页模式，在「模型与设置 → 使用方式」或托盘菜单中随时切换，程序记住选择。关闭桌面窗口后服务继续在托盘运行，点击 Dock 可重新打开。两种模式共用知识库、设置和本机对话记录；旧浏览器对话会在刷新页面后迁移到本机共享存储。
+
+## 更新教程与动图
+
+教程的源文件位于 `secretary/static/tutorial.html`、`tutorial.css` 和 `tutorial.js`，应用内与离线版使用同一套内容。
+
+```sh
+python scripts/build_tutorial.py
+python scripts/check_tutorial.py
+```
+
+重新录制动图需 macOS 桌面会话与 Google Chrome，安装 `scripts/requirements-demo.txt` 后运行 `python scripts/make_demo.py`。录制使用临时资料库、虚构 PDF 和预置摘要，不读取已安装应用的数据、不调用模型。输出为 `docs/demo.gif`。

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知识秘书 · 交互教程</title><link rel="stylesheet" href="tutorial.css"></head>
+<body>
+<header><a class="wordmark" href="#"><span>✳</span> Stellar Secretary <small>交互教程</small></a><div><button id="reset" class="quiet">重新练习</button><a id="return-app" class="quiet" href="/">返回知识秘书 ↗</a></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">从存下第一份资料开始</p><h1>动手试一次，就会用了。</h1><p>六个小练习，熟悉从归档到找回资料的完整流程。</p></div><span class="safe">示例练习 · 不写入知识库 · 不调用模型</span></section>
+<div class="course">
+<nav id="steps" aria-label="教程步骤"></nav>
+<section class="lesson" aria-labelledby="lesson-title">
+<div class="lesson-head"><p id="step-number" class="eyebrow"></p><h2 id="lesson-title"></h2><p id="instruction"></p><p id="hint" class="hint"></p></div>
+<div class="sandbox" aria-label="知识秘书练习界面">
+<aside><div class="mini-brand"><span>✳</span> 知识秘书</div><button id="new-note" class="nav-button">✎ 新对话</button><button id="library" class="nav-button">⌕ 搜索知识库</button><div class="mini-label">最近归档</div><button id="recent-file" class="nav-button" hidden></button><div class="spacer"></div><button id="settings" class="nav-button">⚙ 模型与设置</button><button id="backup" class="nav-button">↓ 导出知识库备份</button><small>仅供练习的界面</small></aside>
+<div class="workspace"><div class="workspace-head"><strong>Stellar Secretary</strong><span id="mode-badge">网页练习</span></div><div id="workspace-content"></div></div>
+</div>
+<div id="feedback" role="status" aria-live="polite"></div>
+<div class="lesson-footer"><button id="previous" class="quiet">← 上一步</button><span id="completion"></span><button id="next" class="primary" disabled>下一步 →</button></div>
+<div class="real-tip"><strong>在真实程序中</strong><span id="real-tip"></span></div>
+</section>
+</div>
+<footer>所有资料均为虚构示例。真实资料、模型账号和程序设置不会被本教程更改。</footer>
+</main><script src="tutorial.js"></script>
+</body></html>
