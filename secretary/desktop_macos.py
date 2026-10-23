@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__, paths
 from .desktop_status import presentation
+from .i18n import translate
 
 
 def run(address, service=None, server=None, open_browser=True):
@@ -55,6 +56,9 @@ def run(address, service=None, server=None, open_browser=True):
             self.window_controller=None
             self.mode=service.archive.settings()['interface_mode'] if service is not None else 'browser'
             self.handled_interface=None
+            self.language=service.archive.settings()['ui_language'] if service is not None else 'zh'
+            self.localized_items=[]
+            self.localized_menus=[]
             self.images = {}
             self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
             for name in ('ready', 'busy', 'error', 'starting'):
@@ -69,6 +73,7 @@ def run(address, service=None, server=None, open_browser=True):
             version = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(f'知识秘书 v{__version__}', None, '')
             version.setEnabled_(False)
             self.menu.addItem_(version)
+            self.version_item=version
             self.menu.addItem_(NSMenuItem.separatorItem())
             for title, action, key in [('打开知识秘书', 'openMain:', 'o'),
                                         ('切换到桌面窗口', 'openDesktop:', ''),
@@ -78,6 +83,7 @@ def run(address, service=None, server=None, open_browser=True):
                                         ('退出知识秘书', 'requestQuit:', 'q')]:
                 item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key)
                 item.setTarget_(self)
+                self.localized_items.append((item,title))
                 self.menu.addItem_(item)
             self.status_item.setMenu_(self.menu)
             main_menu = NSMenu.alloc().init()
@@ -86,22 +92,29 @@ def run(address, service=None, server=None, open_browser=True):
             main_menu.addItem_(app_menu)
             edit=NSMenu.alloc().initWithTitle_('编辑')
             for title,selector,key in [('撤销','undo:','z'),('剪切','cut:','x'),('复制','copy:','c'),('粘贴','paste:','v'),('全选','selectAll:','a')]:
-                edit.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title,selector,key))
+                edit_action=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title,selector,key);edit.addItem_(edit_action);self.localized_items.append((edit_action,title))
             edit_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('编辑',None,'');edit_item.setSubmenu_(edit);main_menu.addItem_(edit_item)
+            self.localized_items.extend([(app_menu,'知识秘书'),(edit_item,'编辑')])
+            self.localized_menus.append((edit,'编辑'))
             app.setMainMenu_(main_menu)
             self.refresh()
 
         @objc.python_method
         def refresh(self):
             value = state['value']
-            label = presentation(value)
+            self.language=value.get('settings',{}).get('ui_language',self.language)
+            for item,title in self.localized_items:item.setTitle_(translate(title,self.language))
+            for menu,title in self.localized_menus:menu.setTitle_(translate(title,self.language))
+            self.version_item.setTitle_(translate('知识秘书',self.language)+' v'+__version__)
+            if self.window_controller:self.window_controller[0].setTitle_(translate('Stellar Secretary · 知识秘书',self.language))
+            label = presentation({**value,'settings':{**value.get('settings',{}),'ui_language':self.language}})
             if self.quitting:
-                label = {'title':'退出中', 'detail':'正在停止本机服务…', 'icon':'starting', 'badge':'…'}
+                label = {'title':translate('退出中',self.language), 'detail':translate('正在停止本机服务…',self.language), 'icon':'starting', 'badge':'…'}
             if label != self.last_label:
                 button = self.status_item.button()
                 button.setImage_(self.images[label['icon']])
                 button.setTitle_('')
-                button.setToolTip_('知识秘书 · '+label['detail'])
+                button.setToolTip_(translate('知识秘书',self.language)+' · '+label['detail'])
                 self.status_label.setTitle_(label['detail'])
                 app.dockTile().setBadgeLabel_(label['badge'])
                 self.last_label = label
@@ -109,7 +122,7 @@ def run(address, service=None, server=None, open_browser=True):
                 service.desktop = {'enabled':True,'menu_bar':True,'dock':True,'supports_window':True,
                     'state':label['icon'],'label':self.status_item.button().title(),
                     'dock_badge':app.dockTile().badgeLabel() or '', 'activation_policy':int(app.activationPolicy()),
-                    'mode':self.mode,'window_visible':bool(self.window_controller and self.window_controller[0].isVisible()),
+                    'mode':self.mode,'language':self.language,'window_visible':bool(self.window_controller and self.window_controller[0].isVisible()),
                     'window_loaded':bool(self.window_controller and self.window_controller[2].loaded)}
 
         def tick_(self, timer):
@@ -132,7 +145,7 @@ def run(address, service=None, server=None, open_browser=True):
             if mode=='desktop':
                 if self.window_controller is None:
                     from .desktop_window import create_window
-                    self.window_controller=create_window(address)
+                    self.window_controller=create_window(address,get_language=lambda:self.language)
                 self.window_controller[0].makeKeyAndOrderFront_(None);app.activateIgnoringOtherApps_(True)
             else:
                 if self.window_controller:self.window_controller[0].orderOut_(None)
@@ -166,9 +179,9 @@ def run(address, service=None, server=None, open_browser=True):
             runtime = service.runtime() if service is not None else value.get('runtime', {})
             if not value.get('error') and (any(runtime.values()) or value.get('update', {}).get('phase') in ('downloading', 'verifying', 'installing')):
                 alert = NSAlert.alloc().init()
-                alert.setMessageText_('仍有任务正在进行')
-                alert.setInformativeText_('请等待整理、问答或升级完成；会话读取可在网页中停止后再退出。')
-                alert.addButtonWithTitle_('知道了')
+                alert.setMessageText_(translate('仍有任务正在进行',self.language))
+                alert.setInformativeText_(translate('请等待整理、问答或升级完成；会话读取可在网页中停止后再退出。',self.language))
+                alert.addButtonWithTitle_(translate('知道了',self.language))
                 alert.runModal()
                 return
             self.quitting = True

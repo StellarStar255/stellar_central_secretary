@@ -1,7 +1,7 @@
 """Shared, testable labels for the native application's service state."""
 
 
-def presentation(status):
+def _presentation(status):
     if status.get('error'):
         return {'title':'异常', 'detail':'服务连接异常，请查看运行日志', 'icon':'error', 'badge':'!'}
     if not status.get('application'):
@@ -18,3 +18,13 @@ def presentation(status):
         return {'title':'处理中', 'detail':' · '.join(f'{label} {n} 项' for n,label,_ in active),
                 'icon':'busy', 'badge':active[0][2]}
     return {'title':'就绪', 'detail':'运行中 · 就绪', 'icon':'ready', 'badge':None}
+
+
+def presentation(status):
+    from .i18n import translate
+    value=_presentation(status);language=status.get('settings',{}).get('ui_language','zh')
+    if language=='en':
+        value={key:translate(text,language) if isinstance(text,str) else text for key,text in value.items()}
+        import re
+        value['detail']=re.sub(r' (\d+) 项',r': \1',value['detail'])
+    return value

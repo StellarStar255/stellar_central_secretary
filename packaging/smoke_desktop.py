@@ -35,11 +35,20 @@ with tempfile.TemporaryDirectory() as temp:
             time.sleep(.25)
         else:raise RuntimeError('Frozen WKWebView did not load: '+str(status['desktop']))
         assert status['settings']['interface_mode']=='desktop'
+        request=urllib.request.Request(f'http://127.0.0.1:{port}/api/language',data=b'{"language":"en"}',headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
+        opener.open(request,timeout=3).close()
+        for _ in range(80):
+            with opener.open(f'http://127.0.0.1:{port}/api/status',timeout=2) as response:status=json.load(response)
+            if status['desktop'].get('language')=='en':break
+            time.sleep(.25)
+        else:raise RuntimeError('Native menu language did not change')
+        assert status['settings']['ui_language']=='en'
+
         request=urllib.request.Request(f'http://127.0.0.1:{port}/api/shutdown',data=b'{}',
                 headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
         opener.open(request,timeout=3).close()
         assert proc.wait(timeout=15)==0
-        print('PASS: frozen Cocoa menu bar, regular Dock application, loaded native WebKit window, persisted mode and authenticated shutdown')
+        print('PASS: frozen Cocoa menu bar, regular Dock application, loaded native WebKit window, persisted mode, English native menus and authenticated shutdown')
     finally:
         if proc.poll() is None:proc.kill();proc.wait()
         log=Path(temp)/'app.log'

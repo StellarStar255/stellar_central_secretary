@@ -7,7 +7,9 @@ import webbrowser
 from pathlib import Path
 
 
-def create_window(address):
+def create_window(address,get_language=lambda:'zh'):
+    from .i18n import translate
+    tr=lambda text:translate(text,get_language())
     import objc
     from AppKit import (NSApplication,NSWindow,NSWindowStyleMaskTitled,NSWindowStyleMaskClosable,
                         NSWindowStyleMaskMiniaturizable,NSWindowStyleMaskResizable,NSBackingStoreBuffered,
@@ -41,7 +43,7 @@ def create_window(address):
                 try:
                     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
                     with opener.open(url[:-5],timeout=3) as response:name=json.load(response)['filename']
-                except Exception:name='原文件'
+                except Exception:name=tr('原文件')
             panel=NSSavePanel.savePanel();panel.setNameFieldStringValue_(Path(name).name)
             if panel.runModal()!=NSModalResponseOK:return
             destination=Path(str(panel.URL().path()))
@@ -56,7 +58,7 @@ def create_window(address):
             threading.Thread(target=download,daemon=True).start()
 
         def showError_(self,sender):
-            alert=NSAlert.alloc().init();alert.setMessageText_('下载未完成');alert.setInformativeText_(self.error);alert.runModal()
+            alert=NSAlert.alloc().init();alert.setMessageText_(tr('下载未完成'));alert.setInformativeText_(self.error);alert.runModal()
 
         def webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler_(self,view,parameters,frame,complete):
             panel=NSOpenPanel.openPanel();panel.setCanChooseDirectories_(False);panel.setCanChooseFiles_(True)
@@ -76,7 +78,7 @@ def create_window(address):
     delegate=WindowDelegate.alloc().init();delegate.loaded=False;view.setNavigationDelegate_(delegate);view.setUIDelegate_(delegate)
     style=NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable
     window=NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(((0,0),(1200,820)),style,NSBackingStoreBuffered,False)
-    window.setTitle_('Stellar Secretary · 知识秘书');window.setMinSize_((760,560));window.setReleasedWhenClosed_(False)
+    window.setTitle_(tr('Stellar Secretary · 知识秘书'));window.setMinSize_((760,560));window.setReleasedWhenClosed_(False)
     window.setContentView_(view);window.setDelegate_(delegate);window.center();window.setFrameAutosaveName_('SecretaryMainWindow')
     view.loadRequest_(NSURLRequest.requestWithURL_(NSURL.URLWithString_(address+'/?desktop=1')))
     return window,view,delegate

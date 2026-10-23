@@ -129,7 +129,7 @@ class Archive:
         return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
                 'capture_background': values.get('capture_background', 'true') == 'true',
                 'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
-                'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser')}
+                'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh')}
     def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None):
         if backend not in ('codex', 'claude'): raise ValueError('未知模型后端')
         with self.db() as db:
@@ -142,6 +142,9 @@ class Archive:
                     if not isinstance(value,bool): raise ValueError('浏览器选项格式无效')
                     pairs.append((key,str(value).lower()))
             db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)', pairs)
+    def set_language(self,language):
+        if language not in ('zh','en'):raise ValueError('Unsupported display language')
+        with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('ui_language',language))
     def set_interface_mode(self,mode):
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
