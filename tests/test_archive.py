@@ -336,6 +336,18 @@ class ServiceTest(unittest.TestCase):
         status, body=request('/api/ingest', {'text':'测试 HTTP 全文检索'}, token)
         self.assertEqual(status,200); record=json.loads(body); self.assertTrue(record['created'])
         item_id=record['item']['id']
+        self.service.archive.update(item_id,summary='已有摘要',state='ready')
+        with patch.object(self.service,'queue') as queue:
+            status,body=request('/api/items/'+item_id+'/title',{'title':'  自定义资料名称  '},token)
+            self.assertEqual(status,200)
+            renamed=json.loads(body)['item']
+            self.assertEqual(renamed['title'],'自定义资料名称')
+            self.assertEqual(renamed['summary'],'已有摘要');self.assertEqual(renamed['state'],'ready')
+            self.assertEqual(renamed['text'],record['item']['text'])
+            self.assertEqual(request('/api/items/'+item_id+'/title',{'title':'   '},token)[0],400)
+            self.assertEqual(request('/api/items/'+item_id+'/title',{'title':'字'*301},token)[0],400)
+            queue.assert_not_called()
+        self.assertEqual([r['id'] for r in self.service.archive.list(q='自定义资料名称')],[item_id])
         with patch.object(self.service, 'start_capture') as capture:
             status, body=request('/api/items/'+item_id+'/capture',{},token)
             self.assertEqual(status,200);self.assertTrue(json.loads(body)['capture_started'])

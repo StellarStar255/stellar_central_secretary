@@ -306,7 +306,7 @@ def handler(service):
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
                     with service.lock:
@@ -324,6 +324,11 @@ def handler(service):
                         return self.send(200, {'ok':True})
                     with service.lock:
                         if item_id in service.captures: raise ValueError('正在读取会话，请先停止读取再编辑。')
+                    if path.endswith('/title'):
+                        title=body.get('title')
+                        if not isinstance(title,str) or not title.strip() or len(title.strip())>300:raise ValueError('标题不能为空，且不能超过 300 个字符')
+                        service.archive.update(item_id,title=title.strip())
+                        return self.send(200,{'ok':True,'item':service.archive.get(item_id)})
                     if 'text' in body:
                         text = str(body['text'])
                         if len(text)>2_000_000: raise ValueError('正文超过 200 万字')
