@@ -84,6 +84,9 @@ def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
         validate_public_url(page.url)
         if not same_page(page.url,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
         result=page.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':120000})
+        actual=result.get('url',page.url)
+        validate_public_url(actual)
+        if not same_page(actual,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
         if result['login']:raise RuntimeError('页面仍是登录界面，请完成登录并打开目标内容后再确认')
         if result['denied']:raise RuntimeError('网页提示没有访问权限，请确认当前账号有权查看目标内容')
         text=result['text'].strip();stable=stable+1 if text==last and len(text)>=80 and not result['busy'] and result['ready'] else 0;last=text
@@ -107,21 +110,14 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
     marker='about:blank#stellar-web-capture-'+uuid.uuid4().hex
     session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=browser_proxy())
     confirmed=login_complete if login_complete is not None else threading.Event()
-    page=None;completed=False;guard=None
+    page=None;completed=False
     with sync_playwright() as pw:
         browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
         try:
             page=create_task_page(browser,session,background)
-            checked=set()
-            def navigation_guard(route):
-                try:
-                    request=route.request
-                    if request.is_navigation_request() and urlsplit(request.url).scheme in ('http','https'):
-                        host=urlsplit(request.url).hostname
-                        if host not in checked:validate_public_url(request.url);checked.add(host)
-                    route.fallback()
-                except (ValueError,OSError):route.abort('blockedbyclient')
-            guard=navigation_guard;page.route('**/*',guard)
+            # Do not route/intercept page requests. The user may spend minutes
+            # signing in while this thread waits, without pumping Playwright's
+            # event loop. Routing would pause ordinary fetch/iframe requests.
             page.goto(target,wait_until='domcontentloaded',timeout=45000)
             for attempt in range(3):
                 if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
@@ -139,7 +135,6 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
         finally:
             if page is not None:
                 try:
-                    if guard is not None:page.unroute('**/*',guard)
                     if completed and close_new_tabs and not page.is_closed():page.close()
                 except Exception:pass
             # Existing tabs and the browser process are never closed.

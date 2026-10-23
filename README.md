@@ -2,7 +2,7 @@
 
 **简体中文** · [English](README.en.md)
 
-版本 **v0.1.31** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.31.md)
+版本 **v0.1.32** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.32.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -189,7 +189,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.31 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.32 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -222,3 +222,5 @@ python scripts/check_tutorial.py
 「资料摘要」上方的「我的速记」支持文字、粘贴/拖入/选择图片，修改后自动保存在本机，也可点击「保存速记」。速记文字参与知识库搜索，速记和图片不参与 AI 摘要或问答，重新解析和整理原文不会覆盖速记；ZIP 备份包含速记及图片。每份最多 8 张 PNG/JPEG/GIF/WebP 图片，每张不超过 5 MB，文字最多 20000 字符。
 
 勾选读取后关闭网页时，没有其他页面的空闲专用浏览器也会退出。在「模型与设置」点击「关闭专用浏览器」可关闭知识秘书的专用实例及其页面；登录目录保留，个人日常浏览器不受影响。
+
+通用网页读取不拦截浏览器网络请求。等待登录或确认期间，页面的异步接口、嵌入页面和链接跳转可正常运行；程序在采集时核对实际页面地址，再读取已加载内容。

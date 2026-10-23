@@ -43,6 +43,12 @@ class WebReaderTest(unittest.TestCase):
         with patch.object(web_reader,'validate_public_url'),self.assertRaises(web_reader.reader.CaptureCancelled):
             web_reader.capture_loaded_page(page,URL,stop)
 
+    def test_snapshot_navigation_is_rejected_even_if_cached_page_url_is_stale(self):
+        page=Mock(url=URL);page.is_closed.return_value=False
+        page.evaluate.return_value={'url':'https://example.test/different','text':'Do not archive another page'}
+        with patch.object(web_reader,'validate_public_url'),self.assertRaisesRegex(RuntimeError,'跳转'):
+            web_reader.capture_loaded_page(page,URL,threading.Event())
+
     def test_success_has_explicit_loaded_scope_and_full_original_url(self):
         page=Mock(url=URL);page.is_closed.return_value=False
         page.evaluate.return_value=dict(text='Loaded project comments. '*10,login=False,denied=False,busy=False,ready=True,truncated=False,title='Project')
