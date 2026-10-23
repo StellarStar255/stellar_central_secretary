@@ -115,6 +115,12 @@ class Archive:
             CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, item_id TEXT, position INTEGER, text TEXT);
             CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(tokens, chunk_id UNINDEXED, item_id UNINDEXED);
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);''')
+            if 'tags_manual' not in {row[1] for row in db.execute('PRAGMA table_info(items)')}:
+                db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
+                for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
+            columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
+            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0')]:
+                if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if recover:
                 db.execute("UPDATE items SET state='pending',error='上次处理被中断，等待重新处理' WHERE state='processing'")
                 db.execute("UPDATE items SET state='needs_content',error='上次登录读取已中断，请点击登录并读取重试。' WHERE state IN ('queued_capture','opening_browser','waiting_login','confirming_login','waiting_browser_close','reading')")
@@ -150,11 +156,13 @@ class Archive:
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
         text = searchable_text(text)
+        metadata=db.execute('SELECT title,tags FROM items WHERE id=?',(item_id,)).fetchone()
+        keywords=(metadata['title']+' '+' '.join(json.loads(metadata['tags']))) if metadata else ''
         db.execute('DELETE FROM search WHERE item_id=?', (item_id,)); db.execute('DELETE FROM chunks WHERE item_id=?', (item_id,))
         for pos, offset in enumerate(range(0, len(text), 1000)):
             chunk = text[offset:offset+1200]
             cursor = db.execute('INSERT INTO chunks(item_id,position,text) VALUES (?,?,?)', (item_id, pos, chunk))
-            db.execute('INSERT INTO search VALUES (?,?,?)', (' '.join(terms(chunk)), cursor.lastrowid, item_id))
+            db.execute('INSERT INTO search VALUES (?,?,?)', (' '.join(terms(keywords+' '+chunk)), cursor.lastrowid, item_id))
     def add(self, title='', text='', url='', filename='', data=None, warning=''):
         digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
@@ -177,15 +185,37 @@ class Archive:
     def get(self, item_id):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row: raise KeyError('资料不存在')
-        item = dict(row); item['tags'] = json.loads(item['tags']); return item
+        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']); return item
     def update(self, item_id, **values):
         allowed = {'title','text','summary','tags','category','state','error'}
         if not values or not set(values) <= allowed: raise ValueError('无效更新')
-        if 'tags' in values: values['tags'] = json.dumps(values['tags'], ensure_ascii=False)
         values['updated'] = datetime.now(timezone.utc).isoformat()
         with self.lock, self.db() as db:
+            if 'tags' in values:
+                current=db.execute('SELECT tags_manual FROM items WHERE id=?',(item_id,)).fetchone()
+                if not current:raise KeyError('资料不存在')
+                if current['tags_manual']:values.pop('tags')
+                else:values['tags']=json.dumps(values['tags'],ensure_ascii=False)
             db.execute('UPDATE items SET '+','.join(k+'=?' for k in values)+' WHERE id=?', (*values.values(), item_id))
-            if 'text' in values: self._index(db, item_id, values['text'])
+            if {'text','title','tags'} & values.keys():
+                row=db.execute('SELECT text FROM items WHERE id=?',(item_id,)).fetchone()
+                if row:self._index(db,item_id,row['text'])
+    def set_tags(self,item_id,tags,expected=None):
+        if not isinstance(tags,list) or len(tags)>50 or any(not isinstance(tag,str) or not tag.strip() or len(tag.strip())>60 for tag in tags):
+            raise ValueError('最多添加 50 个标签，每个标签为 1–60 个字符。')
+        clean=[];seen=set()
+        for tag in tags:
+            tag=tag.strip()
+            if tag.casefold() not in seen:clean.append(tag);seen.add(tag.casefold())
+        with self.lock,self.db() as db:
+            row=db.execute('SELECT tags,text FROM items WHERE id=?',(item_id,)).fetchone()
+            if not row:raise KeyError('资料不存在')
+            if expected is not None and json.loads(row['tags'])!=expected:raise ValueError('标签已变化，请刷新资料后重试。')
+            db.execute('UPDATE items SET tags=?,tags_manual=1,updated=? WHERE id=?',
+                       (json.dumps(clean,ensure_ascii=False),datetime.now(timezone.utc).isoformat(),item_id))
+            self._index(db,item_id,row['text'])
+        return self.get(item_id)
+
     def replace_capture(self, item_id, title, text, partial=False):
         previous = self.get(item_id)
         if not text.strip(): raise ValueError('新采集正文为空，原正文已保留。')
@@ -203,7 +233,7 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length'
+        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note'
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
@@ -212,7 +242,7 @@ class Archive:
             row['tags']=json.loads(row['tags'])
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
-                fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category')]
+                fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note')]
                 fields.extend(row['tags']);fields.append(searchable_text(body))
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()

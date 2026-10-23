@@ -1,5 +1,7 @@
 """Exercise the frozen server, static assets, archive and authenticated shutdown."""
 import json
+import io
+from PIL import Image
 import base64
 import os
 from pathlib import Path
@@ -36,7 +38,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         request('/api/language',{'language':'en'},status['token'])
@@ -44,7 +46,14 @@ with tempfile.TemporaryDirectory() as data:
         request('/api/language',{'language':'zh'},status['token'])
         request('/api/settings', {'backend':'codex', 'auto_ai':False, 'capture_scope':'loaded'}, status['token'])
         assert json.loads(request('/api/status'))['settings']['capture_scope'] == 'loaded'
-        request('/api/ingest', {'text':'安装包测试资料，可供检索。'}, status['token'])
+        fixture=json.loads(request('/api/ingest', {'text':'安装包测试资料，可供检索。'}, status['token']))['item']
+        request('/api/items/'+fixture['id']+'/tags',{'tags':['CustomSearchTag'],'expected_tags':[]},status['token'])
+        assert json.loads(request('/api/items?q=CustomSearchTag'))[0]['id']==fixture['id']
+        image=io.BytesIO();Image.new('RGB',(8,8),'#77aacc').save(image,format='PNG')
+        saved=json.loads(request('/api/items/'+fixture['id']+'/notes',{'text':'Private quick note','images':[{'name':'example.png','data':base64.b64encode(image.getvalue()).decode()}],'version':0},status['token']))['item']
+        assert saved['note']=='Private quick note' and saved['note_version']==1
+        assert request('/api/items/'+fixture['id']+'/note-images/'+saved['note_images'][0]['id'])==image.getvalue()
+        print('PASS: frozen manual tags, tag search, quick-note text and local PNG image storage')
         assert len(json.loads(request('/api/items'))) == 1
         backup = request('/api/backup')
         imported = json.loads(request('/api/import', backup, status['token']))
