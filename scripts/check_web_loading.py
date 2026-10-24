@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as temp:
    try:results.append(web_reader.read(target,root/'profile',notify,cancelled,login_complete=confirmed,background=True,close_new_tabs=False,language='en'))
    except browser_reader.CaptureCancelled:pass
    except Exception as error:errors.append(str(error))
-  with patch.object(web_reader,'browser_proxy',return_value=None),patch.object(web_reader,'validate_public_url',side_effect=lambda url:url),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
+  with patch.object(web_reader,'browser_proxy',return_value=None),patch.object(browser_reader,'start_or_reuse_browser',return_value=session):
    worker=threading.Thread(target=read);worker.start();assert waiting.wait(10),'Capture did not wait for confirmation'
    with sync_playwright() as pw:
     browser=pw.chromium.connect_over_cdp(session['websocket']);page=next(page for page in browser.contexts[0].pages if page.url==target)

@@ -128,7 +128,7 @@ class Service:
     def start_capture(self, item_id, force_summary=False):
         item = self.archive.get(item_id)
         try: browser_reader.conversation_url(item['url'])
-        except ValueError: web_reader.validate_public_url(item['url'])
+        except ValueError: web_reader.validate_browser_url(item['url'])
         with self.lock:
             if self.stopping:raise ValueError('程序正在退出，请稍后重新启动。')
             if item_id in self.captures or item_id in self.busy: return
@@ -302,8 +302,11 @@ class Service:
                 try: text, warning = extract(name, data)
                 except Exception as exc: text, warning = '', '原件已保存，正文解析失败：'+str(exc)[:300]
         elif url and not text:
-            try: text, warning = fetch_page(url)
-            except Exception as exc: warning = '链接已收藏，正文抓取失败：'+str(exc)[:300]+'。可手动补充正文。'
+            if web_reader.is_loopback_url(url):
+                warning='本地网页链接已收藏，请在浏览器打开目标内容后确认读取。'
+            else:
+                try: text, warning = fetch_page(url)
+                except Exception as exc: warning = '链接已收藏，正文抓取失败：'+str(exc)[:300]+'。可手动补充正文。'
         if not (url or text or name): raise ValueError('请添加链接、文字或文件')
         if len(text)>2_000_000: raise ValueError('正文超过 200 万字，请拆分后导入')
         item_id, created = self.archive.add(title, text, url, name, data, warning)

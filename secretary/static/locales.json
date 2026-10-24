@@ -483,5 +483,8 @@
   "读取结束后，空闲且没有其他页面的专用浏览器会自动退出。登录资料保留，下次读取时复用。": "After capture, an idle dedicated browser with no other pages exits automatically. Sign-in data is kept for next time.",
   "关闭知识秘书的专用浏览器及其中页面，保留登录资料；不关闭你的日常浏览器。": "Close the dedicated capture browsers and their pages, keeping sign-in data. Your regular browser stays open.",
   "专用浏览器已关闭，登录资料已保留": "Capture browsers closed. Sign-in data is kept.",
-  "请先停止所有网页读取，再关闭专用浏览器。": "Stop all webpage captures before closing the dedicated browsers."
+  "请先停止所有网页读取，再关闭专用浏览器。": "Stop all webpage captures before closing the dedicated browsers.",
+  "本地网页链接已收藏，请在浏览器打开目标内容后确认读取。": "Local webpage saved. Open the target content in the browser, then confirm capture.",
+  "本地网页读取仅限你提交的原始地址，请返回原页面后重试": "Local capture is limited to the original host and port you submitted. Return to that page and retry.",
+  "本地网页地址必须指向本机回环地址": "The local webpage address must resolve to this computer’s loopback address"
 }

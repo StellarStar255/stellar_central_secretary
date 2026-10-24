@@ -12,8 +12,30 @@ URL='https://example.test/project/item?tabKey=comment#comment'
 class WebReaderTest(unittest.TestCase):
     def test_preserves_full_target_and_rejects_non_web_urls(self):
         self.assertEqual(web_reader.capture_url(URL),URL)
-        for url in ('http://localhost/x','http://127.0.0.1/x','http://[::1]/x','file:///tmp/a',urlunsplit(('https','fixture:'+uuid.uuid4().hex+'@example.test','/x','','')),'https://example.test/file.pdf'):
+        for url in ('file:///tmp/a',urlunsplit(('https','fixture:'+uuid.uuid4().hex+'@example.test','/x','','')),'https://example.test/file.pdf'):
             with self.subTest(url=url),self.assertRaises(ValueError):web_reader.capture_url(url)
+
+    def test_explicit_loopback_browser_target_and_origin_boundaries(self):
+        for url in ('http://localhost:8088/proxy/view?tab=chat#latest','http://127.0.0.1:8088/proxy/view','http://[::1]:8088/view'):
+            with self.subTest(url=url):
+                self.assertEqual(web_reader.validate_browser_url(url),url)
+                with self.assertRaises(ValueError):web_reader.validate_public_url(url)
+        local='http://127.0.0.1:8088/proxy/view'
+        for other in ('http://127.0.0.1:8089/view','http://localhost:8088/view','https://127.0.0.1:8088/view',URL):
+            with self.subTest(url=other),self.assertRaises(ValueError):web_reader.validate_browser_url(other,local)
+        with self.assertRaises(ValueError):web_reader.validate_browser_url(local,URL)
+        with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',8088))]):
+            with self.assertRaises(ValueError):web_reader.validate_browser_url('http://localhost:8088/view')
+
+    def test_local_ingest_uses_browser_confirmation_without_server_fetch(self):
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root);service.archive.configure('codex',False)
+            try:
+                with patch('secretary.server.fetch_page') as fetch,patch.object(service,'start_capture') as start:
+                    result=service.ingest({'url':'http://127.0.0.1:8088/proxy/view'})
+                    fetch.assert_not_called();start.assert_called_once_with(result['item']['id'])
+                    self.assertEqual(result['item']['text'],'')
+            finally:service.close()
 
     def test_public_dns_rechecked(self):
         with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]):
