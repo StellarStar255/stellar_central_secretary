@@ -37,6 +37,29 @@ class WebReaderTest(unittest.TestCase):
                     self.assertEqual(result['item']['text'],'')
             finally:service.close()
 
+    def test_superseded_navigation_can_reach_manual_confirmation(self):
+        from playwright.sync_api import Error
+        page=Mock(url=URL);page.is_closed.return_value=False
+        page.goto.side_effect=Error('net::ERR_ABORTED')
+        web_reader.open_capture_page(page,URL,threading.Event(),'en')
+        page.goto.assert_called_once_with(URL,wait_until='commit',timeout=45000)
+        page.wait_for_timeout.assert_not_called()
+        self.assertEqual(page.remove_listener.call_count,2)
+
+    def test_navigation_cancellation_does_not_retry(self):
+        stop=threading.Event();stop.set();page=Mock()
+        with self.assertRaises(web_reader.reader.CaptureCancelled):
+            web_reader.open_capture_page(page,URL,stop)
+        page.goto.assert_not_called()
+
+    def test_connection_refusal_is_actionable_and_not_a_false_success(self):
+        from playwright.sync_api import Error
+        page=Mock(url='about:blank');page.is_closed.return_value=False
+        page.goto.side_effect=Error('net::ERR_CONNECTION_REFUSED')
+        with self.assertRaisesRegex(RuntimeError,'Start the service'):
+            web_reader.open_capture_page(page,URL,threading.Event(),'en')
+        self.assertEqual(page.goto.call_count,1)
+
     def test_public_dns_rechecked(self):
         with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',443))]):
             with self.assertRaises(ValueError):web_reader.validate_public_url(URL)

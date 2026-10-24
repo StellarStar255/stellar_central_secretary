@@ -486,5 +486,8 @@
   "请先停止所有网页读取，再关闭专用浏览器。": "Stop all webpage captures before closing the dedicated browsers.",
   "本地网页链接已收藏，请在浏览器打开目标内容后确认读取。": "Local webpage saved. Open the target content in the browser, then confirm capture.",
   "本地网页读取仅限你提交的原始地址，请返回原页面后重试": "Local capture is limited to the original host and port you submitted. Return to that page and retry.",
-  "本地网页地址必须指向本机回环地址": "The local webpage address must resolve to this computer’s loopback address"
+  "本地网页地址必须指向本机回环地址": "The local webpage address must resolve to this computer’s loopback address",
+  "这个地址返回了下载文件，而不是网页。请下载后导入原文件，或提交实际查看器页面的链接。": "The address returned a download instead of a webpage. Download and import the file, or submit the viewer page URL.",
+  "浏览器打开网页被中断。请检查本地服务与端口转发，或在能正常显示内容的常用浏览器中使用采集扩展。": "Browser navigation was interrupted. Check the local service and port forwarding, or capture the working page with the browser extension.",
+  "无法连接网页服务。请在本机启动对应服务与端口转发，再重新读取。": "Cannot connect to the webpage service. Start the service and port forwarding on this computer, then retry."
 }

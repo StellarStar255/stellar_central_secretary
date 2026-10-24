@@ -167,6 +167,59 @@ def nearly_same_text(previous,current):
     return (prefix+suffix)/size>=.97
 
 
+def open_capture_page(page,target,cancelled,language='zh'):
+    """Wait for navigation commit, not a DOM event a SPA can supersede.
+
+    Observe only main-document response metadata. Never intercept requests or
+    treat an aborted download, empty response or browser error as captured text.
+    """
+    from playwright.sync_api import Error,TimeoutError
+    latest={};downloads=[];english=language=='en'
+    def response_seen(response):
+        try:
+            if response.request.is_navigation_request() and response.request.frame==page.main_frame:
+                latest.update(status=response.status,attachment=response.headers.get('content-disposition','').lower().startswith('attachment'))
+        except Exception:pass
+    def download_seen(download):
+        downloads.append(True)
+        try:download.cancel()
+        except Exception:pass
+    page.on('response',response_seen);page.on('download',download_seen)
+    try:
+        for attempt in range(2):
+            if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
+            latest.clear()
+            try:
+                response=page.goto(target,wait_until='commit',timeout=45000)
+                if response is not None:response_seen(response)
+                error=None
+            except Error as exc:error=exc
+            if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
+            if page.is_closed():raise RuntimeError('任务网页已关闭，请重新打开后再试')
+            status=latest.get('status',0)
+            if downloads or latest.get('attachment') or error and 'Download is starting' in str(error):
+                raise RuntimeError('The address returned a download instead of a webpage. Download and import the file, or submit the viewer page URL.' if english else '这个地址返回了下载文件，而不是网页。请下载后导入原文件，或提交实际查看器页面的链接。')
+            if status>=400:
+                raise RuntimeError(('The webpage service returned HTTP ' if english else '网页服务返回 HTTP ')+str(status)+(' . Check the service, proxy and sign-in, then retry.' if english else '，请检查服务、端口转发及登录状态后重试。'))
+            if error is None and status not in (204,205):return
+            interrupted=error is None or isinstance(error,TimeoutError) or 'ERR_ABORTED' in str(error)
+            if interrupted and status not in (204,205) and same_page(page.url,target):
+                # A committed document may have superseded the original DOM
+                # event. Manual confirmation and extraction still validate it.
+                return
+            if interrupted and attempt==0:
+                page.wait_for_timeout(600);continue
+            if status in (204,205):
+                raise RuntimeError(('The proxy returned an empty HTTP response (' if english else '代理地址返回空响应（HTTP ')+str(status)+('), with no webpage to read. Check that the forwarded port serves the viewer, then retry.' if english else '），没有可读取的网页。请确认端口转发指向已启动的查看器网页服务后重试。'))
+            if interrupted:
+                raise RuntimeError('Browser navigation was interrupted. Check the local service and port forwarding, or capture the working page with the browser extension.' if english else '浏览器打开网页被中断。请检查本地服务与端口转发，或在能正常显示内容的常用浏览器中使用采集扩展。')
+            if error and 'ERR_CONNECTION_REFUSED' in str(error):
+                raise RuntimeError('Cannot connect to the webpage service. Start the service and port forwarding on this computer, then retry.' if english else '无法连接网页服务。请在本机启动对应服务与端口转发，再重新读取。')
+            raise error
+    finally:
+        page.remove_listener('response',response_seen);page.remove_listener('download',download_seen)
+
+
 def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
     validate_browser_url(page.url,target)
     if not same_page(page.url,target):raise RuntimeError('请先在浏览器返回目标网页，再确认读取')
@@ -217,19 +270,30 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
             # Do not route/intercept page requests. The user may spend minutes
             # signing in while this thread waits, without pumping Playwright's
             # event loop. Routing would pause ordinary fetch/iframe requests.
-            page.goto(target,wait_until='domcontentloaded',timeout=45000)
+            open_capture_page(page,target,cancelled,language)
             for attempt in range(3):
                 if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
                 confirmed.clear();page.bring_to_front()
                 notify('waiting_login','请在浏览器完成登录，打开并展开要保存的内容，再点击「页面已打开，开始读取」')
                 reader.wait_for_manual_login(session.get('process') or SimpleNamespace(poll=lambda:None),confirmed,cancelled,timeout)
-                if not same_page(page.url,target):page.goto(target,wait_until='domcontentloaded',timeout=45000)
+                confirmed_target=target
+                if is_loopback_url(target):
+                    # Local proxy viewers commonly redirect to an index or
+                    # selected-conversation path. Accept that displayed page
+                    # only after confirmation, within the submitted origin.
+                    # Waiting for the user's event does not pump Playwright's
+                    # cached URL updates. Ask the actual document after the
+                    # confirmation so a completed script redirect is not stale.
+                    confirmed_target=page.evaluate('location.href')
+                    validate_browser_url(confirmed_target,target)
+                elif not same_page(page.url,target):open_capture_page(page,target,cancelled,language)
                 notify('reading','正在采集网页中已加载的正文')
-                try:result=capture_loaded_page(page,target,cancelled,language)
+                try:result=capture_loaded_page(page,confirmed_target,cancelled,language)
                 except RuntimeError as exc:
                     if isinstance(exc,reader.CaptureCancelled):raise
                     if '登录界面' in str(exc) and attempt<2:continue
                     raise
+                result['url']=target
                 completed=True;session['confirmed']=True;reader.save_session(profile,session);return result
         finally:
             if page is not None:
