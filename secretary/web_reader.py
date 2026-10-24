@@ -1,4 +1,4 @@
-"""Task-owned browser capture for public HTTP(S) pages after manual confirmation."""
+"""Task-owned HTTP(S) browser capture after manual confirmation."""
 import ipaddress
 import os
 import socket
@@ -24,12 +24,6 @@ def capture_url(url):
     if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('请输入不含账号密码的 http 或 https 网页链接')
     parsed.port  # Validate malformed port syntax without altering query or fragment.
-    if parsed.hostname.lower() in ('localhost','localhost.localdomain') or parsed.hostname.lower().endswith('.localhost'):
-        raise ValueError('浏览器采集仅支持公开网页地址')
-    try:address=ipaddress.ip_address(parsed.hostname)
-    except ValueError:pass
-    else:
-        if not address.is_global:raise ValueError('浏览器采集仅支持公开网页地址')
     if Path(parsed.path).suffix.lower() in FILE_SUFFIXES:
         raise ValueError('文件链接请先下载原文件，再导入知识库')
     return url
@@ -56,6 +50,10 @@ def browser_proxy():
 def validate_public_url(url):
     capture_url(url)
     parsed=urlsplit(url)
+    try:literal=ipaddress.ip_address(parsed.hostname)
+    except ValueError:literal=None
+    if is_loopback_url(url) or literal is not None and not literal.is_global:
+        raise ValueError('浏览器采集仅支持公开网页地址')
     answers=socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
     addresses=[ipaddress.ip_address(answer[4][0]) for answer in answers]
     # Some local proxy DNS modes return benchmark-range virtual addresses.
@@ -64,6 +62,33 @@ def validate_public_url(url):
     if addresses and all(address.version==4 and address in fake for address in addresses) and browser_proxy():return url
     if not addresses or any(not address.is_global for address in addresses):
         raise ValueError('浏览器采集仅支持公开网页地址')
+    return url
+
+
+def is_loopback_url(url):
+    host=(urlsplit(url).hostname or '').lower().rstrip('.')
+    if host in ('localhost','localhost.localdomain') or host.endswith('.localhost'):return True
+    try:return ipaddress.ip_address(host).is_loopback
+    except ValueError:return False
+
+
+def validate_browser_url(url,target=None):
+    """Local reading requires an explicit loopback target and its exact origin.
+
+    Server-side fetching stays public-only. Public pages cannot opt local frames
+    or redirects into this exception, and no other local ports are scanned.
+    """
+    capture_url(url)
+    target=target or url
+    if not is_loopback_url(target):return validate_public_url(url)
+    capture_url(target)
+    origin=lambda value:(value.scheme,value.hostname,value.port or (443 if value.scheme=='https' else 80))
+    if not is_loopback_url(url) or origin(urlsplit(url))!=origin(urlsplit(target)):
+        raise ValueError('本地网页读取仅限你提交的原始地址，请返回原页面后重试')
+    parsed=urlsplit(url)
+    answers=socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
+    if not answers or any(not ipaddress.ip_address(answer[4][0]).is_loopback for answer in answers):
+        raise ValueError('本地网页地址必须指向本机回环地址')
     return url
 
 
@@ -92,10 +117,10 @@ def frame_allowed(url,parent_url):
 FRAME_VISIBILITY="""el=>{for(let n=el;n;n=n.parentElement||n.getRootNode()?.host){const s=getComputedStyle(n);if(n.hidden||n.getAttribute('aria-hidden')==='true'||s.display==='none'||['hidden','collapse'].includes(s.visibility)||s.opacity==='0')return false}const r=el.getBoundingClientRect();return r.width>=80&&r.height>=40}"""
 
 
-def snapshot_page(page,language):
+def snapshot_page(page,language,target=None):
     result=dict(page.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':120000}))
     actual=result.get('url',page.url)
-    validate_public_url(actual)
+    validate_browser_url(actual,target or page.url)
     if not same_page(actual,page.url):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
     texts=[result.get('text','')];readable=result.get('readable_characters',len(texts[0]));remaining=120000-len(texts[0]);captured=0
     frames=getattr(page,'frames',[])
@@ -104,7 +129,7 @@ def snapshot_page(page,language):
         if captured>=4 or remaining<200:break
         try:
             if not frame_allowed(frame.url,actual):continue
-            if not frame.url.startswith('about:'):validate_public_url(frame.url)
+            if not frame.url.startswith('about:'):validate_browser_url(frame.url,actual)
             ancestor=frame;visible=True
             while ancestor.parent_frame is not None:
                 if not ancestor.frame_element().evaluate(FRAME_VISIBILITY):visible=False;break
@@ -112,7 +137,7 @@ def snapshot_page(page,language):
             if not visible:continue
             child=frame.evaluate(SNAPSHOT_SCRIPT,{'language':language,'limit':min(40000,remaining)})
             if not frame_allowed(child.get('url',frame.url),actual):continue
-            if not child.get('url',frame.url).startswith('about:'):validate_public_url(child.get('url',frame.url))
+            if not child.get('url',frame.url).startswith('about:'):validate_browser_url(child.get('url',frame.url),actual)
             text=child.get('text','').strip()
             if child.get('login') or child.get('denied') or len(text)<40 or text in texts:continue
             captured+=1;label=f'[Embedded content {captured}]' if language=='en' else f'【可见嵌入内容 {captured}】'
@@ -143,17 +168,17 @@ def nearly_same_text(previous,current):
 
 
 def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
-    validate_public_url(page.url)
+    validate_browser_url(page.url,target)
     if not same_page(page.url,target):raise RuntimeError('请先在浏览器返回目标网页，再确认读取')
     deadline=time.monotonic()+timeout;last=None;stable=0;result={}
     while time.monotonic()<deadline:
         if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
         if page.is_closed():raise RuntimeError('任务网页已关闭，请重新打开后再试')
-        validate_public_url(page.url)
+        validate_browser_url(page.url,target)
         if not same_page(page.url,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
-        result=snapshot_page(page,language)
+        result=snapshot_page(page,language,target)
         actual=result.get('url',page.url)
-        validate_public_url(actual)
+        validate_browser_url(actual,target)
         if not same_page(actual,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
         if result['login']:raise RuntimeError('页面仍是登录界面，请完成登录并打开目标内容后再确认')
         if result['denied']:raise RuntimeError('网页提示没有访问权限，请确认当前账号有权查看目标内容')
@@ -178,11 +203,11 @@ def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
 
 def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,background=False,close_new_tabs=False,language='zh'):
     from playwright.sync_api import sync_playwright
-    target=validate_public_url(url);profile=Path(profile_dir).resolve();profile.mkdir(parents=True,exist_ok=True)
+    target=validate_browser_url(url);profile=Path(profile_dir).resolve();profile.mkdir(parents=True,exist_ok=True)
     if os.name!='nt':profile.chmod(0o700)
     notify('opening_browser','正在打开浏览器以读取网页')
     marker='about:blank#stellar-web-capture-'+uuid.uuid4().hex
-    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=browser_proxy())
+    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=None if is_loopback_url(target) else browser_proxy())
     confirmed=login_complete if login_complete is not None else threading.Event()
     page=None;completed=False
     with sync_playwright() as pw:

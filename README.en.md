@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.34
+[简体中文](README.md) · **English** · v0.1.35
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -86,6 +86,8 @@ In item details, use **+ Add tag** or the × on a tag to maintain your own searc
 Idle dedicated browsers with no other pages exit after capture when automatic tab closing is enabled. **Models & settings → Close capture browsers** also closes the dedicated instances and their pages while keeping sign-in data. Your regular browser stays open.
 
 Generic capture does not intercept browser requests. APIs, embedded pages and navigation continue while waiting for confirmation. Capture validates the actual page address before saving loaded content.
+
+Local dynamic viewers and development services on `localhost`, `127.0.0.1` and IPv6 loopback can be captured after browser confirmation. Submit the complete URL; capture stays within that host, scheme and port and retains proxy paths, queries and fragments. Automatic server fetching remains public-only and other local services are not scanned. The local service must be running on the same computer as the capture browser.
 
 After dedicated Chrome restarts, capture verifies the exact profile and loopback endpoint before refreshing stale connection metadata. Sign-in data and regular browsers are kept. Generic webpage capture failures are shown beneath the item card.
 
