@@ -489,5 +489,10 @@
   "本地网页地址必须指向本机回环地址": "The local webpage address must resolve to this computer’s loopback address",
   "这个地址返回了下载文件，而不是网页。请下载后导入原文件，或提交实际查看器页面的链接。": "The address returned a download instead of a webpage. Download and import the file, or submit the viewer page URL.",
   "浏览器打开网页被中断。请检查本地服务与端口转发，或在能正常显示内容的常用浏览器中使用采集扩展。": "Browser navigation was interrupted. Check the local service and port forwarding, or capture the working page with the browser extension.",
-  "无法连接网页服务。请在本机启动对应服务与端口转发，再重新读取。": "Cannot connect to the webpage service. Start the service and port forwarding on this computer, then retry."
+  "无法连接网页服务。请在本机启动对应服务与端口转发，再重新读取。": "Cannot connect to the webpage service. Start the service and port forwarding on this computer, then retry.",
+  "界面字号": "Interface font size",
+  "恢复默认字号": "Reset font size",
+  "拖动即时预览，松开自动保存。桌面与网页模式共用字号设置。": "Drag to preview; release to save automatically. Desktop and browser modes share this setting.",
+  "字号已保存": "Font size saved",
+  "界面字号必须是 12–24 之间的整数": "Interface font size must be an integer from 12 to 24"
 }

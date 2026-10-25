@@ -41,6 +41,11 @@ with tempfile.TemporaryDirectory() as data:
         for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
+        assert b'ui-font-size' in request('/')
+        request('/api/appearance',{'ui_font_size':18},status['token'])
+        assert json.loads(request('/api/status'))['settings']['ui_font_size']==18
+        request('/api/appearance',{'ui_font_size':14},status['token'])
+        print('PASS: frozen interface font-size setting and GUI control')
         request('/api/language',{'language':'en'},status['token'])
         assert json.loads(request('/api/status'))['settings']['ui_language']=='en'
         request('/api/language',{'language':'zh'},status['token'])
