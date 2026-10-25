@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.36
+[简体中文](README.md) · **English** · v0.1.37
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -94,3 +94,5 @@ After a local viewer redirects within that origin, confirmation reads the displa
 After dedicated Chrome restarts, capture verifies the exact profile and loopback endpoint before refreshing stale connection metadata. Sign-in data and regular browsers are kept. Generic webpage capture failures are shown beneath the item card.
 
 Generic capture supports structured rich-document editors, display:contents wrappers and open Shadow DOM. After confirmation, up to four visible same-origin or Feishu/Lark document frames may be added within the total text budget. Hidden, unrelated or sign-in frames and ordinary comment/form drafts are excluded. Only loaded text is read; unloaded blocks and canvas OCR remain outside scope. Small live status changes no longer prevent capture.
+
+Use **Models & settings → Interface font size** to adjust text from 12 to 24 px. Drag to preview, release to save, or reset to 14 px. Desktop and browser modes share the preference, which survives reloads and restarts.
