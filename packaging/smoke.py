@@ -45,6 +45,11 @@ with tempfile.TemporaryDirectory() as data:
         request('/api/appearance',{'ui_font_size':18},status['token'])
         assert json.loads(request('/api/status'))['settings']['ui_font_size']==18
         request('/api/appearance',{'ui_font_size':14},status['token'])
+        request('/api/appearance',{'content_font_scale':120},status['token'])
+        appearance=json.loads(request('/api/status'))['settings']
+        assert appearance['content_font_scale']==120 and appearance['ui_font_size']==14
+        request('/api/appearance',{'content_font_scale':100},status['token'])
+        assert b'content-font-reset' in request('/')
         print('PASS: frozen interface font-size setting and GUI control')
         request('/api/language',{'language':'en'},status['token'])
         assert json.loads(request('/api/status'))['settings']['ui_language']=='en'

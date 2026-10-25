@@ -434,6 +434,8 @@ def handler(service):
                 if path=='/api/language':
                     service.archive.set_language(body.get('language'));return self.send(200,{'ok':True,'language':body['language']})
                 if path=='/api/appearance':
+                    if 'content_font_scale' in body:
+                        service.archive.set_content_font_scale(body['content_font_scale']);return self.send(200,{'ok':True,'content_font_scale':body['content_font_scale']})
                     service.archive.set_font_size(body.get('ui_font_size'));return self.send(200,{'ok':True,'ui_font_size':body['ui_font_size']})
                 if path=='/api/settings':
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})

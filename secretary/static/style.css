@@ -32,3 +32,10 @@
 .font-size-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px}.font-size-controls input{flex:1;min-width:120px;max-width:300px}.font-size-controls output{min-width:4em;font-variant-numeric:tabular-nums;white-space:nowrap}aside{overflow-y:auto}
 
 .brand .brand-name{overflow:hidden;text-overflow:ellipsis}.brand .brand-copy{flex:1}
+
+/* Content-only typography; controls and composer keep their interface size. */
+.message-body,.message.assistant .message-body,#detail-dialog .reader-message{font-size:calc(1rem * var(--content-font-scale,1))}
+#messages .archive-summary{font-size:calc(.85714286rem * var(--content-font-scale,1))}
+#detail-dialog .detail-text,#detail-dialog .reader-table-scroll table{font-size:calc(.92857143rem * var(--content-font-scale,1))}
+#detail-dialog .reader-prose h2,#detail-dialog .reader-prose h3,#detail-dialog .reader-prose h4,#detail-dialog .reader-prose h5,#detail-dialog .reader-prose h6{font-size:calc(1.1428571rem * var(--content-font-scale,1))}
+#detail-dialog .reader-prose code,#detail-dialog .reader-original>div,#detail-dialog .reader-chart-data pre{font-size:calc(.85714286rem * var(--content-font-scale,1))}

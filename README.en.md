@@ -1,6 +1,6 @@
 # Stellar Secretary
 
-[简体中文](README.md) · **English** · v0.1.37
+[简体中文](README.md) · **English** · v0.1.38
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -96,3 +96,5 @@ After dedicated Chrome restarts, capture verifies the exact profile and loopback
 Generic capture supports structured rich-document editors, display:contents wrappers and open Shadow DOM. After confirmation, up to four visible same-origin or Feishu/Lark document frames may be added within the total text budget. Hidden, unrelated or sign-in frames and ordinary comment/form drafts are excluded. Only loaded text is read; unloaded blocks and canvas OCR remain outside scope. Small live status changes no longer prevent capture.
 
 Use **Models & settings → Interface font size** to adjust text from 12 to 24 px. Drag to preview, release to save, or reset to 14 px. Desktop and browser modes share the preference, which survives reloads and restarts.
+
+Use `Cmd +` / `Cmd =`, `Cmd -`, and `Cmd 0` to enlarge, reduce or reset reading content only; use Ctrl on Windows/Linux. The 70–200% content scale is saved independently of interface font size. Buttons, sidebar and composer keep their interface size.

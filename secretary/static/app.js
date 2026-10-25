@@ -154,7 +154,7 @@ function renderChat(scroll=true){
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
 function updateMessage(chat,message,values){Object.assign(message,values);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat()}
 async function refresh(){
- const fontRevision=fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
+ const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
  try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}
  allItems=await api('/api/items');
  for(const [id,action] of captureActions){
@@ -371,9 +371,40 @@ $('#ui-font-size').oninput=()=>{fontSizeChanging=true;applyUIFontSize($('#ui-fon
 $('#ui-font-size').onchange=saveUIFontSize;
 $('#ui-font-size-reset').onclick=()=>{applyUIFontSize(14);return saveUIFontSize()};
 try{applyUIFontSize(Number(localStorage.getItem('stellar.ui-font-size'))||14)}catch{}
+let contentFontScale=100,savedContentFontScale=100,contentFontRevision=0,contentFontChanging=false,contentFontTimer,contentFontQueue=Promise.resolve();
+function applyContentFontScale(scale){
+ const value=Number(scale);if(!Number.isInteger(value)||value<70||value>200)return;
+ contentFontScale=value;document.documentElement?.style?.setProperty('--content-font-scale',String(value/100));
+ $('#content-font-scale-value').textContent=value+'%';
+ try{localStorage.setItem('stellar.content-font-scale',String(value))}catch{}
+}
+function syncContentFontScale(settings,revision){
+ if(contentFontChanging||revision!==contentFontRevision)return;
+ savedContentFontScale=settings.content_font_scale||100;applyContentFontScale(savedContentFontScale);
+}
+function changeContentFontScale(value){
+ const scale=Math.min(200,Math.max(70,value));
+ if(scale===contentFontScale)return;
+ const revision=++contentFontRevision;contentFontChanging=true;applyContentFontScale(scale);
+ toast(t('正文大小：')+scale+'%');clearTimeout(contentFontTimer);
+ contentFontTimer=setTimeout(async()=>{
+  try{const request=contentFontQueue.catch(()=>{}).then(()=>api('/api/appearance',{content_font_scale:scale}));contentFontQueue=request;await request;savedContentFontScale=scale;if(revision===contentFontRevision)contentFontChanging=false}
+  catch(error){if(revision===contentFontRevision){contentFontChanging=false;applyContentFontScale(savedContentFontScale);toast(error.message)}}
+ },180);
+}
+$('#content-font-reset').onclick=()=>changeContentFontScale(100);
+document.addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||event.altKey||!(event.metaKey||event.ctrlKey))return;
+ const plus=['+','='].includes(event.key)||event.code==='NumpadAdd';
+ const minus=event.key==='-'||event.code==='Minus'||event.code==='NumpadSubtract';
+ const reset=event.key==='0'||event.code==='Numpad0';
+ if(!plus&&!minus&&!reset)return;
+ event.preventDefault();changeContentFontScale(reset?100:contentFontScale+(plus?10:-10));
+},true);
+try{applyContentFontScale(Number(localStorage.getItem('stellar.content-font-scale'))||100)}catch{}
 $('#ui-language').onchange=async()=>{const select=$('#ui-language'),previous=StellarI18n.language,language=select.value;uiLanguageRevision++;languageChanging=true;select.disabled=true;try{await api('/api/language',{language});await applyUILanguage(language);toast(t('语言已切换'))}catch(error){select.value=previous;toast(error.message)}finally{languageChanging=false;select.disabled=false}};
 $('#settings-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
-async function loadStatus(){const fontRevision=fontSizeRevision,revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(data.settings.ui_font_size||14);if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsWebCapture=data.capabilities?.generic_page_capture===true;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').textContent=t('本机资料目录：')+data.data_dir}
+async function loadStatus(){const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;syncContentFontScale(data.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(data.settings.ui_font_size||14);if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsWebCapture=data.capabilities?.generic_page_capture===true;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;$('#backend').value=data.settings.backend;$('#auto-ai').checked=data.settings.auto_ai;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').textContent=t('本机资料目录：')+data.data_dir}
 $('#close-capture-browsers').onclick=()=>busy($('#close-capture-browsers'),async()=>{await api('/api/browser/close',{});toast(t('专用浏览器已关闭，登录资料已保留'))});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value});$('#settings-dialog').close();toast(t('设置已保存；等待中的资料可手动重新整理'))});
 $('#model-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};

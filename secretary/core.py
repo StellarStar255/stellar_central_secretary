@@ -135,10 +135,13 @@ class Archive:
         try:font_size=int(values.get('ui_font_size','14'))
         except (TypeError,ValueError):font_size=14
         if not 12<=font_size<=24:font_size=14
+        try:content_scale=int(values.get('content_font_scale','100'))
+        except (TypeError,ValueError):content_scale=100
+        if not 70<=content_scale<=200:content_scale=100
         return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
                 'capture_background': values.get('capture_background', 'true') == 'true',
                 'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
-                'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size}
+                'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size, 'content_font_scale':content_scale}
     def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None):
         if backend not in ('codex', 'claude'): raise ValueError('未知模型后端')
         with self.db() as db:
@@ -157,6 +160,9 @@ class Archive:
     def set_font_size(self,size):
         if type(size) is not int or not 12<=size<=24:raise ValueError('界面字号必须是 12–24 之间的整数')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('ui_font_size',str(size)))
+    def set_content_font_scale(self,scale):
+        if type(scale) is not int or not 70<=scale<=200:raise ValueError('正文缩放必须是 70–200 之间的整数')
+        with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('content_font_scale',str(scale)))
     def set_interface_mode(self,mode):
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
