@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.38** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.38.md)
+Version **v0.1.39** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.39.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -49,6 +49,8 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - On macOS, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app in the menu bar; click the Dock icon to reopen it.
 - For authenticated or dynamic webpages, choose **Read webpage in browser**, sign in and expand the content, then click **Page is ready, start reading**. Failed direct text fetches open this flow automatically. Capture includes loaded text and HTML tables, with an explicit scope note; it does not load all comments or pages. Success closes only the new task tab according to settings; failure leaves it open. Canvas, iframe and restricted content may require the extension or manual text.
 - The browser extension is an alternative for capturing conversations from an already signed-in browser.
+
+Right-click a recent archive, library row or archive card and choose **Delete archive…**. Confirmation removes the record, originals, quick notes, capture-history copies, search entries and conversation messages that reference it. Other archives are retained, and stale conversation sync cannot restore the deleted messages. Exported backups, original websites and external open windows are unaffected.
 
 ## Data and backups
 

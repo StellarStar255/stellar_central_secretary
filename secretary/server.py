@@ -24,6 +24,7 @@ from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
+from .chat_cleanup import clean_chats
 
 STATIC = Path(__file__).parent / 'static'
 MAX_UPLOAD = 50 * 1024 * 1024
@@ -80,7 +81,7 @@ class Service:
         path=self.archive.root/'conversations.json'
         with self.lock:
             saved=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'conversations':[],'activeId':''}
-            if body is None:return saved
+            if body is None:return self.clean_chat_history(saved,path,saved)
             if not isinstance(body,dict) or len(json.dumps(body,ensure_ascii=False).encode())>8_000_000:raise ValueError('对话记录格式无效或超过 8 MB')
             chats=body.get('conversations');active=body.get('activeId','')
             if not isinstance(chats,list) or len(chats)>500 or not isinstance(active,str):raise ValueError('对话记录格式无效')
@@ -93,10 +94,44 @@ class Service:
                     if not isinstance(message,dict) or message.get('role') not in ('user','assistant') or not isinstance(message.get('id'),str) or not isinstance(message.get('text',''),str):raise ValueError('消息格式无效')
                 if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):merged[chat['id']]=chat
             result={'conversations':sorted(merged.values(),key=lambda c:c.get('updated',0),reverse=True),'activeId':active}
-            encoded=json.dumps(result,ensure_ascii=False)
-            if len(encoded.encode())>8_000_000 or len(merged)>500:raise ValueError('共享对话存储已满，原有记录保持不变')
+            return self.clean_chat_history(result,path,saved)
+
+    def clean_chat_history(self,result,path,saved):
+        refs=self.archive.deletion_refs()
+        known={tuple(pair) for pair in refs['deletedMessages']}
+        chats,removed=clean_chats(result['conversations'],refs['deletedItemIds'],known)
+        result={'conversations':chats,'activeId':result['activeId'] if any(chat['id']==result['activeId'] for chat in chats) else ''}
+        if removed-known:
+            with self.archive.db() as db:db.executemany('INSERT OR IGNORE INTO deleted_messages VALUES (?,?)',sorted(removed-known))
+            refs=self.archive.deletion_refs()
+        encoded=json.dumps(result,ensure_ascii=False)
+        if len(encoded.encode())>8_000_000 or len(chats)>500:raise ValueError('共享对话存储已满，原有记录保持不变')
+        if result!=saved:
             temporary=path.with_suffix('.tmp');temporary.write_text(encoded,encoding='utf-8');temporary.replace(path)
-            return result
+        return {**result,**refs} if refs['deletedItemIds'] or refs['deletedMessages'] else result
+
+    def delete_item(self,item_id,expected_updated):
+        warning=''
+        with self.lock:
+            if item_id in self.busy or item_id in self.captures:raise ValueError('这份资料正在处理，请先停止读取或等待整理完成后再删除。')
+            path=self.archive.root/'conversations.json';original=path.read_text(encoding='utf-8') if path.exists() else None
+            saved=json.loads(original) if original is not None else {'conversations':[],'activeId':''}
+            refs=self.archive.deletion_refs()
+            chats,removed=clean_chats(saved['conversations'],[*refs['deletedItemIds'],item_id],{tuple(pair) for pair in refs['deletedMessages']})
+            cleaned={'conversations':chats,'activeId':saved['activeId'] if any(chat['id']==saved['activeId'] for chat in chats) else ''}
+            changed=cleaned!=saved;temporary=path.with_suffix('.delete.tmp')
+            try:
+                # Finish the fallible chat-file replacement before deleting the
+                # archive; restore it if file staging or revision checks fail.
+                if changed:temporary.write_text(json.dumps(cleaned,ensure_ascii=False),encoding='utf-8');temporary.replace(path)
+                try:self.archive.delete(item_id,expected_updated,sorted(removed))
+                except Exception as error:
+                    if item_id not in self.archive.deletion_refs()['deletedItemIds']:
+                        if changed:temporary.write_text(original,encoding='utf-8');temporary.replace(path)
+                        raise
+                    warning=str(error)
+            finally:temporary.unlink(missing_ok=True)
+        return {'ok':True,'history':self.chat_history(),'warning':warning}
 
     def switch_interface(self,mode):
         if not self.desktop.get('supports_window'):raise ValueError('独立桌面窗口需要 macOS 安装版，请从应用程序启动知识秘书')
@@ -248,14 +283,15 @@ class Service:
         return item,path
 
     def open_pdf(self,item_id):
-        item,source=self.pdf_original(item_id)
-        directory=self.archive.root/'open-files'/item_id;directory.mkdir(parents=True,exist_ok=True)
-        target=directory/Path(item['filename'].replace('\\','/')).name
-        temporary=directory/(secrets.token_hex(16)+'.tmp')
-        try:
-            shutil.copyfile(source,temporary);temporary.replace(target)
-        finally:
-            temporary.unlink(missing_ok=True)
+        with self.archive.lock:
+            item,source=self.pdf_original(item_id)
+            directory=self.archive.root/'open-files'/item_id;directory.mkdir(parents=True,exist_ok=True)
+            target=directory/Path(item['filename'].replace('\\','/')).name
+            temporary=directory/(secrets.token_hex(16)+'.tmp')
+            try:
+                shutil.copyfile(source,temporary);temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
         if sys.platform=='darwin':subprocess.run(['/usr/bin/open',str(target.resolve())],check=True,timeout=15)
         elif os.name=='nt':os.startfile(str(target.resolve()))
         else:subprocess.run(['xdg-open',str(target.resolve())],check=True,timeout=15)
@@ -376,7 +412,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
                 image_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})',path)
                 if image_match:
                     image,source=notes.note_image(service.archive,*image_match.groups())
@@ -401,7 +437,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -443,9 +479,12 @@ def handler(service):
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
                 if path.startswith('/api/items/'):
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
+                    if path.endswith('/delete'):
+                        if body.get('confirmed') is not True:raise ValueError('请先确认删除这份归档。')
+                        return self.send(200,service.delete_item(item_id,body.get('expected_updated')))
                     if path.endswith('/notes'):
                         return self.send(200,{'ok':True,'item':notes.set_note(service.archive,item_id,body.get('text'),body.get('images'),body.get('version'))})
                     if path.endswith('/tags'):
