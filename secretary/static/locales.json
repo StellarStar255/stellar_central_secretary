@@ -494,5 +494,10 @@
   "恢复默认字号": "Reset font size",
   "拖动即时预览，松开自动保存。桌面与网页模式共用字号设置。": "Drag to preview; release to save automatically. Desktop and browser modes share this setting.",
   "字号已保存": "Font size saved",
-  "界面字号必须是 12–24 之间的整数": "Interface font size must be an integer from 12 to 24"
+  "界面字号必须是 12–24 之间的整数": "Interface font size must be an integer from 12 to 24",
+  "正文缩放": "Content text size",
+  "恢复正文大小": "Reset content size",
+  "⌘ / Ctrl + 加号放大，减号缩小，0 恢复正文大小；按钮、侧栏和输入框字号保持不变。": "⌘ / Ctrl with + to enlarge, - to reduce, or 0 to reset content text. Buttons, sidebar and composer keep their font size.",
+  "正文大小：": "Content text: ",
+  "正文缩放必须是 70–200 之间的整数": "Content text scale must be an integer from 70 to 200"
 }
