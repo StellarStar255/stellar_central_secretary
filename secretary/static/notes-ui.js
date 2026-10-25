@@ -19,21 +19,22 @@
   const text=container.querySelector('#note-text'),status=container.querySelector('#note-status'),saveButton=container.querySelector('#note-save');
   const active=()=>document.querySelector('.quick-note')===container;
   function paint(){if(!active())return;status.textContent=draft.busy?t('正在保存…'):draft.error?t('保存失败：')+draft.error:draft.dirty?t('尚未保存'):t('已保存');status.classList.toggle('note-error',!!draft.error);saveButton.disabled=draft.busy}
-  function cache(){try{localStorage.setItem(storageKey(item.id),JSON.stringify({text:draft.text,version:draft.version}))}catch{}}
-  function changed(){draft.dirty=true;draft.error='';draft.revision++;cache();paint();clearTimeout(draft.timer);draft.timer=setTimeout(save,500)}
+  function cache(){if(draft.deleted)return;try{localStorage.setItem(storageKey(item.id),JSON.stringify({text:draft.text,version:draft.version}))}catch{}}
+  function changed(){if(draft.deleted)return;draft.dirty=true;draft.error='';draft.revision++;cache();paint();clearTimeout(draft.timer);draft.timer=setTimeout(save,500)}
   function images(){if(!active())return;container.querySelector('#note-images').innerHTML=imageMarkup(draft);container.querySelectorAll('[data-note-remove]').forEach(button=>button.onclick=()=>{draft.images.splice(Number(button.dataset.noteRemove),1);images();changed()})}
   async function save(){
-   clearTimeout(draft.timer);if(draft.busy||!draft.dirty)return;draft.busy=true;draft.error='';paint();
+   clearTimeout(draft.timer);if(draft.deleted||draft.busy||!draft.dirty)return;draft.busy=true;draft.error='';paint();
    const revision=draft.revision,snapshot=draft.images.map(image=>({...image}));
    try{
     const result=await api('/api/items/'+item.id+'/notes',{text:draft.text,images:snapshot.map(image=>image.id?{id:image.id}:{name:image.name,data:image.data}),version:draft.version});
+    if(draft.deleted)return;
     draft.version=result.item.note_version;
     snapshot.forEach((image,index)=>{const current=draft.images.findIndex(value=>value.key===image.key);if(current>=0)draft.images[current]={...result.item.note_images[index],key:image.key}});
     draft.dirty=draft.revision!==revision;
     if(!draft.dirty){try{localStorage.removeItem(storageKey(item.id))}catch{}}else cache();
     images();onSaved?.(result.item);
    }catch(error){draft.error=error.message}
-   finally{draft.busy=false;paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500)}
+   finally{draft.busy=false;if(!draft.deleted){paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500)}}
   }
   async function addFiles(files){
    try{
@@ -59,5 +60,6 @@
  }
  addEventListener('blur',()=>{for(const draft of drafts.values())if(draft.dirty)void draft.save?.()});
  addEventListener('beforeunload',event=>{if(Array.from(drafts.values()).some(draft=>draft.dirty||draft.busy)){event.preventDefault();event.returnValue=''}});
- globalThis.StellarNotes={render,bind,isDirty:id=>{const draft=drafts.get(id);return !!draft&&(draft.dirty||draft.busy)}};
+ function discard(id){const draft=drafts.get(id);if(draft){draft.deleted=true;draft.dirty=false;clearTimeout(draft.timer);drafts.delete(id)}try{localStorage.removeItem(storageKey(id))}catch{}}
+ globalThis.StellarNotes={render,bind,discard,isDirty:id=>{const draft=drafts.get(id);return !!draft&&(draft.dirty||draft.busy)}};
 })();

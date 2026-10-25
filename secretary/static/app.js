@@ -106,14 +106,14 @@ let latestStatus=null,lastUpdateState=null,uiLanguageRevision=0,languageChanging
 let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
 const storageKey='stellar.conversations.v1';
 let conversations=[], activeId='';
-let sharedChatsReady=false,sharedChatSaves=Promise.resolve();
+let sharedChatsReady=false,historyLoaded=false,sharedChatSaves=Promise.resolve();
 try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); conversations=Array.isArray(saved.conversations)?saved.conversations:[];activeId=saved.activeId||''; } catch {}
 const uid=()=>crypto.randomUUID();
 function currentChat(){return conversations.find(c=>c.id===activeId)}
-function writeLocalChats(){try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
+function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);if(!conversations.some(chat=>chat.id===activeId))activeId='';try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
 function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId}));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast(t('对话同步未完成：')+e.message))}}
-function mergeChats(remote){const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
-async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;writeLocalChats()}
+function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
+async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;historyLoaded=true;writeLocalChats()}
 async function pullSharedChats(){if(!sharedChatsReady||sending)return;await sharedChatSaves;mergeChats(await api('/api/conversations'))}
 async function switchInterface(mode){if(sending){toast(t('请等待当前消息处理完成后再切换'));return}await sharedChatSaves;await api('/api/conversations',{conversations,activeId});await api('/api/interface',{mode});toast(mode==='desktop'?t('正在打开桌面窗口'):t('正在打开网页模式'))}
 $('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterface((globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?'browser':'desktop'));
@@ -135,7 +135,7 @@ function displayCategory(value){return value==='未分类'?t('未分类'):value}
 function date(value){return new Date(value).toLocaleDateString(StellarI18n.locale,{month:'short',day:'numeric'})}
 function newChat(){activeId='';attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
 function renderSidebar(){
- $('#conversations').innerHTML=conversations.map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
+ $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
  $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar')});
  $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
  bindDetails($('#recent-items'));
@@ -143,7 +143,8 @@ function renderSidebar(){
 function bindDetails(container){container.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>detail(b.dataset.id).catch(e=>toast(e.message)))}
 function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}</button>${captureControls(item)}`}
 function renderChat(scroll=true){
- const chat=currentChat();const messages=chat?.messages||[];
+ if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);
+ const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
  const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.text?`<div class="message-body">${esc(m.text)}</div>`:''}${(m.items||[]).map(archiveCard).join('')}${m.sources?.length?`<div class="source-list">${m.sources.map(s=>ui`<button class="source" data-id="${s.item_id}">[${s.number}] ${esc(s.title)}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
@@ -156,7 +157,7 @@ function updateMessage(chat,message,values){Object.assign(message,values);chat.u
 async function refresh(){
  const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
  try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}
- allItems=await api('/api/items');
+ allItems=(await api('/api/items')).filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  for(const [id,action] of captureActions){
   const item=allItems.find(i=>i.id===id);
   if(action.accepted&&item?.state!=='waiting_login')captureActions.delete(id);
@@ -176,7 +177,7 @@ async function refresh(){
 }
 async function renderLibrary(){
  const q=$('#search').value.trim(),kind=$('#kind-filter').value,category=$('#category-filter').value;
- const items=await api('/api/items?'+new URLSearchParams({q,kind,category}));
+ const items=(await api('/api/items?'+new URLSearchParams({q,kind,category}))).filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(c=>`<option value="${esc(c)}" ${c===category?'selected':''}>${esc(displayCategory(c))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(items.length,'份资料','item','items');$('#empty').hidden=items.length>0;
@@ -325,7 +326,7 @@ $('#composer-form').onsubmit=async event=>{
  }catch(e){updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+t('本次处理未完成：')+e.message,pending:false,error:true})}
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
-async function detail(id){const item=await api('/api/items/'+id);selectedId=id;detailVersion=item.updated;
+async function detail(id){const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;selectedId=id;detailVersion=item.updated;
  $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${StellarNotes.render(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${renderArchivedBody(item)}`;
  const cancelTitle=()=>{$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''}});

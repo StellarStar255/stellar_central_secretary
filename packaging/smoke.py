@@ -1,5 +1,6 @@
 """Exercise the frozen server, static assets, archive and authenticated shutdown."""
 import json
+import zipfile
 import io
 from PIL import Image
 import base64
@@ -38,7 +39,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
@@ -81,6 +82,13 @@ with tempfile.TemporaryDirectory() as data:
             update = json.loads(request('/api/update/check', {}, status['token']))
             assert not update.get('error'), update
             print('PASS: frozen HTTPS update check with certificate verification enabled')
+        current=json.loads(request('/api/items/'+fixture['id']))
+        deleted=json.loads(request('/api/items/'+fixture['id']+'/delete',{'confirmed':True,'expected_updated':current['updated']},status['token']))
+        assert deleted['ok'] and not deleted['warning']
+        assert [item['id'] for item in json.loads(request('/api/items'))]==[pdf['id']]
+        with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as clean_backup:
+            assert 'files/'+saved['note_images'][0]['id'] not in clean_backup.namelist()
+        print('PASS: frozen confirmed archive deletion, attachment cleanup and unrelated PDF preserved')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

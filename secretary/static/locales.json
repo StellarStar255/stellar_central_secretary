@@ -499,5 +499,19 @@
   "恢复正文大小": "Reset content size",
   "⌘ / Ctrl + 加号放大，减号缩小，0 恢复正文大小；按钮、侧栏和输入框字号保持不变。": "⌘ / Ctrl with + to enlarge, - to reduce, or 0 to reset content text. Buttons, sidebar and composer keep their font size.",
   "正文大小：": "Content text: ",
-  "正文缩放必须是 70–200 之间的整数": "Content text scale must be an integer from 70 to 200"
+  "正文缩放必须是 70–200 之间的整数": "Content text scale must be an integer from 70 to 200",
+  "归档操作": "Archive actions",
+  "删除归档…": "Delete archive…",
+  "删除归档": "Delete archive",
+  "删除这份归档？": "Delete this archive?",
+  "将删除归档、原文件、速记及引用它的对话消息，无法撤销。其他归档会保留。": "This permanently deletes the archive, original, quick notes and conversation messages that reference it. Other archives are kept.",
+  "已导出的备份、原网页和外部已打开的窗口不受影响。": "Exported backups, the original webpage and external open windows are unaffected.",
+  "归档已删除": "Archive deleted",
+  "请等待当前消息处理完成后再删除。": "Wait for the current message to finish before deleting.",
+  "请先确认删除这份归档。": "Confirm deletion of this archive first.",
+  "这份资料正在处理，请先停止读取或等待整理完成后再删除。": "This archive is busy. Stop capture or wait for processing to finish before deleting.",
+  "资料已更新，请关闭确认框后重新选择删除。": "The archive changed. Close this dialog and select delete again.",
+  "归档已移除，但部分文件仍被占用。请关闭原文件后重启程序完成清理。": "The archive was removed, but some files are still in use. Close the originals and restart to finish cleanup.",
+  "删除暂存目录无效，未删除资料。": "The deletion staging folder is invalid. The archive was kept.",
+  "速记图片编号无效，未删除资料。": "A note image ID is invalid. The archive was kept."
 }
