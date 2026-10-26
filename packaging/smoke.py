@@ -83,6 +83,12 @@ with tempfile.TemporaryDirectory() as data:
             assert original.read('files/01-sample.png')==image.getvalue()
         request('/api/items/'+group['id']+'/delete',{'confirmed':True,'expected_updated':group['updated']},status['token'])
         print('PASS: frozen grouped image/text/file archive, original image preview and grouped deletion')
+        annotated=json.loads(request('/api/ingest',{'url':f'http://127.0.0.1:{port}/unavailable-page','context':'Synthetic machine inventory link:'},status['token']))['item']
+        assert annotated['user_context']=='Synthetic machine inventory link:' and not annotated['text']
+        assert annotated['title']=='Synthetic machine inventory link'
+        assert json.loads(request('/api/items?q=inventory%20machine'))[0]['id']==annotated['id']
+        request('/api/items/'+annotated['id']+'/delete',{'confirmed':True,'expected_updated':annotated['updated']},status['token'])
+        print('PASS: frozen unavailable link retains annotation, descriptive title and search index')
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
         assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
