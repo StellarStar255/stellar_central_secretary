@@ -183,6 +183,11 @@ def summary_fields(item, backend, full_pdf=False):
         scope_note='【PDF 全文摘要】基于全部已提取文字分段整理。'
     elif len(item['text']) > 240_000:
         raise ValueError('正文已完整索引；超长资料请分拆到 24 万字以内再生成 AI 摘要。')
+    context=item.get('user_context','').strip()
+    if context:
+        context_note='【用户说明归档】仅根据用户提供的说明整理，尚未读取网页正文，不推断页面内容。' if not item['text'].strip() else '【附用户说明】用户说明与网页正文分开提供。'
+        scope_note=(scope_note+'\n' if scope_note else '')+context_note
+        item['text']='【用户提供的说明，非网页正文】\n'+context+'\n\n【网页正文】\n'+(item['text'] or '尚未读取。')
     result = summarize(item['text'], item['title'], backend)
     tags = result.get('tags', [])
     if not isinstance(tags, list) or not isinstance(result.get('summary'), str) or not result['summary'].strip():

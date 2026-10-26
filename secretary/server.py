@@ -145,7 +145,7 @@ class Service:
     def queue(self, item_id, force=False, full_pdf=False):
         item = self.archive.get(item_id)
         if self.stopping:return
-        if not item['text'].strip() or (not force and not self.archive.settings()['auto_ai']): return
+        if not (item['text'].strip() or item.get('user_context','').strip()) or (not force and not self.archive.settings()['auto_ai']): return
         with self.lock:
             if item_id in self.busy: return
             self.busy.add(item_id)
@@ -334,6 +334,8 @@ class Service:
             return {'item':self.item_detail(item_id),'created':created,'updated':False}
         name = Path(str(body.get('filename', '')).replace('\\', '/')).name
         url = str(body.get('url', '')).strip(); text = str(body.get('text', '')).strip()
+        context=body.get('context','')
+        if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
         title = str(body.get('title', '')).strip(); data = None; warning = ''
         if url: validate_url(url)
         if name:
@@ -356,13 +358,16 @@ class Service:
         if not (url or text or name): raise ValueError('请添加链接、文字或文件')
         if len(text)>2_000_000: raise ValueError('正文超过 200 万字，请拆分后导入')
         item_id, created = self.archive.add(title, text, url, name, data, warning)
+        with self.lock:
+            if url and context.strip() and (item_id in self.busy or item_id in self.captures):raise ValueError('资料正在处理，请稍后再补充链接说明')
+            contextual=self.archive.save_context(item_id,context) if url else False
         item = self.archive.get(item_id)
         enriched = not created and bool(text.strip()) and item['state']=='pending' and item['text']==text
-        if created or enriched: self.queue(item_id)
-        if not item['text'].strip() and url and '请下载文件后拖入知识库' not in warning:
+        if created or enriched or contextual: self.queue(item_id)
+        if not item['text'].strip() and not item['user_context'].strip() and url and '请下载文件后拖入知识库' not in warning:
             try: self.start_capture(item_id)
             except (ValueError, OSError): pass
-        return {'item': self.archive.get(item_id), 'created': created, 'updated': enriched}
+        return {'item': self.archive.get(item_id), 'created': created, 'updated': enriched or contextual}
     def item_detail(self,item_id):
         item=self.archive.get(item_id)
         if bundles.is_bundle(item['filename']):

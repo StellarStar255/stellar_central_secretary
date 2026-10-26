@@ -123,7 +123,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''")]:
+            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''")]:
                 if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
@@ -175,8 +175,9 @@ class Archive:
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
-        visual=db.execute('SELECT vision_text FROM items WHERE id=?',(item_id,)).fetchone()
+        visual=db.execute('SELECT vision_text,user_context FROM items WHERE id=?',(item_id,)).fetchone()
         if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
+        if visual and visual[1]:text+='\n\n【用户提供的说明，非网页正文】\n'+visual[1]
         text = searchable_text(text)
         metadata=db.execute('SELECT title,tags FROM items WHERE id=?',(item_id,)).fetchone()
         keywords=(metadata['title']+' '+' '.join(json.loads(metadata['tags']))) if metadata else ''
@@ -208,6 +209,23 @@ class Archive:
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row: raise KeyError('资料不存在')
         item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']); return item
+    def save_context(self,item_id,context):
+        """Keep submitted annotations independent of fetched/replaced webpage text."""
+        if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
+        context=context.strip()
+        if not context:return False
+        with self.lock,self.db() as db:
+            item=db.execute('SELECT * FROM items WHERE id=?',(item_id,)).fetchone()
+            if not item:raise KeyError('资料不存在')
+            previous=item['user_context']
+            if ('\n\n'+context+'\n\n') in ('\n\n'+previous+'\n\n'):return False
+            combined=(previous+'\n\n' if previous else '')+context
+            if len(combined)>20000:raise ValueError('链接说明不能超过 20000 个字符')
+            title=item['title']
+            if title in ('',item['url'],'未命名笔记'):title=context.splitlines()[0].strip().rstrip('：:')[:100] or title
+            db.execute("UPDATE items SET user_context=?,title=?,summary=CASE WHEN trim(text)='' THEN '' ELSE summary END,state='pending',updated=? WHERE id=?",(combined,title,datetime.now(timezone.utc).isoformat(),item_id))
+            self._index(db,item_id,item['text'])
+        return True
     def deletion_refs(self):
         with self.db() as db:
             return {'deletedItemIds':[row[0] for row in db.execute('SELECT id FROM deleted_items ORDER BY id')],
@@ -319,7 +337,7 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note'
+        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context'
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
@@ -329,7 +347,7 @@ class Archive:
             row['tags']=json.loads(row['tags'])
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
-                fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note')]
+                fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]
                 fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual)
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()

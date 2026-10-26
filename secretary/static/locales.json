@@ -543,5 +543,10 @@
   "Claude 没有返回图片分析结果，原件已保留": "Claude returned no image analysis. Originals are kept.",
   "提问本次资料": "Ask about this material",
   "请概览本次图片和附件": "Summarize the images and attachments in this submission",
-  "组合资料含清单后超过 50 MB，请减少附件大小": "The grouped archive including its manifest exceeds 50 MB. Use smaller attachments."
+  "组合资料含清单后超过 50 MB，请减少附件大小": "The grouped archive including its manifest exceeds 50 MB. Use smaller attachments.",
+  "你的链接说明": "Your link annotation",
+  "已按你提供的说明归档，原链接也已保留；尚未读取网页正文。": "Archived using your annotation with the original link retained; webpage content has not been read.",
+  "正在根据说明整理摘要。": "Preparing a summary based on your annotation.",
+  "链接说明不能超过 20000 个字符": "Link annotations cannot exceed 20,000 characters",
+  "资料正在处理，请稍后再补充链接说明": "This item is being processed. Add the link annotation after it finishes."
 }
