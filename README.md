@@ -2,9 +2,9 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.43** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.43.md)
+Version **v0.1.44** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.44.md)
 
-A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
+A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
 ![English demonstration: save a PDF, search, rename, read the original and open the tutorial](docs/demo-en.gif)
 
@@ -17,7 +17,7 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 - **Apple Silicon Mac:** open the DMG, drag Stellar Secretary into Applications, then launch it. macOS releases use Apple Developer ID signing and notarization.
 - **Windows 10/11 x64:** run the setup EXE.
 
-Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers require a locally installed, signed-in Codex CLI or Claude Code.
+Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
 
 In **Models & settings → Display language**, choose **English** or **简体中文**. The interface updates immediately and remembers your choice across desktop and browser modes. Saved titles, originals and existing summaries are not translated.
 
@@ -42,7 +42,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 
 - Send a link, attach a file with **+**, or drop files into the composer. Multiple links in one message become one archive by default, along with any text and attachments. **Group into one archive** also allows explicit grouping.
 - Grouped links are saved first, then accessible public text is read in the background. Source statuses distinguish read and unread pages. Sign-in-only or unavailable pages retain their links and annotations; append their content manually when needed. Up to 20 links per group, with bounded text overviews.
-- Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected model CLI. Limits: 20 attachments, 8 images and 50 MB per submission. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
+- Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected image-capable model. Limits: 20 attachments, 8 images and 50 MB per submission. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
 - Text submitted alongside links is saved as a searchable link annotation. If webpage text cannot be read, the annotation still provides the title and material for a clearly labeled summary. Later webpage capture retains it.
 - Choose **Save as note** to keep plain text instead of asking a question.
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.
@@ -106,3 +106,11 @@ Generic capture supports structured rich-document editors, display:contents wrap
 Use **Models & settings → Interface font size** to adjust text from 12 to 24 px. Drag to preview, release to save, or reset to 14 px. Desktop and browser modes share the preference, which survives reloads and restarts.
 
 Use `Cmd +` / `Cmd =`, `Cmd -`, and `Cmd 0` to enlarge, reduce or reset reading content only; use Ctrl on Windows/Linux. The 70–200% content scale is saved independently of interface font size. Buttons, sidebar and composer keep their interface size.
+
+## Custom model APIs
+
+Choose **Models & settings → AI backend → Custom model API (OpenAI-compatible)**. Enter the API base URL, model name and API key, then test the connection and save. A DeepSeek example is provided; other compatible hosted services or local endpoints can be configured manually. HTTP is allowed for loopback endpoints; remote services require HTTPS. Services without authentication can use **No API key required**.
+
+Enable image input only for an image-capable model. Otherwise images remain archived while summaries and answers explicitly use text only. JSON output mode is optional. Output limits support both `max_tokens` and `max_completion_tokens`, as required by the provider. Other native API protocols need a compatible endpoint or adapter.
+
+The key is stored in a separate local `model-api.json` file, never returned to the UI, and excluded from library backups. Leave the key field empty to keep a saved key. Changing the endpoint requires re-entering it. After restoring a backup on another computer, configure the API credentials again. The connection test sends a short synthetic message, not library content; provider charges may apply.

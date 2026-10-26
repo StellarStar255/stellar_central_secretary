@@ -39,6 +39,8 @@ backups/
 *.pfx
 auth.json
 credentials.json
+model-api.json
+.model-api-*.tmp
 storage-state.json
 storage_state.json
 .codex/

@@ -47,3 +47,5 @@
 #append-text{width:100%;box-sizing:border-box;min-height:140px;resize:vertical}#append-files{margin:14px 0}.addition-batch{border-top:1px solid var(--border);padding:16px 0}.archive-additions{margin-top:24px}
 
 .group-link{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0}.group-link a{overflow-wrap:anywhere}.group-link span{display:block;font-size:.85em;opacity:.75;margin-top:6px}
+
+#model-api-settings>input,#model-api-settings>select{width:100%;box-sizing:border-box}#api-max-tokens{max-width:180px}

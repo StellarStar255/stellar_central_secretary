@@ -158,7 +158,7 @@ class Archive:
                 'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
                 'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size, 'content_font_scale':content_scale}
     def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None):
-        if backend not in ('codex', 'claude'): raise ValueError('未知模型后端')
+        if backend not in ('codex', 'claude','api'): raise ValueError('未知模型后端')
         with self.db() as db:
             pairs=[('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())]
             if capture_scope is not None:
