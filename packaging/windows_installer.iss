@@ -17,6 +17,7 @@ DefaultDirName={localappdata}\Programs\Stellar Secretary
 DefaultGroupName={#AppName}
 UsePreviousGroup=no
 PrivilegesRequired=lowest
+MinVersion=10.0.17763
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}

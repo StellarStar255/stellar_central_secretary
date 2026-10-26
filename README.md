@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.44** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.44.md)
+Version **v0.1.45** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.45.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -50,7 +50,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.
 - PDF overviews use the first five pages by default. The full extracted text and original are retained. Select **Summarize full document** when needed.
 - AES-encrypted PDFs without an opening password are supported. Password-protected documents must first be exported as accessible copies. Scanned PDFs need OCR.
-- On macOS, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app in the menu bar; click the Dock icon to reopen it.
+- On Windows and macOS, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app running in the notification area (Windows) or menu bar (macOS). Use the tray menu or reopen the app to restore its window. Windows includes its own Chromium engine; no separate WebView2 installation is needed.
 - For authenticated or dynamic webpages, choose **Read webpage in browser**, sign in and expand the content, then click **Page is ready, start reading**. Failed direct text fetches open this flow automatically. Capture includes loaded text and HTML tables, with an explicit scope note; it does not load all comments or pages. Success closes only the new task tab according to settings; failure leaves it open. Canvas, iframe and restricted content may require the extension or manual text.
 - The browser extension is an alternative for capturing conversations from an already signed-in browser.
 

@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.44** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.44.md)
+版本 **v0.1.45** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.45.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -21,7 +21,7 @@
 - **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
 - **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
 
-安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。主界面支持网页模式，macOS 安装版也可使用独立桌面窗口。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 关闭页面后后台继续运行，再次双击应用可重新打开页面。
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。Windows 与 macOS 安装版均支持独立桌面窗口和网页模式。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 自带 Chromium 内核，无需另装 WebView2；关闭桌面窗口后常驻系统托盘，可从托盘菜单或再次双击应用恢复窗口。支持 Windows 10 1809 及以上版本与 Windows 11 x64。
 
 在「模型与设置 → 显示语言」选择「简体中文」或「English」即可即时切换界面，选择会保留并同步到网页和桌面模式。资料标题、原文和已有摘要不会被翻译。交互教程跟随当前语言，也可在教程页单独选择语言；教程内切换不改变程序设置。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.44 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.45 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -208,7 +208,7 @@ v0.1.8 起，登录读取和浏览器扩展会把 HTML 表格保存为结构化�
 
 v0.1.9 补齐新版 ChatGPT 的 search-unit 消息容器和角色标题 DOM 采集路径；这两种页面结构同样保留表格、SVG 曲线和按钮式图例。图表的原始数据与说明可在图形下方展开，避免图形被散乱文本替代。
 
-macOS 安装版支持独立桌面窗口和网页模式，在「模型与设置 → 使用方式」或托盘菜单中随时切换，程序记住选择。关闭桌面窗口后服务继续在托盘运行，点击 Dock 可重新打开。两种模式共用知识库、设置和本机对话记录；旧浏览器对话会在刷新页面后迁移到本机共享存储。
+Windows 与 macOS 安装版支持独立桌面窗口和网页模式，在「模型与设置 → 使用方式」或托盘菜单中随时切换，程序记住选择。关闭桌面窗口后服务继续在托盘运行，点击 Dock 可重新打开。两种模式共用知识库、设置和本机对话记录；旧浏览器对话会在刷新页面后迁移到本机共享存储。
 
 ## 更新教程与动图
 
