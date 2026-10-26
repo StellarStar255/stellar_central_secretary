@@ -15,13 +15,15 @@
  function clean(chats){return chats.flatMap(original=>{
   const list=original.messages||[],drop=new Set();
   list.forEach((message,index)=>{
-   const refs=[...(Array.isArray(message.items)?message.items:[]),...(Array.isArray(message.sources)?message.sources:[]).map(source=>source?.item_id)];
+   const refs=[...(Array.isArray(message.items)?message.items:[]),...(Array.isArray(message.sources)?message.sources:[]).map(source=>source?.item_id),...(Array.isArray(message.images)?message.images:[]).map(image=>image?.item_id)];
    if(messages.has(JSON.stringify([original.id,message.id]))||refs.some(id=>items.has(id))){drop.add(index);if(message.role==='assistant'&&index&&list[index-1].role==='user')drop.add(index-1)}
   });
   if(!drop.size&&!affected.has(original.id))return [original];
   const kept=list.filter((_,index)=>!drop.has(index));if(!kept.length)return [];
   const user=kept.find(message=>message.role==='user')||{};
-  return [{...original,messages:kept,title:String(user.text||user.files?.[0]||'Conversation').slice(0,36)}];
+  const title=String(user.text||user.files?.[0]||'Conversation').slice(0,36);
+  if(!drop.size&&title===original.title)return [original];
+  return [{...original,messages:kept,title}];
  })}
  try{accept(JSON.parse(localStorage.getItem(key)||'{}'))}catch{}
  globalThis.StellarArchiveActions={accept,clean,isDeleted:id=>items.has(id)};

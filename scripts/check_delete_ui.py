@@ -49,9 +49,18 @@ with tempfile.TemporaryDirectory() as temp:
     assert second.evaluate('id=>localStorage.getItem("stellar-note-draft:"+id)',item) is None
     # A fresh browser with an old local cache must never render the deleted text.
     third=browser.new_context();third.add_init_script('localStorage.setItem("stellar.conversations.v1",'+json.dumps(json.dumps(stale))+');globalThis.privateFlash=false;new MutationObserver(()=>{if(document.querySelector("#messages")?.textContent.includes("DELETE_FIXTURE_SECRET"))privateFlash=true}).observe(document,{childList:true,subtree:true})')
-    fresh=third.new_page();fresh.goto(base);expect(fresh.locator('#recent-items [data-id="'+keep+'"]')).to_be_visible()
+    fresh=third.new_page();fresh.on('pageerror',lambda error:errors.append(str(error)));fresh.goto(base)
+    try:expect(fresh.locator('#recent-items [data-id="'+keep+'"]')).to_be_visible(timeout=15000)
+    except Exception:print({'page_errors':errors,'fresh_toast':fresh.locator('#toast').inner_text()});raise
     assert not fresh.evaluate('privateFlash') and SECRET not in fresh.locator('#messages').inner_text()
     assert service.archive.get(keep)==before and not errors,errors
+    # Continue composing in a conversation that has already been cleaned.
+    page.locator('#input-mode').select_option('note');page.locator('#message-input').fill('Fresh note after deletion');page.locator('#send-button').click()
+    expect(page.locator('#messages')).to_contain_text('Fresh note after deletion')
+    fresh_note=next(row for row in service.archive.list() if row['id']!=keep)
+    expect(page.locator('#messages .message.assistant')).to_have_count(2)
+    page.locator('#recent-items [data-id="'+fresh_note['id']+'"]').click(button='right');page.locator('#archive-delete-menu').click();page.locator('#delete-archive-confirm').click()
+    expect(page.locator('#toast')).to_have_text('归档已删除')
     page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');page.locator('#settings-dialog .dialog-head button').click()
     page.locator('#recent-items [data-id="'+keep+'"]').click(button='right');expect(page.locator('#archive-delete-menu')).to_have_text('Delete archive…')
     page.screenshot(path='/tmp/secretary-delete-menu.png')

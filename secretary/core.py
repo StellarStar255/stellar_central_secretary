@@ -33,6 +33,10 @@ class PageText(HTMLParser):
 
 
 def extract(name, data):
+    if str(name).lower().endswith('.stellar.zip'):
+        from .bundles import load,assemble
+        archive,manifest=load(data)
+        with archive:return assemble(manifest),''
     suffix = Path(name).suffix.lower()
     if suffix == '.pdf':
         try:
@@ -118,12 +122,12 @@ class Archive:
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
-            if 'tags_manual' not in {row[1] for row in db.execute('PRAGMA table_info(items)')}:
+            columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
+            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''")]:
+                if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
+            if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
                 for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
-            columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0')]:
-                if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if recover:
                 db.execute("UPDATE items SET state='pending',error='上次处理被中断，等待重新处理' WHERE state='processing'")
                 db.execute("UPDATE items SET state='needs_content',error='上次登录读取已中断，请点击登录并读取重试。' WHERE state IN ('queued_capture','opening_browser','waiting_login','confirming_login','waiting_browser_close','reading')")
@@ -171,6 +175,8 @@ class Archive:
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
+        visual=db.execute('SELECT vision_text FROM items WHERE id=?',(item_id,)).fetchone()
+        if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
         text = searchable_text(text)
         metadata=db.execute('SELECT title,tags FROM items WHERE id=?',(item_id,)).fetchone()
         keywords=(metadata['title']+' '+' '.join(json.loads(metadata['tags']))) if metadata else ''
@@ -266,9 +272,10 @@ class Archive:
             try:shutil.rmtree(stage)
             except OSError as error:raise ValueError('归档已移除，但部分文件仍被占用。请关闭原文件后重启程序完成清理。') from error
     def update(self, item_id, **values):
-        allowed = {'title','text','summary','tags','category','state','error'}
+        allowed = {'title','text','summary','tags','category','state','error','vision_text'}
         if not values or not set(values) <= allowed: raise ValueError('无效更新')
         values['updated'] = datetime.now(timezone.utc).isoformat()
+        if 'text' in values:values.setdefault('vision_text','')
         with self.lock, self.db() as db:
             if 'tags' in values:
                 current=db.execute('SELECT tags_manual FROM items WHERE id=?',(item_id,)).fetchone()
@@ -276,7 +283,7 @@ class Archive:
                 if current['tags_manual']:values.pop('tags')
                 else:values['tags']=json.dumps(values['tags'],ensure_ascii=False)
             db.execute('UPDATE items SET '+','.join(k+'=?' for k in values)+' WHERE id=?', (*values.values(), item_id))
-            if {'text','title','tags'} & values.keys():
+            if {'text','title','tags','vision_text'} & values.keys():
                 row=db.execute('SELECT text FROM items WHERE id=?',(item_id,)).fetchone()
                 if row:self._index(db,item_id,row['text'])
     def set_tags(self,item_id,tags,expected=None):
@@ -314,15 +321,16 @@ class Archive:
         keywords=list(dict.fromkeys(q.casefold().split()))
         columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note'
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text' if keywords else '')+' FROM items ORDER BY created DESC')]
+            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
         for row in rows:
             body=row.pop('text','')
+            visual=row.pop('vision_text','')
             row['tags']=json.loads(row['tags'])
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note')]
-                fields.extend(row['tags']);fields.append(searchable_text(body))
+                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual)
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue

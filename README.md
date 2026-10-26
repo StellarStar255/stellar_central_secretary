@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.39** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.39.md)
+Version **v0.1.40** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.40.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -41,6 +41,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 ## Everyday use
 
 - Send a link, attach a file with **+**, or drop files into the composer.
+- Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected model CLI. Limits: 20 attachments, 8 images and 50 MB per submission. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
 - Choose **Save as note** to keep plain text instead of asking a question.
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.
@@ -61,7 +62,7 @@ Data stays outside the replaceable application bundle:
 
 Use **Export library backup** for a ZIP containing originals, the database and a JSON list. **Import library backup** merges items and skips duplicates. Archived originals may use item IDs as filenames; downloading through the app restores the original filename.
 
-The app listens on `http://127.0.0.1:8768`. Original material stays on your computer; AI features send relevant text to your selected model provider and use that account's quota. Backups exclude browser sign-in credentials.
+The app listens on `http://127.0.0.1:8768`. Original material stays on your computer; AI features send relevant text and submitted images to your selected model provider and use that account's quota. Backups exclude browser sign-in credentials.
 
 ## Development
 

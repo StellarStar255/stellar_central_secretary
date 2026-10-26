@@ -133,7 +133,7 @@ async function api(path,body,retry=true){
 async function busy(button,action,label=t('处理中…')){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await action()}catch(e){toast(e.message)}finally{button.disabled=false;button.textContent=old}}
 function displayCategory(value){return value==='未分类'?t('未分类'):value}
 function date(value){return new Date(value).toLocaleDateString(StellarI18n.locale,{month:'short',day:'numeric'})}
-function newChat(){activeId='';attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
+function newChat(){activeId='';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
 function renderSidebar(){
  $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
  $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar')});
@@ -147,7 +147,7 @@ function renderChat(scroll=true){
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.text?`<div class="message-body">${esc(m.text)}</div>`:''}${(m.items||[]).map(archiveCard).join('')}${m.sources?.length?`<div class="source-list">${m.sources.map(s=>ui`<button class="source" data-id="${s.item_id}">[${s.number}] ${esc(s.title)}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body">${esc(m.text)}</div>`:''}${(m.items||[]).map(archiveCard).join('')}${m.sources?.length?`<div class="source-list">${m.sources.map(s=>ui`<button class="source" data-id="${s.item_id}">[${s.number}] ${esc(s.title)}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
  if(markup===lastMessageMarkup)return;lastMessageMarkup=markup;$('#messages').innerHTML=markup;
  bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
@@ -208,10 +208,24 @@ function resizeInput(){const input=$('#message-input');input.style.height='auto'
 function updateSend(){$('#send-button').disabled=sending||(!$('#message-input').value.trim()&&!attachedFiles.length)}
 $('#message-input').oninput=resizeInput;
 $('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();if(!$('#send-button').disabled)$('#composer-form').requestSubmit()}};
-function renderAttachments(){$('#attachments').innerHTML=attachedFiles.map((f,i)=>ui`<div class="attachment"><span title="${esc(f.name)}">▧ ${esc(f.name)}</span><button type="button" data-remove="${i}" aria-label="移除 ${esc(f.name)}">×</button></div>`).join('');$('#attachments').querySelectorAll('button').forEach(b=>b.onclick=()=>{attachedFiles.splice(Number(b.dataset.remove),1);renderAttachments()});updateSend()}
-function attach(files){for(const file of files){if(file.size>50*1024*1024){toast(file.name+t(' 超过 50 MB'));continue}attachedFiles.push(file)}renderAttachments();$('#message-input').focus()}
+const attachmentPreviews=new WeakMap();
+const isImageFile=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp)$/i.test(file.name);
+function releaseAttachment(file){const url=attachmentPreviews.get(file);if(url){URL.revokeObjectURL(url);attachmentPreviews.delete(file)}}
+function renderAttachments(){
+ $('#attachments').innerHTML=attachedFiles.map((file,index)=>{
+  let image='';if(isImageFile(file)){try{let url=attachmentPreviews.get(file);if(!url){url=URL.createObjectURL(file);attachmentPreviews.set(file,url)}image='<img src="'+url+'" alt="'+esc(file.name)+'">'}catch{}}
+  return ui`<div class="attachment">${image}<span title="${esc(file.name)}">▧ ${esc(file.name)}</span><button type="button" data-remove="${index}" aria-label="移除 ${esc(file.name)}">×</button></div>`;
+ }).join('')+(attachedFiles.length?t('<p class="bundle-composer-hint">同次文字、图片和附件将归档在一起。启用 AI 摘要或提问时，文字和支持的图片会发送给所选模型。</p>'):'');
+ $('#attachments').querySelectorAll('button').forEach(button=>button.onclick=()=>{const [removed]=attachedFiles.splice(Number(button.dataset.remove),1);releaseAttachment(removed);renderAttachments()});updateSend();
+}
+function attach(files){for(const file of files){
+ if(file.size>50*1024*1024){toast(file.name+t(' 超过 50 MB'));continue}
+ if(attachedFiles.length>=20||attachedFiles.reduce((sum,item)=>sum+item.size,0)+file.size>50*1024*1024){toast(t('每次最多 20 个附件，总计不超过 50 MB'));continue}
+ if(isImageFile(file)&&attachedFiles.filter(isImageFile).length>=8){toast(t('每次最多 8 张图片'));continue}
+ attachedFiles.push(file)
+}renderAttachments();$('#message-input').focus()}
 $('#attach-button').onclick=()=>$('#file-input').click();$('#file-input').onchange=e=>{attach([...e.target.files]);e.target.value=''};
-$('#message-input').addEventListener('paste',e=>{if(e.clipboardData.files.length){e.preventDefault();attach([...e.clipboardData.files])}});
+$('#message-input').addEventListener('paste',event=>{const data=event.clipboardData;if(!data)return;const files=data.files?.length?[...data.files]:Array.from(data.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();const text=data.getData('text/plain');if(text){const input=$('#message-input');input.setRangeText(text,input.selectionStart,input.selectionEnd,'end');resizeInput()}attach(files)}});
 let dragDepth=0;
 window.addEventListener('drop',()=>{dragDepth=0;$('#drag-overlay').hidden=true},true);
 window.addEventListener('dragenter',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();dragDepth++;$('#drag-overlay').hidden=false}});
@@ -306,10 +320,22 @@ $('#composer-form').onsubmit=async event=>{
  event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],mode=$('#input-mode').value;if(!text&&!files.length)return;
  if(!token){toast(t('服务尚未连接，请稍后重试或刷新页面。'));return}
  let chat=currentChat();if(!chat){chat={id:uid(),title:(text||files[0]?.name||t('新对话')).slice(0,36),messages:[]};conversations.unshift(chat);activeId=chat.id}
- addMessage(chat,'user',text,{files:files.map(f=>f.name)});const response=addMessage(chat,'assistant',t('正在处理…'),{pending:true,items:[]});
- $('#message-input').value='';attachedFiles=[];sending=true;renderAttachments();resizeInput();renderSidebar();$('#composer-status').textContent=t('正在处理…');
+ const userMessage=addMessage(chat,'user',text,{files:files.map(f=>f.name)});const response=addMessage(chat,'assistant',t('正在处理…'),{pending:true,items:[]});
+ $('#message-input').value='';for(const file of files)releaseAttachment(file);attachedFiles=[];sending=true;renderAttachments();resizeInput();renderSidebar();$('#composer-status').textContent=t('正在处理…');
  const results=[],errors=[];
  try{
+  const grouped=files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
+  if(grouped){
+   const asking=mode==='ask'||mode!=='note'&&!!text&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(text);
+   updateMessage(chat,response,{text:t('正在保存这组资料…')});
+   const attachments=[];for(const file of files)attachments.push({name:file.name,data:await readFile(file)});
+   const result=await api('/api/ingest',{text,attachments,defer_summary:asking});results.push(result);response.items.push(result.item.id);
+   updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
+   await refresh();response.archiveOnly=!asking;
+   let answer=archiveReply(result);
+   if(asking){updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:text||t('请概览本次图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources}
+   updateMessage(chat,response,{text:answer,pending:false,error:false});return;
+  }
   for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file)});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(file.name+'：'+e.message)}}
   const urls=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const result=await api('/api/ingest',{url});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
@@ -317,17 +343,17 @@ $('#composer-form').onsubmit=async event=>{
   await refresh();
   const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
   // URLs and attachments are archived by default. A plain-text turn asks the knowledge base.
-  const shouldAsk=mode!=='note'&&text&&(!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
+  const shouldAsk=mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
   let answer=results.map(archiveReply).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
   if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources}
   if(errors.length)answer+=(answer?'\n\n':'')+t('以下资料未能保存：\n')+errors.join('\n');
   updateMessage(chat,response,{text:answer||t('已处理。'),pending:false,error:errors.length>0&&!results.length});
- }catch(e){updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+t('本次处理未完成：')+e.message,pending:false,error:true})}
+ }catch(e){if(files.length&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+t('本次处理未完成：')+e.message,pending:false,error:true})}
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
 async function detail(id){const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;selectedId=id;detailVersion=item.updated;
- $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${StellarNotes.render(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${renderArchivedBody(item)}`;
+ $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render(item):''}${StellarNotes.render(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><div class="detail-text">${esc(item.vision_text)}</div>`:''}${renderArchivedBody(item)}`;
  const cancelTitle=()=>{$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''}});
  $('#add-tag').onclick=()=>{$('#tag-editor').hidden=false;$('#add-tag').hidden=true;$('#tag-input').focus()};
