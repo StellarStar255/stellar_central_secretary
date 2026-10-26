@@ -14,6 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
+from . import additions
 
 
 class PageText(HTMLParser):
@@ -123,12 +124,18 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''")]:
+            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
                 for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
             if recover:
+                for row in db.execute('SELECT id,additions FROM items').fetchall():
+                    batches=additions.records(row['additions'])
+                    if any(batch['state']=='processing' for batch in batches):
+                        for batch in batches:
+                            if batch['state']=='processing':batch.update(state='error',error='上次追加整理被中断，可重新生成补充摘要')
+                        db.execute('UPDATE items SET additions=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),row['id']))
                 db.execute("UPDATE items SET state='pending',error='上次处理被中断，等待重新处理' WHERE state='processing'")
                 db.execute("UPDATE items SET state='needs_content',error='上次登录读取已中断，请点击登录并读取重试。' WHERE state IN ('queued_capture','opening_browser','waiting_login','confirming_login','waiting_browser_close','reading')")
         if recover:self.finish_deletions()
@@ -175,9 +182,11 @@ class Archive:
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
-        visual=db.execute('SELECT vision_text,user_context FROM items WHERE id=?',(item_id,)).fetchone()
+        visual=db.execute('SELECT vision_text,user_context,additions FROM items WHERE id=?',(item_id,)).fetchone()
         if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
         if visual and visual[1]:text+='\n\n【用户提供的说明，非网页正文】\n'+visual[1]
+        batch_text=additions.index_text(additions.records(visual[2])) if visual else ''
+        if batch_text:text+='\n\n'+batch_text
         text = searchable_text(text)
         metadata=db.execute('SELECT title,tags FROM items WHERE id=?',(item_id,)).fetchone()
         keywords=(metadata['title']+' '+' '.join(json.loads(metadata['tags']))) if metadata else ''
@@ -208,7 +217,7 @@ class Archive:
     def get(self, item_id):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row: raise KeyError('资料不存在')
-        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']); return item
+        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -235,7 +244,7 @@ class Archive:
         if not pending.is_dir() or pending.is_symlink():return
         with self.db() as db:
             deleted={row[0] for row in db.execute('SELECT id FROM deleted_items')}
-            remaining={row['id']:json.loads(row['note_images']) for row in db.execute('SELECT id,note_images FROM items')}
+            remaining={row['id']:json.loads(row['note_images'])+additions.records(row['additions']) for row in db.execute('SELECT id,note_images,additions FROM items')}
         for path in pending.iterdir():
             if not re.fullmatch('[a-f0-9]{32}',path.name) or not path.is_dir() or path.is_symlink():continue
             try:
@@ -259,10 +268,10 @@ class Archive:
         with self.lock:
             item=self.get(item_id)
             if item['updated']!=expected_updated:raise ValueError('资料已更新，请关闭确认框后重新选择删除。')
-            images={image['id'] for image in item['note_images']}
+            images={image['id'] for image in item['note_images']+item['additions']}
             if any(not re.fullmatch('[a-f0-9]{32}',key) for key in images):raise ValueError('速记图片编号无效，未删除资料。')
             with self.db() as db:
-                shared={image['id'] for row in db.execute('SELECT note_images FROM items WHERE id!=?',(item_id,)) for image in json.loads(row[0])}
+                shared={image['id'] for row in db.execute('SELECT note_images,additions FROM items WHERE id!=?',(item_id,)) for image in json.loads(row[0])+additions.records(row[1])}
             targets=[self.root/'files'/key for key in [item_id,*sorted(images-shared)]]
             targets+=list((self.root/'capture-history').glob(item_id+'-*.json'))
             targets.append(self.root/'open-files'/item_id)
@@ -337,7 +346,7 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context'
+        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context,additions'
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
@@ -345,10 +354,11 @@ class Archive:
             body=row.pop('text','')
             visual=row.pop('vision_text','')
             row['tags']=json.loads(row['tags'])
+            batches=additions.records(row.pop('additions'));row['summary']=additions.combined_summary(row['summary'],batches);row['addition_count']=len(batches)
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]
-                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual)
+                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches))
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue

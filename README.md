@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.41** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.41.md)
+Version **v0.1.42** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.42.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -45,6 +45,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - Text submitted alongside links is saved as a searchable link annotation. If webpage text cannot be read, the annotation still provides the title and material for a clearly labeled summary. Later webpage capture retains it.
 - Choose **Save as note** to keep plain text instead of asking a question.
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.
+- Open any archive and choose **Append materials** to add new text, pasted images and files to that same record. Enable **Generate a supplemental summary after saving** to append dated findings while retaining the original summary, title, tags and source. Each batch can be previewed, downloaded and summarized again; appended text and image descriptions are searchable and included in backups.
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.
 - PDF overviews use the first five pages by default. The full extracted text and original are retained. Select **Summarize full document** when needed.
 - AES-encrypted PDFs without an opening password are supported. Password-protected documents must first be exported as accessible copies. Scanned PDFs need OCR.

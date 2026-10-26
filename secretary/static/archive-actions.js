@@ -5,7 +5,7 @@
  function accept(value={}){
   for(const id of value.deletedItemIds||[])if(typeof id==='string'&&/^[a-f0-9]{32}$/.test(id))items.add(id);
   for(const pair of value.deletedMessages||[])if(Array.isArray(pair)&&pair.length===2&&pair.every(v=>typeof v==='string')){messages.add(JSON.stringify(pair));affected.add(pair[0])}
-  for(const id of items){globalThis.StellarNotes?.discard?.(id);for(const node of document.querySelectorAll('[data-id="'+id+'"]'))node.remove()}
+  for(const id of items){globalThis.StellarNotes?.discard?.(id);globalThis.StellarAdditions?.discard?.(id);for(const node of document.querySelectorAll('[data-id="'+id+'"]'))node.remove()}
   if(typeof selectedId!=='undefined'&&items.has(selectedId)){
    const dialog=document.querySelector('#detail-dialog');if(dialog?.open)dialog.close();
    if(dialog)document.querySelector('#detail-content').innerHTML='';selectedId='';detailVersion='';
