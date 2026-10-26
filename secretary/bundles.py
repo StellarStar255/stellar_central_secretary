@@ -18,7 +18,7 @@ def assemble(manifest):
 def create(text,files):
     from .core import extract
     if not isinstance(text,str) or len(text)>200000:raise ValueError('组合资料的说明文字不能超过 20 万字符')
-    if not isinstance(files,list) or not 1<=len(files)<=20:raise ValueError('每份组合资料需要 1–20 个附件')
+    if not isinstance(files,list) or len(files)>20 or not files and not text.strip():raise ValueError('请添加文字或最多 20 个附件')
     manifest={'version':1,'text':text,'files':[]};contents={};total=0;images=0;remaining=1_790_000
     for file in files:
         if not isinstance(file,dict):raise ValueError('组合附件格式无效')
@@ -60,7 +60,7 @@ def load(data):
     if len(infos)>21 or len({info.filename for info in infos})!=len(infos) or any(info.flag_bits&1 for info in infos):raise ValueError('组合资料结构无效')
     if sum(info.file_size for info in infos)>MAX_BYTES+16*1024*1024 or archive.getinfo('manifest.json').file_size>16*1024*1024:raise ValueError('组合资料展开后过大')
     value=json.loads(archive.read('manifest.json'))
-    if value.get('version')!=1 or not isinstance(value.get('text'),str) or len(value['text'])>200000 or not isinstance(value.get('files'),list) or not 1<=len(value['files'])<=20:raise ValueError('组合资料清单无效')
+    if value.get('version')!=1 or not isinstance(value.get('text'),str) or len(value['text'])>200000 or not isinstance(value.get('files'),list) or len(value['files'])>20 or not value['files'] and not value['text'].strip():raise ValueError('组合资料清单无效')
     names={'manifest.json'}
     for index,file in enumerate(value['files'],1):
         if not isinstance(file,dict) or not re.fullmatch('[a-f0-9]{32}',str(file.get('id',''))):raise ValueError('组合附件编号无效')

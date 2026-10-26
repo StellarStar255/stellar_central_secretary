@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.41** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.41.md)
+版本 **v0.1.42** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.42.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.41 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.42 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -247,3 +247,9 @@ python scripts/check_tutorial.py
 AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对原图。启用整理或提问时，相关文字及图片发送给所选在线模型服务，需要对应 CLI 和账号支持图片输入。「我的速记」仍只保存在本机，不会自动用于 AI。
 
 链接旁输入的说明会与该链接一起保存，参与搜索与整理。网页无法读取时，可按说明生成标题、分类和摘要，并标注未读取网页正文；之后成功采集网页仍保留说明。同一个链接再次发送说明时会补充到已有条目。
+
+## 追加资料与补充摘要
+
+打开任意归档，在详情中点击「追加资料」，可输入文字、粘贴图片、添加或拖入文件。新内容按批次归属原记录，原链接、PDF、标题、手动标签、速记和旧摘要保留。勾选「追加后生成补充摘要」后，模型结合有限的旧摘要背景整理本次新增资料，补充摘要按时间追加；失败后可单独重试，不会重复添加附件。自动整理关闭时默认不勾选。
+
+每批最多 20 个附件、8 张图片、50 MB；每份归档最多 100 批，追加文字索引合计最多 200 万字符。长文与 PDF 沿用概览范围。原件可按批次下载，随 ZIP 备份恢复，删除整个归档时一并清理。「我的速记」仍不参与 AI。

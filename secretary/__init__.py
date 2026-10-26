@@ -1,3 +1,3 @@
 """Stellar Secretary: local personal knowledge management."""
 
-__version__ = '0.1.41'
+__version__ = '0.1.42'

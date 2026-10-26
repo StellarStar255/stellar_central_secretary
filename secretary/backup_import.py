@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from .notes import image_bytes,MAX_IMAGE,MAX_IMAGES
+from . import additions,bundles
 
 MAX_BACKUP = 256 * 1024 * 1024
 MAX_EXPANDED = 512 * 1024 * 1024
@@ -80,19 +81,25 @@ def import_backup(archive, data):
                 if name not in names or z.getinfo(name).file_size>MAX_IMAGE:raise ValueError('备份缺少速记图片或图片过大')
                 image_data=z.read(name);media=image_bytes(image_data)
                 attachments.append((image['name'][:180],media,image_data))
-            prepared.append((item, content, digest,attachments))
+            batches=additions.records(item.get('additions',[]));batch_files=[]
+            for batch in batches:
+                name='files/'+batch['id']
+                if name not in names or z.getinfo(name).file_size>bundles.MAX_BYTES:raise ValueError('备份缺少追加资料或文件过大')
+                raw=z.read(name);bundles.metadata(raw);batch_files.append(raw)
+            if not isinstance(item.get('base_summary',item.get('summary','')),str):raise ValueError('备份摘要字段无效')
+            prepared.append((item, content, digest,attachments,batches,batch_files))
         imported = skipped = 0
         created_files = []
         try:
             with archive.lock, archive.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                for item, content, digest,attachments in prepared:
+                for item, content, digest,attachments,batches,batch_files in prepared:
                     url = item.get('url', '')
                     if db.execute("SELECT 1 FROM items WHERE digest=? OR (url=? AND ?!='')", (digest, url, url)).fetchone():
                         skipped += 1
                         continue
                     item_id = uuid.uuid4().hex
-                    filename, text, summary = item.get('filename', ''), item.get('text', ''), item.get('summary', '')
+                    filename, text, summary = item.get('filename', ''), item.get('text', ''), item.get('base_summary',item.get('summary', ''))
                     if content is not None:
                         path = archive.root/'files'/item_id
                         with path.open('xb') as f:
@@ -104,6 +111,10 @@ def import_backup(archive, data):
                         with path.open('xb') as stream:created_files.append(path);stream.write(image_data)
                         note_images.append({'id':image_id,'name':name,'media':media})
                     now = datetime.now(timezone.utc).isoformat()
+                    for batch,raw in zip(batches,batch_files):
+                        batch['id']=uuid.uuid4().hex;path=archive.root/'files'/batch['id']
+                        with path.open('xb') as stream:created_files.append(path);stream.write(raw)
+                        if batch['state']=='processing':batch.update(state='error',error='上次追加整理被中断，可重新生成补充摘要')
                     state = item.get('state', 'pending')
                     if state not in ('ready', 'pending', 'error', 'needs_content'):
                         state = 'ready' if summary else ('pending' if text.strip() else 'needs_content')
@@ -115,6 +126,7 @@ def import_backup(archive, data):
                                 item.get('category') or '未分类', state, item.get('error', ''),
                                 item.get('created') or now, item.get('updated') or now,int(item.get('tags_manual',0)),item.get('note',''),json.dumps(note_images,ensure_ascii=False),0))
                     db.execute('UPDATE items SET vision_text=?,user_context=? WHERE id=?',(item.get('vision_text','')[:60000],item.get('user_context','')[:20000],item_id))
+                    db.execute('UPDATE items SET additions=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

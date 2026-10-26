@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js','/bundle-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
@@ -91,6 +91,12 @@ with tempfile.TemporaryDirectory() as data:
         print('PASS: frozen unavailable link retains annotation, descriptive title and search index')
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
         assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
+        extra=json.loads(request('/api/items/'+pdf['id']+'/additions',{'text':'New supporting materials','attachments':[{'name':'new.png','data':base64.b64encode(image.getvalue()).decode()}],'expected_updated':reparsed['item']['updated'],'summarize':False},status['token']))
+        batch=extra['item']['additions'][0]
+        assert request('/api/items/'+pdf['id']+'/additions/'+batch['id']+'/attachments/'+batch['attachments'][0]['id']+'/preview')==image.getvalue()
+        assert request('/api/items/'+pdf['id']+'/preview')==request('/api/items/'+pdf['id']+'/file')
+        assert json.loads(request('/api/items?q=supporting'))[0]['id']==pdf['id']
+        print('PASS: frozen append-to-PDF archive, appended-image preview, search and original PDF retained')
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
             update = json.loads(request('/api/update/check', {}, status['token']))
             assert not update.get('error'), update
