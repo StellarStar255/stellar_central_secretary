@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
-from . import additions
+from . import additions,links
 
 
 class PageText(HTMLParser):
@@ -124,7 +124,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'")]:
+            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
@@ -182,11 +182,13 @@ class Archive:
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
-        visual=db.execute('SELECT vision_text,user_context,additions FROM items WHERE id=?',(item_id,)).fetchone()
+        visual=db.execute('SELECT vision_text,user_context,additions,group_links FROM items WHERE id=?',(item_id,)).fetchone()
         if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
         if visual and visual[1]:text+='\n\n【用户提供的说明，非网页正文】\n'+visual[1]
         batch_text=additions.index_text(additions.records(visual[2])) if visual else ''
         if batch_text:text+='\n\n'+batch_text
+        link_text=links.source(links.records(json.loads(visual[3]))) if visual else ''
+        if link_text and link_text not in text:text+='\n\n'+link_text
         text = searchable_text(text)
         metadata=db.execute('SELECT title,tags FROM items WHERE id=?',(item_id,)).fetchone()
         keywords=(metadata['title']+' '+' '.join(json.loads(metadata['tags']))) if metadata else ''
@@ -217,7 +219,7 @@ class Archive:
     def get(self, item_id):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row: raise KeyError('资料不存在')
-        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
+        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -299,8 +301,9 @@ class Archive:
             try:shutil.rmtree(stage)
             except OSError as error:raise ValueError('归档已移除，但部分文件仍被占用。请关闭原文件后重启程序完成清理。') from error
     def update(self, item_id, **values):
-        allowed = {'title','text','summary','tags','category','state','error','vision_text'}
+        allowed = {'title','text','summary','tags','category','state','error','vision_text','group_links'}
         if not values or not set(values) <= allowed: raise ValueError('无效更新')
+        if 'group_links' in values:values['group_links']=json.dumps(links.records(values['group_links']),ensure_ascii=False)
         values['updated'] = datetime.now(timezone.utc).isoformat()
         if 'text' in values:values.setdefault('vision_text','')
         with self.lock, self.db() as db:
@@ -310,7 +313,7 @@ class Archive:
                 if current['tags_manual']:values.pop('tags')
                 else:values['tags']=json.dumps(values['tags'],ensure_ascii=False)
             db.execute('UPDATE items SET '+','.join(k+'=?' for k in values)+' WHERE id=?', (*values.values(), item_id))
-            if {'text','title','tags','vision_text'} & values.keys():
+            if {'text','title','tags','vision_text','group_links'} & values.keys():
                 row=db.execute('SELECT text FROM items WHERE id=?',(item_id,)).fetchone()
                 if row:self._index(db,item_id,row['text'])
     def set_tags(self,item_id,tags,expected=None):
@@ -346,19 +349,19 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns='id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context,additions'
+        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text' if keywords else '')+' FROM items ORDER BY created DESC')]
+            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
         for row in rows:
             body=row.pop('text','')
-            visual=row.pop('vision_text','')
+            visual=row.pop('vision_text','');group_values=links.records(json.loads(row.pop('group_links','[]')))
             row['tags']=json.loads(row['tags'])
             batches=additions.records(row.pop('additions'));row['summary']=additions.combined_summary(row['summary'],batches);row['addition_count']=len(batches)
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]
-                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches))
+                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches));fields.append(links.source(group_values))
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue

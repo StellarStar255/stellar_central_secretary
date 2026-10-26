@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.42** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.42.md)
+Version **v0.1.43** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.43.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI, and find material again with search or source-backed answers.
 
@@ -40,7 +40,8 @@ The tutorial uses fictional material, makes no model calls and does not access l
 
 ## Everyday use
 
-- Send a link, attach a file with **+**, or drop files into the composer.
+- Send a link, attach a file with **+**, or drop files into the composer. Multiple links in one message become one archive by default, along with any text and attachments. **Group into one archive** also allows explicit grouping.
+- Grouped links are saved first, then accessible public text is read in the background. Source statuses distinguish read and unread pages. Sign-in-only or unavailable pages retain their links and annotations; append their content manually when needed. Up to 20 links per group, with bounded text overviews.
 - Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected model CLI. Limits: 20 attachments, 8 images and 50 MB per submission. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
 - Text submitted alongside links is saved as a searchable link annotation. If webpage text cannot be read, the annotation still provides the title and material for a clearly labeled summary. Later webpage capture retains it.
 - Choose **Save as note** to keep plain text instead of asking a question.

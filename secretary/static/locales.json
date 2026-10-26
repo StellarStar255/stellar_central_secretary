@@ -571,5 +571,17 @@
   "上次追加整理被中断，可重新生成补充摘要": "The last supplemental summary was interrupted. You can generate it again.",
   "追加附件暂时无法读取，可下载原件后检查。": "Additional attachments are unavailable. Download the batch originals to inspect them.",
   "有追加资料": "Additional materials saved",
-  "追加资料已保存，可打开归档查看；原网页正文尚未读取。": "Additional materials are saved in this archive; the original webpage has not been read."
+  "追加资料已保存，可打开归档查看；原网页正文尚未读取。": "Additional materials are saved in this archive; the original webpage has not been read.",
+  "合并为一份归档": "Group into one archive",
+  "Enter 发送 · Shift + Enter 换行 · 同次发送的多个链接合并归档": "Enter to send · Shift + Enter for a new line · Links sent together share one archive",
+  "输入新内容或多个链接、粘贴图片，或拖入文件…": "Enter new content or multiple links, paste images, or drop files…",
+  "本档案的来源链接": "Source links in this archive",
+  "已读取": "Read",
+  "未读取正文": "Content not read",
+  "需要登录的页面会先保留链接；可打开页面，将正文追加到此档案。": "Links requiring sign-in are retained. Open the page and append its content to this archive.",
+  "重新读取本组链接": "Read these links again",
+  "链接已归为一档，正在读取可访问的来源…": "Links are saved in one archive. Reading accessible sources…",
+  "链接仍在后台读取，资料已保存，可稍后在归档中查看。": "Links are still being read in the background. Materials are saved; check the archive later.",
+  "请概览本次链接、图片和附件": "Summarize the links, images and attachments in this submission",
+  "本组链接已归为一档，正在后台读取可访问的正文。": "These links share one archive. Accessible content is being read in the background."
 }

@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.42** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.42.md)
+版本 **v0.1.43** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.43.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.42 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.43 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -253,3 +253,7 @@ AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对�
 打开任意归档，在详情中点击「追加资料」，可输入文字、粘贴图片、添加或拖入文件。新内容按批次归属原记录，原链接、PDF、标题、手动标签、速记和旧摘要保留。勾选「追加后生成补充摘要」后，模型结合有限的旧摘要背景整理本次新增资料，补充摘要按时间追加；失败后可单独重试，不会重复添加附件。自动整理关闭时默认不勾选。
 
 每批最多 20 个附件、8 张图片、50 MB；每份归档最多 100 批，追加文字索引合计最多 200 万字符。长文与 PDF 沿用概览范围。原件可按批次下载，随 ZIP 备份恢复，删除整个归档时一并清理。「我的速记」仍不参与 AI。
+
+## 多链接归为同一档案
+
+同一条消息中发送的多个链接默认合为一份归档，可混合说明文字、图片和文件；也可选择「合并为一份归档」。已有档案的「追加资料」中可一次输入多个链接，生成同一批补充摘要。先保存来源，再后台读取可访问的公开网页；每个链接分别显示读取状态，单个失败不影响整组。每组最多 20 个链接，链接正文用于有限范围概览；不自动批量打开登录窗口。需要登录、内网或不可访问的来源先保留链接，可打开页面后将正文追加到该档案。来源状态、已读取文字和附件均随完整备份保存。

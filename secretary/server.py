@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions
+from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -143,12 +143,50 @@ class Service:
         with self.lock:
             return {'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
     def append_material(self,item_id,body):
+        if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
             if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后追加')
-            batch_id=additions.save(self.archive,item_id,body.get('text',''),body.get('attachments',[]),body.get('expected_updated'))
-            if body.get('summarize',self.archive.settings()['auto_ai']) is True:
+            urls=body.get('links',links.extract(body.get('text',''))) if body.get('read_links',True) else []
+            batch_id=additions.save(self.archive,item_id,body.get('text',''),body.get('attachments',[]),body.get('expected_updated'),urls)
+            summarize=body.get('summarize',self.archive.settings()['auto_ai']) is True
+            if urls:
+                self.busy.add(item_id);self.pool.submit(self.process_group_links,item_id,batch_id,summarize)
+            elif summarize:
                 self.busy.add(item_id);self.pool.submit(self.process_addition,item_id,batch_id)
         return {'ok':True,'batch_id':batch_id,'item':self.item_detail(item_id)}
+
+    def read_group_links(self,item_id,batch_id=None,summarize=None):
+        with self.lock:
+            if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后重读链接')
+            item=self.archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
+            if batch_id and batch is None:raise KeyError('追加资料不存在')
+            if not (batch.get('links',[]) if batch else item['group_links']):raise ValueError('这份资料没有组合链接')
+            self.busy.add(item_id);self.pool.submit(self.process_group_links,item_id,batch_id,self.archive.settings()['auto_ai'] if summarize is None else summarize)
+        return {'ok':True}
+
+    def process_group_links(self,item_id,batch_id,summarize):
+        delegated=False
+        try:
+            item=self.archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
+            previous=batch.get('links',[]) if batch else item['group_links']
+            if batch:additions.update(self.archive,item_id,batch_id,state='processing',error='正在读取本组链接…')
+            else:self.archive.update(item_id,state='processing',error='正在读取本组链接…')
+            values=links.read(previous,lambda url:('', '本地网页请手动打开后将正文追加到本档案。') if web_reader.is_loopback_url(url) else fetch_page(url),lambda:self.stopping)
+            if self.stopping:return
+            original,manifest=bundles.load((self.archive.root/'files'/(batch_id or item_id)).read_bytes());original.close()
+            old_source=bundles.assemble(dict(manifest,links=previous));source=bundles.assemble(dict(manifest,links=values))
+            if batch:additions.update(self.archive,item_id,batch_id,links=values,text=source[:200000],state='pending',error='')
+            else:self.archive.update(item_id,group_links=values,text=source if item['text']==old_source else item['text'],vision_text=item['vision_text'],state='ready' if item['summary'] else 'pending',error='')
+            if summarize:
+                delegated=True
+                if batch:self.process_addition(item_id,batch_id)
+                else:self.process(item_id)
+        except Exception as error:
+            if batch_id:additions.update(self.archive,item_id,batch_id,state='error',error=str(error)[:1600])
+            else:self.archive.update(item_id,state='error',error=str(error)[:1600])
+        finally:
+            if not delegated:
+                with self.lock:self.busy.discard(item_id)
 
     def retry_addition(self,item_id,batch_id):
         with self.lock:
@@ -158,12 +196,14 @@ class Service:
         return {'ok':True}
 
     def process_addition(self,item_id,batch_id):
+        batch=additions.find(self.archive.get(item_id),batch_id)
+        if batch and any(value['state']=='pending' for value in batch.get('links',[])):return self.process_group_links(item_id,batch_id,True)
         try:
             with self.ai_lock:
                 if self.stopping:return
                 item=self.archive.get(item_id);batch=additions.find(item,batch_id)
                 additions.update(self.archive,item_id,batch_id,state='processing',error='')
-                source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id).read_bytes(),batch['text'])
+                source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id).read_bytes(),batch['text'],batch.get('links',[]))
                 source='本次仅总结新追加资料，不重述旧摘要；旧摘要仅供理解背景。\n旧摘要：\n'+item['summary'][:8000]+'\n\n本次新增：\n'+source
                 fields,_=ai.analyze_material(source,item['title'],self.archive.settings()['backend'],images,'【追加资料概览】'+scope)
                 additions.update(self.archive,item_id,batch_id,summary=fields['summary'][:60000],vision_text=fields['vision_text'],state='ready',error='')
@@ -180,13 +220,14 @@ class Service:
             self.busy.add(item_id)
         self.pool.submit(self.process, item_id, full_pdf)
     def process(self, item_id, full_pdf=False):
+        if any(value['state']=='pending' for value in self.archive.get(item_id)['group_links']):return self.process_group_links(item_id,None,True)
         try:
             with self.ai_lock:
                 if self.stopping:return
                 item = self.archive.get(item_id)
                 self.archive.update(item_id, state='processing', error='')
                 if bundles.is_bundle(item['filename']):
-                    source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'])
+                    source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
                     fields,_=ai.analyze_material(source,item['title'],self.archive.settings()['backend'],images,scope)
                 else:fields=ai.summary_fields(item, self.archive.settings()['backend'], full_pdf=full_pdf)
                 self.archive.update(item_id, **fields)
@@ -356,10 +397,15 @@ class Service:
 
     def ingest(self, body):
         if 'attachments' in body:
-            text=body.get('text','');data,source=bundles.create(text,body['attachments'])
-            title=(str(body.get('title') or '').strip() or (text.splitlines()[0][:100] if text.strip() else '组合资料'))
+            text=body.get('text','');urls=body.get('links',[]);data,source=bundles.create(text,body['attachments'],urls)
+            annotation=text
+            for url in urls:annotation=annotation.replace(url,'')
+            title=(str(body.get('title') or '').strip() or (annotation.strip().splitlines()[0].rstrip('：:')[:100] if annotation.strip() else '相关链接与资料' if urls else '组合资料'))
             item_id,created=self.archive.add(title,source,filename='materials.stellar.zip',data=data)
-            if body.get('defer_summary') is not True:self.queue(item_id)
+            if urls:
+                self.archive.update(item_id,group_links=links.prepare(urls))
+                self.read_group_links(item_id,summarize=body.get('defer_summary') is not True and self.archive.settings()['auto_ai'])
+            elif body.get('defer_summary') is not True:self.queue(item_id)
             return {'item':self.item_detail(item_id),'created':created,'updated':False}
         name = Path(str(body.get('filename', '')).replace('\\', '/')).name
         url = str(body.get('url', '')).strip(); text = str(body.get('text', '')).strip()
@@ -418,7 +464,7 @@ class Service:
         try:
             with self.ai_lock:
                 self.archive.update(item_id,state='processing',error='')
-                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'])
+                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
                 fields,answer=ai.analyze_material(source,item['title'],self.archive.settings()['backend'],images,scope,question=question)
                 self.archive.update(item_id,**fields)
             return {'answer':answer,'sources':[{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
@@ -487,7 +533,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
                 batch_download=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions/([a-f0-9]{32})/file',path)
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
@@ -571,6 +617,8 @@ def handler(service):
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
+                    group_read=re.fullmatch(r'/api/items/([a-f0-9]{32})/(?:group-links|additions/([a-f0-9]{32})/links)',path)
+                    if group_read:return self.send(200,service.read_group_links(group_read[1],group_read[2]))
                     append_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions(?:/([a-f0-9]{32})/summarize)?',path)
                     if append_match:
                         return self.send(200,service.retry_addition(append_match[1],append_match[2]) if append_match[2] else service.append_material(append_match[1],body))

@@ -2,6 +2,7 @@
 import base64,io,json,re,uuid,zipfile
 from pathlib import Path
 from PIL import Image,ImageOps
+from . import links
 
 MAX_BYTES=50*1024*1024
 IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'image/webp'}
@@ -9,17 +10,18 @@ IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'ima
 def is_bundle(name):return str(name).lower().endswith('.stellar.zip')
 
 def assemble(manifest):
-    parts=[f"【组合资料】同一次发送的文字与 {len(manifest['files'])} 个附件。"]
+    parts=[f"【组合资料】同一次发送的文字与 {len(manifest['files'])} 个附件。"+(f"另有 {len(manifest['links'])} 个相关链接。" if manifest.get('links') else '')]
     if manifest['text']:parts.append('用户文字：\n'+manifest['text'])
+    if manifest.get('links'):parts.append(links.source(manifest['links']))
     for index,file in enumerate(manifest['files'],1):
         parts.append(f"附件 {index}：{file['name']}\n"+(file['text'] or ('图片原件已保存，图像内容将在启用 AI 时进行视觉分析。' if file['media'].startswith('image/') else '原件已保存，未提取到可读文字。'))+(('\n'+file['warning']) if file['warning'] else ''))
     return '\n\n'.join(parts)[:2_000_000]
 
-def create(text,files):
+def create(text,files,urls=None):
     from .core import extract
     if not isinstance(text,str) or len(text)>200000:raise ValueError('组合资料的说明文字不能超过 20 万字符')
-    if not isinstance(files,list) or len(files)>20 or not files and not text.strip():raise ValueError('请添加文字或最多 20 个附件')
-    manifest={'version':1,'text':text,'files':[]};contents={};total=0;images=0;remaining=1_790_000
+    if not isinstance(files,list) or len(files)>20 or not files and not text.strip() and not urls:raise ValueError('请添加文字或最多 20 个附件')
+    manifest={'version':1,'text':text,'files':[],'links':links.prepare(urls or [])};contents={};total=0;images=0;remaining=1_790_000
     for file in files:
         if not isinstance(file,dict):raise ValueError('组合附件格式无效')
         name=Path(str(file.get('name','')).replace('\\','/')).name
@@ -60,7 +62,8 @@ def load(data):
     if len(infos)>21 or len({info.filename for info in infos})!=len(infos) or any(info.flag_bits&1 for info in infos):raise ValueError('组合资料结构无效')
     if sum(info.file_size for info in infos)>MAX_BYTES+16*1024*1024 or archive.getinfo('manifest.json').file_size>16*1024*1024:raise ValueError('组合资料展开后过大')
     value=json.loads(archive.read('manifest.json'))
-    if value.get('version')!=1 or not isinstance(value.get('text'),str) or len(value['text'])>200000 or not isinstance(value.get('files'),list) or len(value['files'])>20 or not value['files'] and not value['text'].strip():raise ValueError('组合资料清单无效')
+    links.records(value.get('links',[]))
+    if value.get('version')!=1 or not isinstance(value.get('text'),str) or len(value['text'])>200000 or not isinstance(value.get('files'),list) or len(value['files'])>20 or not value['files'] and not value['text'].strip() and not value.get('links'):raise ValueError('组合资料清单无效')
     names={'manifest.json'}
     for index,file in enumerate(value['files'],1):
         if not isinstance(file,dict) or not re.fullmatch('[a-f0-9]{32}',str(file.get('id',''))):raise ValueError('组合附件编号无效')
@@ -84,7 +87,7 @@ def attachment(data,key):
         if file is None:raise KeyError('组合附件不存在')
         return file,archive.read(file['path'])
 
-def model_material(data,current_text):
+def model_material(data,current_text,link_values=None):
     archive,value=load(data);images=[];parts=[];limited=False
     allowance=max(1000,100000//max(1,len(value['files'])))
     with archive:
@@ -109,6 +112,12 @@ def model_material(data,current_text):
                     images.append({'name':file['name'],'media':'image/jpeg','data':output.getvalue()})
     # Keep user edits to the archived text in scope as well as attachment order.
     source=(value['text'] if current_text==assemble(value) else current_text)[:20000]+'\n\n附件文字概览：\n'+'\n\n'.join(parts)
+    link_values=links.records(value.get('links',[]) if link_values is None else link_values)
+    if link_values:
+        budget=max(1000,100000//len(link_values));selected=[dict(link,text=link['text'][:budget]) for link in link_values]
+        source+='\n\n'+links.source(selected)
+        limited=limited or any(len(link['text'])>budget for link in link_values)
     scope='【组合资料概览】图片以分析用缩略图读取，原件完整保留。' if images else '【组合资料概览】'
     if limited or len(current_text)>20000:scope+=' 附件长文仅分析有界片段，PDF 默认仅概览前 5 页；未覆盖全部文字。'
+    if link_values:scope+=' 本组 '+str(len(link_values))+' 个链接，已读取 '+str(sum(link['state']=='read' for link in link_values))+' 个；未读取来源仅保存链接，不推断正文。'
     return source,images,scope

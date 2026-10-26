@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from .notes import image_bytes,MAX_IMAGE,MAX_IMAGES
-from . import additions,bundles
+from . import additions,bundles,links
 
 MAX_BACKUP = 256 * 1024 * 1024
 MAX_EXPANDED = 512 * 1024 * 1024
@@ -81,6 +81,7 @@ def import_backup(archive, data):
                 if name not in names or z.getinfo(name).file_size>MAX_IMAGE:raise ValueError('备份缺少速记图片或图片过大')
                 image_data=z.read(name);media=image_bytes(image_data)
                 attachments.append((image['name'][:180],media,image_data))
+            links.records(item.get('group_links',[]))
             batches=additions.records(item.get('additions',[]));batch_files=[]
             for batch in batches:
                 name='files/'+batch['id']
@@ -126,7 +127,7 @@ def import_backup(archive, data):
                                 item.get('category') or '未分类', state, item.get('error', ''),
                                 item.get('created') or now, item.get('updated') or now,int(item.get('tags_manual',0)),item.get('note',''),json.dumps(note_images,ensure_ascii=False),0))
                     db.execute('UPDATE items SET vision_text=?,user_context=? WHERE id=?',(item.get('vision_text','')[:60000],item.get('user_context','')[:20000],item_id))
-                    db.execute('UPDATE items SET additions=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),item_id))
+                    db.execute('UPDATE items SET additions=?,group_links=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),json.dumps(item.get('group_links',[]),ensure_ascii=False),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:
