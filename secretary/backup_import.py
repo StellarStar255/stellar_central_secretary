@@ -46,7 +46,7 @@ def import_backup(archive, data):
         for item in records:
             if not isinstance(item, dict) or not re.fullmatch(r'[a-f0-9]{32}', str(item.get('id', ''))):
                 raise ValueError('备份中存在无效的资料编号')
-            for field in ('title', 'text', 'url', 'filename', 'summary', 'category', 'error', 'state', 'created', 'updated','note'):
+            for field in ('title', 'text', 'url', 'filename', 'summary', 'category', 'error', 'state', 'created', 'updated','note','vision_text'):
                 if not isinstance(item.get(field, ''), str):
                     raise ValueError('备份中存在无效的资料字段')
             if len(item.get('text', '')) > 2_000_000:
@@ -113,6 +113,7 @@ def import_backup(archive, data):
                                 text, summary, json.dumps(item.get('tags', []), ensure_ascii=False),
                                 item.get('category') or '未分类', state, item.get('error', ''),
                                 item.get('created') or now, item.get('updated') or now,int(item.get('tags_manual',0)),item.get('note',''),json.dumps(note_images,ensure_ascii=False),0))
+                    db.execute('UPDATE items SET vision_text=? WHERE id=?',(item.get('vision_text','')[:60000],item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

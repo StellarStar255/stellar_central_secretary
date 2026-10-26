@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater
+from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -156,7 +156,11 @@ class Service:
                 if self.stopping:return
                 item = self.archive.get(item_id)
                 self.archive.update(item_id, state='processing', error='')
-                self.archive.update(item_id, **ai.summary_fields(item, self.archive.settings()['backend'], full_pdf=full_pdf))
+                if bundles.is_bundle(item['filename']):
+                    source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'])
+                    fields,_=ai.analyze_material(source,item['title'],self.archive.settings()['backend'],images,scope)
+                else:fields=ai.summary_fields(item, self.archive.settings()['backend'], full_pdf=full_pdf)
+                self.archive.update(item_id, **fields)
         except Exception as exc: self.archive.update(item_id, state='error', error=str(exc)[:1600])
         finally:
             with self.lock: self.busy.discard(item_id)
@@ -322,6 +326,12 @@ class Service:
         return {'ok':True,'parsed':parsed,'item':self.archive.get(item_id)}
 
     def ingest(self, body):
+        if 'attachments' in body:
+            text=body.get('text','');data,source=bundles.create(text,body['attachments'])
+            title=(str(body.get('title') or '').strip() or (text.splitlines()[0][:100] if text.strip() else '组合资料'))
+            item_id,created=self.archive.add(title,source,filename='materials.stellar.zip',data=data)
+            if body.get('defer_summary') is not True:self.queue(item_id)
+            return {'item':self.item_detail(item_id),'created':created,'updated':False}
         name = Path(str(body.get('filename', '')).replace('\\', '/')).name
         url = str(body.get('url', '')).strip(); text = str(body.get('text', '')).strip()
         title = str(body.get('title', '')).strip(); data = None; warning = ''
@@ -353,8 +363,35 @@ class Service:
             try: self.start_capture(item_id)
             except (ValueError, OSError): pass
         return {'item': self.archive.get(item_id), 'created': created, 'updated': enriched}
-    def ask(self, question):
+    def item_detail(self,item_id):
+        item=self.archive.get(item_id)
+        if bundles.is_bundle(item['filename']):
+            try:item['attachments']=bundles.metadata((self.archive.root/'files'/item_id).read_bytes())
+            except Exception:item['bundle_error']='组合附件暂时无法读取，可下载原文件后检查。'
+        return item
+
+    def ask_material(self,question,item_ids):
+        if not isinstance(item_ids,list) or len(item_ids)!=1 or not isinstance(item_ids[0],str):raise ValueError('请选择一份本次组合资料')
+        item_id=item_ids[0];item=self.archive.get(item_id)
+        if not bundles.is_bundle(item['filename']):raise ValueError('这份资料不是组合资料')
+        with self.lock:
+            if item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后重试')
+            self.busy.add(item_id);self.questions+=1
+        try:
+            with self.ai_lock:
+                self.archive.update(item_id,state='processing',error='')
+                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'])
+                fields,answer=ai.analyze_material(source,item['title'],self.archive.settings()['backend'],images,scope,question=question)
+                self.archive.update(item_id,**fields)
+            return {'answer':answer,'sources':[{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
+        except Exception as error:
+            self.archive.update(item_id,state='error',error=str(error)[:1600]);raise
+        finally:
+            with self.lock:self.busy.discard(item_id);self.questions-=1
+
+    def ask(self, question,item_ids=None):
         if not question.strip(): raise ValueError('请输入问题')
+        if item_ids is not None:return self.ask_material(question,item_ids)
         passages = self.archive.retrieve(question)
         if not passages: return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。', 'sources':[]}
         with self.lock: self.questions += 1
@@ -412,7 +449,17 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                bundle_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/attachments/([a-f0-9]{32})(/preview)?',path)
+                if bundle_match:
+                    item=service.archive.get(bundle_match[1])
+                    if not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
+                    file,data=bundles.attachment((service.archive.root/'files'/item['id']).read_bytes(),bundle_match[2])
+                    media='application/octet-stream';disposition='attachment'
+                    if bundle_match[3]:
+                        if file['media'] in bundles.IMAGE_MEDIA.values():media=file['media'];disposition='inline'
+                        elif file['name'].lower().endswith('.pdf') and b'%PDF-' in data[:1024]:media='application/pdf';disposition='inline'
+                    return self.send(200,data,media,{'Content-Disposition':disposition+"; filename*=UTF-8''"+urllib.parse.quote(file['name'],safe='')})
                 image_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})',path)
                 if image_match:
                     image,source=notes.note_image(service.archive,*image_match.groups())
@@ -432,12 +479,12 @@ def handler(service):
                         if not item['filename']: raise KeyError('没有原文件')
                         data = (service.archive.root/'files'/item['id']).read_bytes()
                         return self.send(200, data, 'application/octet-stream', {'Content-Disposition':"attachment; filename*=UTF-8''"+urllib.parse.quote(item['filename'], safe='')})
-                    return self.send(200, item)
+                    return self.send(200, service.item_detail(item['id']))
                 if path in ('/tutorial','/tutorial.html'):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -477,7 +524,7 @@ def handler(service):
                     service.archive.configure(body['backend'], body['auto_ai'], body.get('capture_background'), body.get('capture_close_tabs'), body.get('capture_scope')); return self.send(200, {'ok':True})
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
-                if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000]))
+                if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
                     if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})

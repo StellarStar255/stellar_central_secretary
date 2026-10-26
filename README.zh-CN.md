@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.39** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.39.md)
+版本 **v0.1.40** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.40.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -114,7 +114,8 @@ Claude 私有链接目前使用下述扩展或粘贴正文方式。
 | TXT、Markdown、CSV、TSV、JSON、HTML、常见代码和日志 | 提取文字 |
 | DOCX、PPTX、XLSX、ODT | 提取文字、幻灯片正文、表格单元格值；保留原件 |
 | PDF | 安装 pypdf 后提取文字及页码 |
-| 图片、扫描 PDF、音视频、旧版 DOC/XLS、其他二进制文件 | 保存原件，可手动补充正文；暂无 OCR / 转写 |
+| PNG/JPEG/GIF/WebP 图片 | 可直接粘贴，与文字、文件组合归档；启用 AI 后进行视觉分析，原件保留 |
+| 扫描 PDF、音视频、旧版 DOC/XLS、其他二进制文件 | 保存原件，可手动补充正文；暂无扫描 PDF OCR / 转写 |
 
 不执行 Office 宏，不计算表格公式；XLSX 读取已保存的计算值。正文按 1,200 字符分段，重叠 200 字符。超过 24 万字符的资料完整保存并索引，但暂不自动摘要，需要拆分；正文总上限 200 万字符。
 
@@ -193,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.39 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.40 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -238,3 +239,9 @@ python scripts/check_tutorial.py
 正文可用 `⌘ +` / `⌘ =` 放大、`⌘ -` 缩小、`⌘ 0` 恢复；Windows/Linux 使用 Ctrl。范围 70–200%，自动保存；按钮、侧栏及输入框保持界面字号，设置中可单独恢复正文大小。
 
 右键点击最近归档、知识库条目或归档卡片，选择「删除归档…」。确认后删除该记录、原件、速记、正文历史副本、搜索索引及引用它的对话消息，保留其他归档；旧窗口同步不会恢复已删除消息。已导出的备份、原网页与外部已打开窗口不受影响。
+
+## 图片与组合资料
+
+在主输入框直接粘贴图片，可继续输入文字、添加文件后一次发送，保存为同一份归档。选择「提问本次资料」可只针对这一组材料回答；普通说明文字遵循自动整理开关。每次最多 20 个附件、8 张图片、50 MB。图片分析使用缩略图，长文使用有限片段，组合中的 PDF 默认仅概览前 5 页；原件完整保留，可逐个预览、下载，也随 ZIP 备份保存。组合原文件是含清单和附件的 `.stellar.zip`。
+
+AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对原图。启用整理或提问时，相关文字及图片发送给所选在线模型服务，需要对应 CLI 和账号支持图片输入。「我的速记」仍只保存在本机，不会自动用于 AI。

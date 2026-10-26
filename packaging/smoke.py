@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js','/bundle-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
@@ -76,6 +76,13 @@ with tempfile.TemporaryDirectory() as data:
             matches=json.loads(request('/api/items?q='+query+'&kind=file'))
             assert [item['id'] for item in matches]==[pdf['id']], matches
         assert json.loads(request('/api/items?q=Encrypted%20nonexistent'))==[]
+        group=json.loads(request('/api/ingest',{'text':'Combined synthetic context','attachments':[{'name':'sample.png','data':base64.b64encode(image.getvalue()).decode()},{'name':'context.txt','data':base64.b64encode(b'Attachment context').decode()}],'defer_summary':True},status['token']))['item']
+        assert status['capabilities']['grouped_materials'] and len(group['attachments'])==2
+        assert request('/api/items/'+group['id']+'/attachments/'+group['attachments'][0]['id']+'/preview')==image.getvalue()
+        with zipfile.ZipFile(io.BytesIO(request('/api/items/'+group['id']+'/file'))) as original:
+            assert original.read('files/01-sample.png')==image.getvalue()
+        request('/api/items/'+group['id']+'/delete',{'confirmed':True,'expected_updated':group['updated']},status['token'])
+        print('PASS: frozen grouped image/text/file archive, original image preview and grouped deletion')
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
         assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
