@@ -1,7 +1,7 @@
 """Append-only material batches; each original ZIP is owned by its parent archive."""
 import json,re,uuid
 from datetime import datetime,timezone
-from . import bundles
+from . import bundles,links
 
 def records(value):
     result=json.loads(value) if isinstance(value,str) else value
@@ -9,24 +9,25 @@ def records(value):
     seen=set()
     for batch in result:
         if not isinstance(batch,dict) or not re.fullmatch('[a-f0-9]{32}',str(batch.get('id',''))) or batch['id'] in seen:raise ValueError('追加资料编号无效')
-        seen.add(batch['id'])
+        seen.add(batch['id']);links.records(batch.get('links',[]))
         if any(not isinstance(batch.get(key),str) for key in ('text','summary','vision_text','created','state','error')):raise ValueError('追加资料字段无效')
         if len(batch['text'])>200000 or len(batch['summary'])>60000 or len(batch['vision_text'])>60000:raise ValueError('追加资料文字过长')
     if sum(len(batch['text']) for batch in result)>2_000_000:raise ValueError('追加资料可索引文字总量超过 200 万字符')
+    if sum(len(value['text']) for batch in result for value in batch.get('links',[]))>2_000_000:raise ValueError('追加链接正文总量超过 200 万字符，请另建档案')
     return result
 
 def combined_summary(base,batches):
     return '\n\n'.join([base]+['【追加摘要 · '+batch['created'][:10]+'】\n'+batch['summary'] for batch in batches if batch['summary']]).strip()
 
 def index_text(batches):
-    return '\n\n'.join('【追加资料 · '+batch['created']+'】\n'+batch['text']+'\n'+batch['summary']+'\n【AI 图片解读，需核对原图】\n'+batch['vision_text'] for batch in batches)
+    return '\n\n'.join('【追加资料 · '+batch['created']+'】\n'+batch['text']+'\n'+links.source(batch.get('links',[]))+'\n'+batch['summary']+'\n【AI 图片解读，需核对原图】\n'+batch['vision_text'] for batch in batches)
 
 def find(item,batch_id):
     return next((batch for batch in item['additions'] if batch['id']==batch_id),None)
 
-def save(archive,item_id,text,files,expected):
-    data,source=bundles.create(text,files)
-    batch={'id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'text':source[:200000],'summary':'','vision_text':'','state':'pending','error':''}
+def save(archive,item_id,text,files,expected,urls=None):
+    data,source=bundles.create(text,files,urls)
+    batch={'id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'text':source[:200000],'summary':'','vision_text':'','state':'pending','error':'','links':links.prepare(urls or [])}
     if len(source)>200000:batch['text']+='\n【追加索引仅保留前部文字；完整原件已保存。】';batch['text']=batch['text'][:199940]+'\n【追加索引仅保留前部文字；完整原件已保存。】'
     with archive.lock:
         item=archive.get(item_id)

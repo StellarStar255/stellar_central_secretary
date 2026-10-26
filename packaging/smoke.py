@@ -89,6 +89,14 @@ with tempfile.TemporaryDirectory() as data:
         assert json.loads(request('/api/items?q=inventory%20machine'))[0]['id']==annotated['id']
         request('/api/items/'+annotated['id']+'/delete',{'confirmed':True,'expected_updated':annotated['updated']},status['token'])
         print('PASS: frozen unavailable link retains annotation, descriptive title and search index')
+        grouped=json.loads(request('/api/ingest',{'text':'Related sources','attachments':[],'links':[f'http://127.0.0.1:{port}/first',f'http://127.0.0.1:{port}/second']},status['token']))['item']
+        for _ in range(30):
+            grouped=json.loads(request('/api/items/'+grouped['id']))
+            if not grouped['append_busy']:break
+            time.sleep(.1)
+        assert len(grouped['group_links'])==2 and all(link['state']=='unread' for link in grouped['group_links'])
+        request('/api/items/'+grouped['id']+'/delete',{'confirmed':True,'expected_updated':grouped['updated']},status['token'])
+        print('PASS: frozen grouped links retain both unavailable sources in one archive')
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
         assert reparsed['parsed'] and reparsed['item']['id'] == pdf['id'], reparsed
         extra=json.loads(request('/api/items/'+pdf['id']+'/additions',{'text':'New supporting materials','attachments':[{'name':'new.png','data':base64.b64encode(image.getvalue()).decode()}],'expected_updated':reparsed['item']['updated'],'summarize':False},status['token']))
