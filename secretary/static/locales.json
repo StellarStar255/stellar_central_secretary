@@ -612,5 +612,13 @@
   "API 配置已保存，可测试连接": "API configuration saved; test the connection to verify it",
   "请先配置模型 API": "Configure the model API first",
   "输出长度参数": "Output length parameter",
-  "按服务文档选择参数；多数兼容服务使用 max_tokens。": "Choose the parameter specified by your provider; most compatible services use max_tokens."
+  "按服务文档选择参数；多数兼容服务使用 max_tokens。": "Choose the parameter specified by your provider; most compatible services use max_tokens.",
+  "打开桌面窗口": "Open desktop window",
+  "打开网页模式": "Open browser mode",
+  "打开资料目录": "Open data folder",
+  "保存文件": "Save file",
+  "请从 Windows 或 macOS 安装版启动程序，才能切换桌面窗口": "Start the Windows or macOS installed app to switch to a desktop window.",
+  "桌面连接标识无效": "Invalid desktop connection identifier",
+  "已有桌面窗口正在运行": "A desktop window is already running",
+  "桌面状态无效": "Invalid desktop state"
 }

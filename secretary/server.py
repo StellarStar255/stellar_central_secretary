@@ -10,6 +10,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import time
 import threading
 import urllib.error
 import urllib.parse
@@ -77,6 +78,7 @@ class Service:
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
+        self.desktop_peer=None;self.desktop_heartbeat_at=0
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
         with self.lock:
@@ -134,7 +136,7 @@ class Service:
         return {'ok':True,'history':self.chat_history(),'warning':warning}
 
     def switch_interface(self,mode):
-        if not self.desktop.get('supports_window'):raise ValueError('独立桌面窗口需要 macOS 安装版，请从应用程序启动知识秘书')
+        if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows 或 macOS 安装版启动程序，才能切换桌面窗口')
         self.archive.set_interface_mode(mode)
         self.interface_request={'mode':mode,'id':secrets.token_hex(16)}
         return {'ok':True,'mode':mode}
@@ -142,6 +144,32 @@ class Service:
     def model_backend(self):
         backend=self.archive.settings()['backend']
         return model_api.prepare(self.archive.root,{}) if backend=='api' else backend
+
+    def desktop_status(self):
+        with self.lock:
+            if self.desktop_peer and time.monotonic()-self.desktop_heartbeat_at>10:
+                self.desktop_peer=None;self.desktop={'enabled':False,'supports_window':False}
+            return dict(self.desktop)
+
+    def desktop_heartbeat(self,body):
+        owner=body.get('owner','')
+        if not isinstance(owner,str) or not re.fullmatch('[a-f0-9]{32}',owner):raise ValueError('桌面连接标识无效')
+        with self.lock:
+            if body.get('detach'):
+                if self.desktop_peer==owner:self.desktop_peer=None;self.desktop={'enabled':False,'supports_window':False}
+                return {'ok':True}
+            if self.desktop.get('enabled') and not self.desktop_peer:raise ValueError('已有桌面窗口正在运行')
+            if self.desktop_peer and self.desktop_peer!=owner and time.monotonic()-self.desktop_heartbeat_at<=10:raise ValueError('已有桌面窗口正在运行')
+            value=body.get('desktop')
+            if not isinstance(value,dict) or value.get('mode') not in ('desktop','browser') or value.get('state') not in ('ready','busy','error','starting'):raise ValueError('桌面状态无效')
+            fields={key:value.get(key,False) for key in ('tray','window_visible','window_loaded','window_minimized')}
+            if any(type(flag) is not bool for flag in fields.values()):raise ValueError('桌面状态无效')
+            for key in ('window_id','browser_opens'):
+                if type(value.get(key,0)) is not int or value.get(key,0)<0:raise ValueError('桌面状态无效')
+                fields[key]=value.get(key,0)
+            self.desktop_peer=owner;self.desktop_heartbeat_at=time.monotonic()
+            self.desktop={**fields,'enabled':True,'supports_window':True,'platform':'windows','mode':value['mode'],'state':value['state'],'language':'en' if value.get('language')=='en' else 'zh'}
+        return {'ok':True}
 
     def save_settings(self,body):
         path=self.archive.root/model_api.NAME;previous=path.read_bytes() if body.get('backend')=='api' and path.exists() else None
@@ -559,7 +587,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop, 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
                 batch_download=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions/([a-f0-9]{32})/file',path)
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
@@ -640,6 +668,7 @@ def handler(service):
                 if path=='/api/model-api/test':return self.send(200,service.test_model_api(body))
                 if path=='/api/settings':return self.send(200,service.save_settings(body))
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
+                if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
@@ -705,7 +734,10 @@ def main(desktop=False):
     updater.check_periodically()
     try:
         if desktop:
-            from .desktop_macos import run
+            if sys.platform=='win32':
+                from .desktop_windows import run
+            else:
+                from .desktop_macos import run
             run(address, service=service, server=server, open_browser=not args.no_browser)
         else:
             if not args.no_browser: webbrowser.open(address)
