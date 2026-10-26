@@ -6,6 +6,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -30,8 +31,35 @@ def cancel_all():
 def executable(name):
     return shutil.which(name) or next((str(p) for p in (Path('/opt/homebrew/bin')/name, Path.home()/'.local/bin'/name, Path('/usr/local/bin')/name) if p.is_file()), None)
 
+def _run_api(prompt,config,images):
+    from .capture_worker import terminate_job
+    with _process_lock:generation=_cancel_generation
+    images=images or []
+    if len(images)>8 or sum(len(image['data']) for image in images)>8*1024*1024:raise ValueError('图片分析数据过大，请减少图片后重试')
+    command=[sys.executable,'--model-api-worker'] if getattr(sys,'frozen',False) else [sys.executable,'-m','secretary.model_api']
+    payload={'config':config,'prompt':prompt,'images':[dict(image,data=base64.b64encode(image['data']).decode()) for image in images]}
+    env={**os.environ,'PYTHONUTF8':'1','PYTHONIOENCODING':'utf-8'}
+    proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',env=env,start_new_session=True,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0,cwd=str(Path(__file__).resolve().parent.parent))
+    with _process_lock:
+        _processes.add(proc);cancelled=generation!=_cancel_generation
+    try:
+        if cancelled:terminate_job(proc);raise RuntimeError('任务已停止，已有资料保持不变。')
+        try:output,_=proc.communicate(json.dumps(payload,ensure_ascii=False),timeout=240)
+        except subprocess.TimeoutExpired:terminate_job(proc);raise RuntimeError('模型 API 处理超时，资料已保留，请稍后重试。') from None
+        with _process_lock:cancelled=generation!=_cancel_generation
+        if cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+        try:result=json.loads(output)
+        except ValueError:raise RuntimeError('模型 API 工作进程未返回有效结果，请重试') from None
+        if result.get('error'):raise RuntimeError(result['error'])
+        if not isinstance(result.get('answer'),str) or not result['answer'].strip():raise RuntimeError('模型 API 没有返回有效文本')
+        return result['answer']
+    finally:
+        terminate_job(proc)
+        with _process_lock:_processes.discard(proc)
+
 
 def run(prompt, backend, images=None):
+    if isinstance(backend,dict):return _run_api(prompt,backend,images)
     with _process_lock:generation=_cancel_generation
     cli = executable(backend)
     if not cli: raise RuntimeError(f'没有找到 {backend}，请先安装并登录本机 CLI。')
@@ -115,6 +143,9 @@ def run(prompt, backend, images=None):
 
 
 def analyze_material(source,title,backend,images,scope,question=None):
+    skipped=bool(images and isinstance(backend,dict) and not backend.get('vision'))
+    if skipped:
+        images=[];scope+=' 当前 API 未启用图片输入，仅整理文字，图片原件已保存但未识别。'
     schema={'title':'简短标题','summary':'200到500字摘要','category':'主题分类','tags':['最多6个关键词']}
     if images:schema['vision_text']='按图片顺序记录可见文字和图像要点，模糊之处说明，不猜测。用于以后检索，最多12000字。'
     if question:schema['answer']='回答用户本次问题，依据本组文字、附件与图片，来源标注 [1]。没有明确问题时整理要点。'
@@ -127,6 +158,7 @@ def analyze_material(source,title,backend,images,scope,question=None):
     tags=result.get('tags',[])
     if not isinstance(tags,list):raise ValueError('摘要标签格式不正确')
     fields=dict(title=str(result.get('title') or title)[:300],summary=scope+'\n\n'+result['summary'],category=str(result.get('category') or '未分类')[:80],tags=[str(tag)[:60] for tag in tags[:6]],vision_text=visual[:60000] if images else '',state='ready',error='')
+    if skipped:fields.pop('vision_text')
     return fields,(scope+'\n\n'+result['answer'] if question else '')
 
 

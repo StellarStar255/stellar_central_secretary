@@ -11,6 +11,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
+import uuid
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import urllib.request
 
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'tests'))
@@ -29,7 +32,7 @@ with tempfile.TemporaryDirectory() as data:
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or ''})
-        with opener.open(req, timeout=30 if path=='/api/update/check' else 3) as response:
+        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test') else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -116,6 +119,23 @@ with tempfile.TemporaryDirectory() as data:
         with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as clean_backup:
             assert 'files/'+saved['note_images'][0]['id'] not in clean_backup.namelist()
         print('PASS: frozen confirmed archive deletion, attachment cleanup and unrelated PDF preserved')
+        api_key=uuid.uuid4().hex
+        class LocalAPI(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_POST(self):
+                body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                assert self.headers.get('Authorization')=='Bearer '+api_key and body['model']=='synthetic-model'
+                raw=json.dumps({'choices':[{'message':{'content':'OK'},'finish_reason':'stop'}]}).encode()
+                self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+        provider=ThreadingHTTPServer(('127.0.0.1',0),LocalAPI);threading.Thread(target=provider.serve_forever,daemon=True).start()
+        try:
+            request('/api/settings',{'backend':'api','auto_ai':False,'model_api':{'base_url':f'http://127.0.0.1:{provider.server_port}/v1','model':'synthetic-model','api_key':api_key}},status['token'])
+            assert json.loads(request('/api/model-api/test',{},status['token']))['ok']
+            api_status=json.loads(request('/api/status'));assert api_status['model_api']['has_key'] and api_key not in json.dumps(api_status)
+            with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as backup:assert all(api_key.encode() not in backup.read(name) for name in backup.namelist())
+            request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
+            print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
+        finally:provider.shutdown();provider.server_close()
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

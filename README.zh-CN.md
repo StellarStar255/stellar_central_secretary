@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.43** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.43.md)
+版本 **v0.1.44** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.44.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.43 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.44 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -257,3 +257,11 @@ AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对�
 ## 多链接归为同一档案
 
 同一条消息中发送的多个链接默认合为一份归档，可混合说明文字、图片和文件；也可选择「合并为一份归档」。已有档案的「追加资料」中可一次输入多个链接，生成同一批补充摘要。先保存来源，再后台读取可访问的公开网页；每个链接分别显示读取状态，单个失败不影响整组。每组最多 20 个链接，链接正文用于有限范围概览；不自动批量打开登录窗口。需要登录、内网或不可访问的来源先保留链接，可打开页面后将正文追加到该档案。来源状态、已读取文字和附件均随完整备份保存。
+
+## 自定义模型 API
+
+在「模型与设置 → AI 后端」选择「自定义模型 API（OpenAI 兼容）」，填写 API 地址、模型名和 API Key，测试连接后保存。提供 DeepSeek 示例，也可手动配置其他兼容的云端或本地服务；API 模式不需要安装 Codex / Claude CLI。支持 Chat Completions 格式，其他原生协议需要兼容端点或适配器。远程地址要求 HTTPS，本机回环地址可用 HTTP，无鉴权的本地服务可勾选「无需 API Key」。
+
+只有模型支持图片时才启用图片输入；未启用时仅整理文字，明确标注图片未识别，原件保留。可选 JSON 输出模式，并按服务要求选择 `max_tokens` 或 `max_completion_tokens`。
+
+密钥单独保存在本机 `model-api.json`，不回传到界面、不放入知识库备份。已保存密钥时留空保持；更换服务地址需要重新填写密钥。恢复备份到其他电脑后需重新配置凭据。测试连接只发一条简短消息，不发送知识库资料，服务可能计费。
