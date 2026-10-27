@@ -119,18 +119,34 @@ with tempfile.TemporaryDirectory() as data:
         with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as clean_backup:
             assert 'files/'+saved['note_images'][0]['id'] not in clean_backup.namelist()
         print('PASS: frozen confirmed archive deletion, attachment cleanup and unrelated PDF preserved')
-        api_key=uuid.uuid4().hex
+        api_key=uuid.uuid4().hex;provider_calls=[]
         class LocalAPI(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_POST(self):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 assert self.headers.get('Authorization')=='Bearer '+api_key and body['model']=='synthetic-model'
-                raw=json.dumps({'choices':[{'message':{'content':'OK'},'finish_reason':'stop'}]}).encode()
+                provider_calls.append(True)
+                content='OK' if 'Reply with exactly OK' in str(body['messages'][-1]['content']) else json.dumps({'title':'Synthetic commands','summary':'Creates a synthetic compressed archive.','category':'Test','tags':['commands']})
+                raw=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         provider=ThreadingHTTPServer(('127.0.0.1',0),LocalAPI);threading.Thread(target=provider.serve_forever,daemon=True).start()
         try:
             request('/api/settings',{'backend':'api','auto_ai':False,'model_api':{'base_url':f'http://127.0.0.1:{provider.server_port}/v1','model':'synthetic-model','api_key':api_key}},status['token'])
             assert json.loads(request('/api/model-api/test',{},status['token']))['ok']
+            request('/api/settings',{'backend':'api','auto_ai':True},status['token'])
+            archived=json.loads(request('/api/ingest',{'text':'tar -czf synthetic.tar.gz samples/','archive_only':True},status['token']))['item']
+            assert archived['state']=='saved' and len(provider_calls)==1
+            assert json.loads(request('/api/status'))['runtime']['processing']==0
+            request('/api/items/'+archived['id'],{},status['token'])
+            for _ in range(60):
+                current=json.loads(request('/api/items/'+archived['id']))
+                if current['state']=='ready' and current.get('summary_progress',{}).get('stage')=='done':break
+                time.sleep(.2)
+            else:raise AssertionError('Frozen manual summary did not complete')
+            assert len(provider_calls)==2 and current['summary_progress']['lane']=='short'
+            assert current['summary_progress']['stages_seconds'] and current['text']==archived['text']
+            assert b'archive-only' in request('/') and b'summaryProgress' in request('/app.js')
+            print('PASS: frozen archive-only skips enabled AI; manual summary uses short lane, retains original and reports stage timings')
             api_status=json.loads(request('/api/status'));assert api_status['model_api']['has_key'] and api_key not in json.dumps(api_status)
             with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as backup:assert all(api_key.encode() not in backup.read(name) for name in backup.namelist())
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])

@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.46** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.46.md)
+版本 **v0.1.47** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.47.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.46 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.47 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -267,3 +267,9 @@ AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对�
 密钥单独保存在本机 `model-api.json`，不回传到界面、不放入知识库备份。已保存密钥时留空保持；更换服务地址需要重新填写密钥。恢复备份到其他电脑后需重新配置凭据。测试连接只发一条简短消息，不发送知识库资料，服务可能计费。
 
 自动识别会将命令和普通知识文字直接归档，明确的问题才检索知识库。也可手动选择「归档文字 / 命令」或「提问本次资料」。命令作为资料原文保存、参与搜索，不会执行；命令中的 URL 不会自动抓取。
+
+短文字摘要要求 1–3 句话、最多约 120 字，中等文字为 100–200 字；长文保留分段覆盖。短文字与问答走独立通道，长任务同时最多一份，模型调用整体最多两路，减少短资料被长文阻塞。
+
+输入框旁可勾选「仅归档，暂不总结」：保存可搜索的原文、附件和链接，不调用 AI，也不自动打开浏览器；链接正文需之后主动读取。该状态会保留，重启不会自动补跑摘要，需要时点「重新整理」。
+
+归档卡片和详情显示当前处理阶段、总耗时、等待/准备时间和模型阶段时间（含进程启动、连接与生成）。计时不含正文或密钥，只保留本次启动最近 100 个已完成任务；重启后清空。任务运行时可见窗口约每秒刷新，空闲时降低频率，对话记录同步另行节流。模型服务耗时及 CLI 启动开销仍可能波动。

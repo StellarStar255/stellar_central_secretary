@@ -622,5 +622,21 @@
   "已有桌面窗口正在运行": "A desktop window is already running",
   "桌面状态无效": "Invalid desktop state",
   "归档文字 / 命令": "Archive text / commands",
-  "自动识别：文字和命令默认归档，明确的问题才检索；不会执行命令。": "Auto detect: text and commands are archived; clear questions search the library. Commands are never executed."
+  "自动识别：文字和命令默认归档，明确的问题才检索；不会执行命令。": "Auto detect: text and commands are archived; clear questions search the library. Commands are never executed.",
+  "仅归档，暂不总结": "Archive only, skip summary",
+  "已归档，未总结": "Archived, not summarized",
+  "已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。": "Archived and searchable without an AI call. Choose “Reorganize” in item details when you want a summary.",
+  "排队中": "Queued",
+  "正在读取来源": "Reading sources",
+  "正在准备摘要": "Preparing summary",
+  "正在启动模型": "Starting model",
+  "模型处理中": "Model processing",
+  "正在保存结果": "Saving result",
+  "处理完成": "Completed",
+  "已停止": "Stopped",
+  "耗时": "Elapsed",
+  "等待/准备": "Waiting/preparation",
+  "模型阶段（含启动）": "Model phase (including startup)",
+  "仅保存链接，尚未读取网页正文。": "Link saved without reading webpage content.",
+  "保存原文、附件和链接，不调用 AI，也不自动打开浏览器。": "Save text, attachments and links without AI calls or automatically opening a browser."
 }
