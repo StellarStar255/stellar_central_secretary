@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.46** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.46.md)
+Version **v0.1.47** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.47.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -114,3 +114,9 @@ Choose **Models & settings → AI backend → Custom model API (OpenAI-compatibl
 Enable image input only for an image-capable model. Otherwise images remain archived while summaries and answers explicitly use text only. JSON output mode is optional. Output limits support both `max_tokens` and `max_completion_tokens`, as required by the provider. Other native API protocols need a compatible endpoint or adapter.
 
 The key is stored in a separate local `model-api.json` file, never returned to the UI, and excluded from library backups. Leave the key field empty to keep a saved key. Changing the endpoint requires re-entering it. After restoring a backup on another computer, configure the API credentials again. The connection test sends a short synthetic message, not library content; provider charges may apply.
+
+Short text summaries target 1–3 sentences (up to 120 Chinese characters); medium text targets 100–200 characters. Long text retains segmented coverage. Short plain-text work and interactive questions use a separate lane from long documents: one task per lane, at most two model calls concurrently. This reduces blocking without interrupting active work.
+
+Select **Archive only, skip summary** beside the composer to save searchable text, attachments and links without AI or automatic browser capture. Links stay unread until explicitly opened/captured; saved items are not automatically summarized after restart. Choose **Reorganize** later to generate a summary.
+
+Archive cards and details show the current stage, elapsed time, waiting/preparation time and model time (including process startup, connection and generation). Timing records contain no document text or credentials and cover the latest 100 completed jobs in the current app session. Active windows refresh about once per second while work runs, and less often when idle; chat-history synchronization is throttled separately. Provider latency and CLI startup remain variable.

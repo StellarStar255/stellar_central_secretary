@@ -97,7 +97,7 @@ function renderArchivedBody(item){
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const states = new Proxy({queued_capture:'等待读取',pending:'等待整理',processing:'正在整理',ready:'已整理',error:'待重试',needs_content:'待补正文',confirming_login:'正在准备读取',waiting_browser_close:'等待专用窗口退出',opening_browser:'正在打开浏览器',waiting_login:'等待你登录',reading:'正在读取正文'},{get:(values,key)=>t(values[key]||'')});
+const states = new Proxy({saved:'已归档，未总结',queued_capture:'等待读取',pending:'等待整理',processing:'正在整理',ready:'已整理',error:'待重试',needs_content:'待补正文',confirming_login:'正在准备读取',waiting_browser_close:'等待专用窗口退出',opening_browser:'正在打开浏览器',waiting_login:'等待你登录',reading:'正在读取正文'},{get:(values,key)=>t(values[key]||'')});
 const captureActions=new Map();
 let lastMessageMarkup='';
 let supportsCapture=false;
@@ -142,22 +142,32 @@ function renderSidebar(){
  bindDetails($('#recent-items'));
 }
 function bindDetails(container){container.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>detail(b.dataset.id).catch(e=>toast(e.message)))}
-function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}</button>${captureControls(item)}`}
+function summaryProgress(item){
+ const p=item?.summary_progress;if(!p)return '';
+ const labels={queued:'排队中',reading_sources:'正在读取来源',preparing:'正在准备摘要',starting_model:'正在启动模型',waiting_model:'模型处理中',processing_result:'正在保存结果',done:'处理完成',saved:'已保存',error:'整理失败',stopped:'已停止'};
+ return `<span>${esc(t(labels[p.stage]||'正在整理'))} · ${esc(t('耗时'))} ${Math.round(p.elapsed_seconds)}s</span><small>${esc(t('等待/准备'))} ${Math.round(p.queue_seconds)}s · ${esc(t('模型阶段（含启动）'))} ${Math.round(p.model_seconds)}s</small>`;
+}
+function updateSummaryProgress(){
+ document.querySelectorAll('[data-summary-id]').forEach(node=>{const html=summaryProgress(allItems.find(item=>item.id===node.dataset.summaryId));if(node.innerHTML!==html)node.innerHTML=html});
+}
+function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${id}"></div>`:''}</button>${captureControls(item)}`}
 function renderChat(scroll=true){
  if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
  const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body">${esc(m.text)}</div>`:''}${(m.items||[]).map(archiveCard).join('')}${m.sources?.length?`<div class="source-list">${m.sources.map(s=>ui`<button class="source" data-id="${s.item_id}">[${s.number}] ${esc(s.title)}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
- if(markup===lastMessageMarkup)return;lastMessageMarkup=markup;$('#messages').innerHTML=markup;
+ if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
  bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
 function updateMessage(chat,message,values){Object.assign(message,values);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat()}
-async function refresh(){
- const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
- try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}
+let refreshPromise=null,refreshAgain=false,activeWork=false,lastHistoryPoll=0;
+function refresh(){if(refreshPromise){refreshAgain=true;return refreshPromise}refreshPromise=(async()=>{do{refreshAgain=false;await refreshNow()}while(refreshAgain)})().finally(()=>{refreshPromise=null});return refreshPromise}
+async function refreshNow(){
+ const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);activeWork=Object.values(languageStatus.runtime||{}).some(Boolean);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
+ if(Date.now()-lastHistoryPoll>5000){lastHistoryPoll=Date.now();try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}}
  allItems=(await api('/api/items')).filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  for(const [id,action] of captureActions){
   const item=allItems.find(i=>i.id===id);
@@ -173,16 +183,18 @@ async function refresh(){
  }
  if(changed)saveChats();
  $('#count').textContent=allItems.length;renderSidebar();renderChat(false);
+ const progress=$('#detail-content').querySelector('#detail-summary-progress');if(progress&&selectedId)progress.innerHTML=summaryProgress(allItems.find(i=>i.id===selectedId));
  if($('#library-dialog').open)await renderLibrary();
  if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
 }
+let lastLibraryMarkup='';
 async function renderLibrary(){
  const q=$('#search').value.trim(),kind=$('#kind-filter').value,category=$('#category-filter').value;
  const items=(await api('/api/items?'+new URLSearchParams({q,kind,category}))).filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(c=>`<option value="${esc(c)}" ${c===category?'selected':''}>${esc(displayCategory(c))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(items.length,'份资料','item','items');$('#empty').hidden=items.length>0;
- $('#items').innerHTML=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p></div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');bindDetails($('#items'));
+ const markup=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p>${i.summary_progress?`<div class="summary-progress" data-summary-id="${i.id}"></div>`:''}</div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');if(markup!==lastLibraryMarkup){lastLibraryMarkup=markup;$('#items').innerHTML=markup;bindDetails($('#items'))}updateSummaryProgress();
 }
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
@@ -303,6 +315,7 @@ async function confirmLogin(id){
 }
 
 function archiveReply(result){const i=result.item;
+ if(i.state==='saved')return t('已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。');
  if(i.has_group_links&&i.state==='processing'&&i.error==='正在读取本组链接…')return t('本组链接已归为一档，正在后台读取可访问的正文。');
  if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请双击项目里的「启动知识秘书.command」重启服务，再刷新此页面。');
  if(!canReadChatGPT(i.url)&&isReading(i))return t('正在准备浏览器采集。请在任务网页完成登录并展开要保存的内容，再点击「页面已打开，开始读取」。仅采集已加载内容，成功后按设置关闭本次新开的标签页。');
@@ -334,7 +347,7 @@ function resolveInputMode(text,mode,hasFiles=false){
 }
 
 $('#composer-form').onsubmit=async event=>{
- event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],mode=resolveInputMode(text,$('#input-mode').value,files.length>0);if(!text&&!files.length)return;
+ event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],archiveOnly=$('#archive-only').checked===true;let mode=resolveInputMode(text,archiveOnly&&$('#input-mode').value==='ask'?'auto':$('#input-mode').value,files.length>0);if(archiveOnly&&mode==='ask')mode='note';if(!text&&!files.length)return;
  if(!token){toast(t('服务尚未连接，请稍后重试或刷新页面。'));return}
  let chat=currentChat();if(!chat){chat={id:uid(),title:(text||files[0]?.name||t('新对话')).slice(0,36),messages:[]};conversations.unshift(chat);activeId=chat.id}
  const userMessage=addMessage(chat,'user',text,{files:files.map(f=>f.name)});const response=addMessage(chat,'assistant',t('正在处理…'),{pending:true,items:[]});
@@ -345,24 +358,24 @@ $('#composer-form').onsubmit=async event=>{
   const grouped=mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
   if(grouped){
    const groupQuestion=groupLinks.reduce((value,url)=>value.replace(url,''),text).trim();
-   const asking=mode==='ask'||mode==='auto'&&!!groupQuestion&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(groupQuestion);
+   const asking=!archiveOnly&&(mode==='ask'||mode==='auto'&&!!groupQuestion&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(groupQuestion));
    updateMessage(chat,response,{text:t('正在保存这组资料…')});
    const attachments=[];for(const file of files)attachments.push({name:file.name,data:await readFile(file)});
-   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking});results.push(result);response.items.push(result.item.id);
+   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id);
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
    if(asking){if(groupLinks.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources}
    updateMessage(chat,response,{text:answer,pending:false,error:false});return;
   }
-  for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file)});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(file.name+'：'+e.message)}}
+  for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file),archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(file.name+'：'+e.message)}}
   const urls=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
-  for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const context=urls.reduce((value,link)=>value.replace(link,''),text).trim();const result=await api('/api/ingest',{url,context});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
-  if(mode==='note'&&text){const result=await api('/api/ingest',{text});results.push(result);response.items.push(result.item.id)}
+  for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const context=urls.reduce((value,link)=>value.replace(link,''),text).trim();const result=await api('/api/ingest',{url,context,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
+  if(mode==='note'&&text){const result=await api('/api/ingest',{text,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}
   await refresh();
   const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
   // Commands and declarative text are notes; explicit questions use retrieval.
-  const shouldAsk=mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
+  const shouldAsk=!archiveOnly&&mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
   let answer=results.map(archiveReply).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
   if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources}
@@ -372,7 +385,7 @@ $('#composer-form').onsubmit=async event=>{
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
 async function detail(id){const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;selectedId=id;detailVersion=item.updated;
- $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="append-material" ${item.append_busy?'disabled':''}>追加资料</button><button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render(item):''}${item.user_context?ui`<h3>你的链接说明</h3><div id="link-context" class="detail-text">${esc(item.user_context)}</div>`:''}${StellarNotes.render(item)}<h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><div class="detail-text">${esc(item.vision_text)}</div>`:''}${renderArchivedBody(item)}${globalThis.StellarAdditions?StellarAdditions.render(item):''}`;
+ $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="open-pdf-default">默认程序打开</button><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}<button class="secondary" id="append-material" ${item.append_busy?'disabled':''}>追加资料</button><button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render(item):''}${item.user_context?ui`<h3>你的链接说明</h3><div id="link-context" class="detail-text">${esc(item.user_context)}</div>`:''}${StellarNotes.render(item)}<div id="detail-summary-progress" class="summary-progress">${summaryProgress(item)}</div><h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><div class="detail-text">${esc(item.vision_text)}</div>`:''}${renderArchivedBody(item)}${globalThis.StellarAdditions?StellarAdditions.render(item):''}`;
  const cancelTitle=()=>{$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''}});
  if(item.group_links?.length){const readButton=document.createElement('button');readButton.id='read-group-links';readButton.className='secondary';readButton.textContent=t('重新读取本组链接');readButton.disabled=item.append_busy;readButton.onclick=()=>busy(readButton,async()=>{await api('/api/items/'+id+'/group-links',{});await detail(id);await refresh()});$('#append-material').parentElement.append(readButton)}
@@ -460,7 +473,7 @@ function updateModelLabel(){$('#model-label').textContent=$('#backend').value===
 globalThis.StellarModelAPI?.bind({api,toast});
 $('#backend').addEventListener('change',()=>{backendRevision++});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{const body={backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value};if(body.backend==='api')body.model_api=StellarModelAPI.collect();const saved=await api('/api/settings',body);if(body.backend==='api')StellarModelAPI.saved(saved.model_api);updateModelLabel();$('#settings-dialog').close();toast(t('设置已保存'))});
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();setInterval(()=>{if(!document.hidden)refresh().catch(()=>{})},5000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();setTimeout(pollArchiveUpdates,activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
@@ -496,3 +509,5 @@ $('#backup-input').onchange=async()=>{
  }catch(e){$('#import-status').textContent=t('导入失败：')+e.message;toast(t('导入失败：')+e.message)}
  finally{importingBackup=false;$('#import-backup').disabled=$('#library-import').disabled=false;$('#backup-input').value=''}
 };
+
+async function pollArchiveUpdates(){try{if(!document.hidden)await refresh()}catch{}finally{setTimeout(pollArchiveUpdates,!document.hidden&&activeWork?1000:10000)}}
