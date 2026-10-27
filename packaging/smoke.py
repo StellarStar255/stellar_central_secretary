@@ -152,6 +152,17 @@ with tempfile.TemporaryDirectory() as data:
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
             print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
         finally:provider.shutdown();provider.server_close()
+        # Prepare an isolated working copy without launching an external GUI app.
+        sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+        from secretary.core import Archive
+        from secretary.attachment_editor import local_copy
+        editable=json.loads(request('/api/ingest',{'filename':'editable.txt','data':base64.b64encode(b'Old frozen attachment content').decode(),'archive_only':True},status['token']))['item']
+        working,_,_=local_copy(Archive(data,recover=False),editable['id']);working.write_bytes(b'NewFrozenEditorKeyword')
+        changed=json.loads(request('/api/items/'+editable['id']+'/editor/save',{},status['token']))
+        assert changed['changed'] and request('/api/items/'+editable['id']+'/file')==b'NewFrozenEditorKeyword'
+        assert json.loads(request('/api/items?q=NewFrozenEditorKeyword'))[0]['id']==editable['id']
+        assert b'data-editor-action' in request('/bundle-ui.js')
+        print('PASS: frozen external-edit save-back, updated original bytes, searchable text and editor controls')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.47** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.47.md)
+Version **v0.1.48** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.48.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -120,3 +120,7 @@ Short text summaries target 1–3 sentences (up to 120 Chinese characters); medi
 Select **Archive only, skip summary** beside the composer to save searchable text, attachments and links without AI or automatic browser capture. Links stay unread until explicitly opened/captured; saved items are not automatically summarized after restart. Choose **Reorganize** later to generate a summary.
 
 Archive cards and details show the current stage, elapsed time, waiting/preparation time and model time (including process startup, connection and generation). Timing records contain no document text or credentials and cover the latest 100 completed jobs in the current app session. Active windows refresh about once per second while work runs, and less often when idle; chat-history synchronization is throttled separately. Provider latency and CLI startup remain variable.
+
+Common document attachments (including XLSX, DOCX, PDF, text and images) can be opened with their system default application, or revealed in their folder. This works for standalone files, grouped attachments and appended batches. Opened files keep their original names in a managed local editing folder; reopening preserves local changes. Compatible viewing/editing software must be installed.
+
+After saving in the external app, click **Save changes to archive**. This explicitly updates the same archive/batch, the downloadable original and searchable text, while preserving unrelated attachments and the parent file. Previous file versions stay locally beside the editing copy under `open-files/<archive ID>/edits/.../history`; they are removed with the archive. Backups contain the latest saved original, not unsaved editing copies or local history. Existing summaries are marked potentially outdated and are not automatically sent to AI. Active processing and conflicting archive versions block save-back without discarding local work. Unsupported file types retain the download option.
