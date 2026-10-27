@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.49** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.49.md)
+Version **v0.1.50** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.50.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 

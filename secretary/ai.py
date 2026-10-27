@@ -46,7 +46,20 @@ def cancel_all():
 
 
 def executable(name):
-    return shutil.which(name) or next((str(p) for p in (Path('/opt/homebrew/bin')/name, Path.home()/'.local/bin'/name, Path('/usr/local/bin')/name) if p.is_file()), None)
+    found = shutil.which(name)
+    if found:
+        return found
+    if sys.platform == 'win32':
+        # Desktop processes may inherit PATH from before the CLI was installed.
+        roots = [Path.home()/'.local/bin', Path.home()/'scoop/shims']
+        if os.environ.get('LOCALAPPDATA') and name == 'codex':
+            roots.insert(0, Path(os.environ['LOCALAPPDATA'])/'Programs/OpenAI/Codex/bin')
+        if os.environ.get('APPDATA'):
+            roots.append(Path(os.environ['APPDATA'])/'npm')
+        return next((str(root/(name+suffix)) for root in roots
+                     for suffix in ('.exe', '.cmd', '.bat')
+                     if (root/(name+suffix)).is_file()), None)
+    return next((str(p) for p in (Path('/opt/homebrew/bin')/name, Path.home()/'.local/bin'/name, Path('/usr/local/bin')/name) if p.is_file()), None)
 
 def _run_api(prompt,config,images):
     from .capture_worker import terminate_job
