@@ -17,7 +17,8 @@ def atomic(path,data):
     finally:temp.unlink(missing_ok=True)
 def directory(archive,item_id,batch_id,key):
     if any(value and not re.fullmatch('[a-f0-9]{32}',value) for value in (item_id,batch_id,key)):raise ValueError('附件编号无效')
-    target=archive.root/'open-files'/item_id/'edits'/(batch_id or 'original')/(key or 'file')
+    token=hashlib.sha256(((batch_id or 'original')+':'+(key or 'file')).encode()).hexdigest()[:20]
+    target=archive.root/'open-files'/item_id/'edits'/token
     current=archive.root
     for part in target.relative_to(archive.root).parts:
         current=current/part
@@ -51,14 +52,14 @@ def source(archive,item_id,batch_id='',key=''):
     if not name or name in ('.','..'):raise ValueError('附件文件名无效')
     return item,batch,path,data,name,content
 def has_copy(archive,item_id,batch_id='',key=''):
-    try:return (directory(archive,item_id,batch_id,key)/'edit.json').is_file()
+    try:return (directory(archive,item_id,batch_id,key)/'state'/'edit.json').is_file()
     except ValueError:return False
 def local_copy(archive,item_id,batch_id='',key=''):
     item,batch,path,data,name,content=source(archive,item_id,batch_id,key)
     folder=directory(archive,item_id,batch_id,key);folder.mkdir(mode=0o700,parents=True,exist_ok=True)
-    working=folder/'content'
-    if working.is_symlink():raise ValueError('附件编辑目录无效')
-    working.mkdir(mode=0o700,exist_ok=True);target=working/name;meta_path=folder/'edit.json'
+    state=folder/'state'
+    if state.is_symlink():raise ValueError('附件编辑目录无效')
+    state.mkdir(mode=0o700,exist_ok=True);target=folder/name;meta_path=state/'edit.json'
     if target.is_symlink() or meta_path.is_symlink():raise ValueError('附件编辑文件无效')
     if meta_path.exists():
         if meta_path.stat().st_size>4096:raise ValueError('附件编辑记录无效')
@@ -106,13 +107,13 @@ def save_file(archive,item_id,batch_id='',key=''):
     from .core import extract
     with archive.lock:
         item,batch,path,original,name,content=source(archive,item_id,batch_id,key)
-        folder=directory(archive,item_id,batch_id,key);meta_path=folder/'edit.json'
+        folder=directory(archive,item_id,batch_id,key);meta_path=folder/'state'/'edit.json'
+        if (folder/'state').is_symlink():raise ValueError('附件编辑目录无效')
         if not meta_path.is_file() or meta_path.is_symlink():raise ValueError('请先在默认程序中打开附件。')
         if meta_path.stat().st_size>4096:raise ValueError('附件编辑记录无效')
         meta=json.loads(meta_path.read_text(encoding='utf-8'))
         if meta.get('name')!=name:raise ValueError('附件编辑记录无效')
-        if (folder/'content').is_symlink():raise ValueError('附件编辑目录无效')
-        changed=read(folder/'content'/name)
+        changed=read(folder/name)
         if digest(content)!=meta.get('base_sha'):raise ValueError('归档附件已被其他操作更新，未覆盖归档；本机编辑文件仍保留，可在文件夹中找回。')
         if changed==content:return {'ok':True,'changed':False}
         if key:
@@ -127,7 +128,7 @@ def save_file(archive,item_id,batch_id='',key=''):
         # Preserve a directly openable previous version and its metadata locally.
         if (folder/'history').is_symlink():raise ValueError('附件历史目录无效')
         version=folder/'history'/(datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(4))
-        (version/'content').mkdir(mode=0o700,parents=True);atomic(version/'content'/name,content);atomic(version/'metadata.json',json.dumps({'item_id':item_id,'batch_id':batch_id,'attachment_id':key,'filename':name,'summary':batch['summary'] if batch else item['base_summary'],'vision_text':batch['vision_text'] if batch else item['vision_text']},ensure_ascii=False).encode())
+        (version/'state').mkdir(mode=0o700,parents=True);atomic(version/name,content);atomic(version/'state'/'metadata.json',json.dumps({'item_id':item_id,'batch_id':batch_id,'attachment_id':key,'filename':name,'summary':batch['summary'] if batch else item['base_summary'],'vision_text':batch['vision_text'] if batch else item['vision_text']},ensure_ascii=False).encode())
         now=datetime.now(timezone.utc).isoformat();replaced=False
         try:
             with archive.db() as db:
