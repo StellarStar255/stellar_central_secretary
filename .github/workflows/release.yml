@@ -48,6 +48,7 @@ jobs:
         run: |
           python scripts/check_text_archive_ui.py
           python scripts/check_summary_performance_ui.py
+          python scripts/check_attachment_editor_ui.py
       - name: Windows native source UI
         if: runner.os == 'Windows'
         run: python packaging/smoke_windows_desktop.py --source

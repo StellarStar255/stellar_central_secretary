@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs
+from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -443,6 +443,19 @@ class Service:
         else:subprocess.run(['xdg-open',str(target.resolve())],check=True,timeout=15)
         return {'ok':True}
 
+    def edit_file(self,item_id,action,batch_id='',key=''):
+        if action!='save':return attachment_editor.open_file(self.archive,item_id,batch_id or '',key or '',reveal=action=='reveal')
+        with self.lock:
+            if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请等待完成后保存修改；本机编辑文件会保留。')
+            self.busy.add(item_id)
+        try:
+            result=attachment_editor.save_file(self.archive,item_id,batch_id or '',key or '')
+            if result['changed']:
+                with self.summary_jobs.lock:self.summary_jobs.jobs.pop(item_id,None)
+            return result
+        finally:
+            with self.lock:self.busy.discard(item_id)
+
     def reextract(self, item_id):
         item=self.archive.get(item_id)
         if not item['filename']:raise ValueError('这条资料没有可重新解析的原文件')
@@ -531,6 +544,11 @@ class Service:
         if bundles.is_bundle(item['filename']):
             try:item['attachments']=bundles.metadata((self.archive.root/'files'/item_id).read_bytes())
             except Exception:item['bundle_error']='组合附件暂时无法读取，可下载原文件后检查。'
+        item['can_open_file']=not bundles.is_bundle(item['filename']) and attachment_editor.can_open(item['filename'])
+        item['file_editing']=attachment_editor.has_copy(self.archive,item_id)
+        for batch_id,files in [('',item.get('attachments',[]))]+[(batch['id'],batch.get('attachments',[])) for batch in item['additions']]:
+            for file in files:
+                file['can_open']=attachment_editor.can_open(file['name']);file['editing']=attachment_editor.has_copy(self.archive,item_id,batch_id,file['id'])
         return item
 
     def ask_material(self,question,item_ids):
@@ -698,6 +716,8 @@ def handler(service):
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
+                    editor=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/editor/(open|reveal|save)',path)
+                    if editor:return self.send(200,service.edit_file(editor[1],editor[4],editor[2],editor[3]))
                     group_read=re.fullmatch(r'/api/items/([a-f0-9]{32})/(?:group-links|additions/([a-f0-9]{32})/links)',path)
                     if group_read:return self.send(200,service.read_group_links(group_read[1],group_read[2]))
                     append_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions(?:/([a-f0-9]{32})/summarize)?',path)
