@@ -28,7 +28,7 @@ class AttachmentEditorTest(unittest.TestCase):
         self.assertTrue(result['changed']);current=self.service.item_detail(item['id']);self.assertIn('NewCell',current['text']);self.assertEqual(current['state'],'saved')
         self.assertTrue(self.service.archive.retrieve('NewCell'));self.assertFalse(self.service.archive.retrieve('OldCell'))
         self.assertFalse(self.service.edit_file(item['id'],'save')['changed'])
-        versions=list((target.parent.parent/'history').glob('*/content/Research workbook.xlsx'));self.assertEqual(len(versions),1);self.assertEqual(versions[0].read_bytes(),sheet('OldCell'))
+        versions=list((target.parent/'history').glob('*/Research workbook.xlsx'));self.assertEqual(len(versions),1);self.assertEqual(versions[0].read_bytes(),sheet('OldCell'))
         with zipfile.ZipFile(io.BytesIO(self.service.backup())) as backup:self.assertEqual(backup.read('files/'+item['id']),sheet('NewCell'))
     def test_bundle_edit_keeps_attachment_ids_other_files_and_marks_old_summary(self):
         data,source=bundles.create('Original context',[{'name':'notes.txt','data':base64.b64encode(b'old keyword').decode()},{'name':'other.txt','data':base64.b64encode(b'unrelated preserved').decode()}])
@@ -85,7 +85,7 @@ class AttachmentEditorTest(unittest.TestCase):
             item=self.service.ingest({'filename':name,'data':base64.b64encode(original).decode()})['item'];target=self.open(item['id'])
             self.assertEqual(target.read_bytes(),original);target.write_bytes(changed);self.service.edit_file(item['id'],'save')
             self.assertEqual((self.service.archive.root/'files'/item['id']).read_bytes(),changed)
-            histories=list((target.parent.parent/'history').glob('*/content/'+name));self.assertEqual(histories[0].read_bytes(),original)
+            histories=list((target.parent/'history').glob('*/'+name));self.assertEqual(histories[0].read_bytes(),original)
     def test_default_open_and_reveal_use_argument_lists(self):
         item=self.service.ingest({'filename':'workbook $(example).xlsx','data':base64.b64encode(sheet('Synthetic')).decode()})['item']
         with patch.object(editor.sys,'platform','darwin'),patch.object(editor.subprocess,'run') as run:
