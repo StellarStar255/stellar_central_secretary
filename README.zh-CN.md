@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.45** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.45.md)
+版本 **v0.1.46** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.46.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -194,7 +194,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.45 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.46 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -265,3 +265,5 @@ AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对�
 只有模型支持图片时才启用图片输入；未启用时仅整理文字，明确标注图片未识别，原件保留。可选 JSON 输出模式，并按服务要求选择 `max_tokens` 或 `max_completion_tokens`。
 
 密钥单独保存在本机 `model-api.json`，不回传到界面、不放入知识库备份。已保存密钥时留空保持；更换服务地址需要重新填写密钥。恢复备份到其他电脑后需重新配置凭据。测试连接只发一条简短消息，不发送知识库资料，服务可能计费。
+
+自动识别会将命令和普通知识文字直接归档，明确的问题才检索知识库。也可手动选择「归档文字 / 命令」或「提问本次资料」。命令作为资料原文保存、参与搜索，不会执行；命令中的 URL 不会自动抓取。

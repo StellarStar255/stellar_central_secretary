@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.45** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.45.md)
+Version **v0.1.46** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.46.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -44,7 +44,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - Grouped links are saved first, then accessible public text is read in the background. Source statuses distinguish read and unread pages. Sign-in-only or unavailable pages retain their links and annotations; append their content manually when needed. Up to 20 links per group, with bounded text overviews.
 - Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected image-capable model. Limits: 20 attachments, 8 images and 50 MB per submission. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
 - Text submitted alongside links is saved as a searchable link annotation. If webpage text cannot be read, the annotation still provides the title and material for a clearly labeled summary. Later webpage capture retains it.
-- Choose **Save as note** to keep plain text instead of asking a question.
+- **Auto detect** archives commands and ordinary knowledge text by default; clear questions search the library. Choose **Archive text / commands** to force archiving, or **Ask about this material** to force a question. Command text, indentation and embedded URLs are retained as material; commands are never executed.
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.
 - Open any archive and choose **Append materials** to add new text, pasted images and files to that same record. Enable **Generate a supplemental summary after saving** to append dated findings while retaining the original summary, title, tags and source. Each batch can be previewed, downloaded and summarized again; appended text and image descriptions are searchable and included in backups.
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.

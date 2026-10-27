@@ -43,6 +43,9 @@ jobs:
         run: |
           python -m pip install "websocket-client>=1.8,<2"
           python -m playwright install chromium
+      - name: Text and command archive UI
+        if: runner.os == 'Windows'
+        run: python scripts/check_text_archive_ui.py
       - name: Windows native source UI
         if: runner.os == 'Windows'
         run: python packaging/smoke_windows_desktop.py --source

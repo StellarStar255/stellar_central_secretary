@@ -486,6 +486,8 @@ class Service:
                 except Exception as exc: warning = '链接已收藏，正文抓取失败：'+str(exc)[:300]+'。可手动补充正文。'
         if not (url or text or name): raise ValueError('请添加链接、文字或文件')
         if len(text)>2_000_000: raise ValueError('正文超过 200 万字，请拆分后导入')
+        if text and not (url or name or title):
+            title=next((line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('```')),'未命名笔记')[:100]
         item_id, created = self.archive.add(title, text, url, name, data, warning)
         with self.lock:
             if url and context.strip() and (item_id in self.busy or item_id in self.captures):raise ValueError('资料正在处理，请稍后再补充链接说明')

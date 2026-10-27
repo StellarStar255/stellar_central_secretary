@@ -320,8 +320,21 @@ function archiveReply(result){const i=result.item;
  if(!result.created&&!result.updated)return t('正文已在知识库中。')+(i.state==='processing'?t('正在生成总结，请稍候。'):t('尚未生成总结，可点击资料中的「重新整理」。'));
  return t('已存入知识库，正文现在就可以检索。')+($('#auto-ai').checked?t('我会继续在后台整理摘要和主题，结果会更新在下方。'):t('自动整理已关闭，之后可以在资料详情中生成摘要。'))}
 
+function resolveInputMode(text,mode,hasFiles=false){
+ if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
+ if(mode!=='auto')return mode;
+ const first=text.split('\n').find(line=>line.trim())?.trim()||'';
+ const save=/^(?:(?:请|麻烦|帮我|请帮我)\s*)?(?:归档|收藏|保存|记录|记住|存下|存一下)(?:一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b/i.test(first);
+ if(save)return 'note';
+ const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|解释|看看|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me)\b/i.test(first);
+ const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
+ if(command&&!question)return 'note';
+ if(!hasFiles&&!/https?:\/\//i.test(text))return question||/[?？]\s*$|(?:是什么|有哪些|有什么|在哪里|怎么样|怎么办|吗|呢)[^\n]{0,24}$/.test(text)?'ask':'note';
+ return mode;
+}
+
 $('#composer-form').onsubmit=async event=>{
- event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],mode=$('#input-mode').value;if(!text&&!files.length)return;
+ event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],mode=resolveInputMode(text,$('#input-mode').value,files.length>0);if(!text&&!files.length)return;
  if(!token){toast(t('服务尚未连接，请稍后重试或刷新页面。'));return}
  let chat=currentChat();if(!chat){chat={id:uid(),title:(text||files[0]?.name||t('新对话')).slice(0,36),messages:[]};conversations.unshift(chat);activeId=chat.id}
  const userMessage=addMessage(chat,'user',text,{files:files.map(f=>f.name)});const response=addMessage(chat,'assistant',t('正在处理…'),{pending:true,items:[]});
@@ -348,7 +361,7 @@ $('#composer-form').onsubmit=async event=>{
   if(mode==='note'&&text){const result=await api('/api/ingest',{text});results.push(result);response.items.push(result.item.id)}
   await refresh();
   const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
-  // URLs and attachments are archived by default. A plain-text turn asks the knowledge base.
+  // Commands and declarative text are notes; explicit questions use retrieval.
   const shouldAsk=mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
   let answer=results.map(archiveReply).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');

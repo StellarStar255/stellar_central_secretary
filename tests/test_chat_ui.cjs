@@ -85,6 +85,20 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert.equal(calls.filter(c=>c.path.endsWith('/capture')).length,readsBefore);
  assert(elements.get('#messages').innerHTML.includes('使用已保存的正文'));
  elements.get('#new-chat').onclick();assert.equal(elements.get('#messages').innerHTML,'');assert.equal(archive.length,2);
+ const askBeforeNotes=countAsk();elements.get('#input-mode').value='auto';
+ for(const text of ['cd /mnt/data/example\n  tar -czf samples.tar.gz samples/','curl https://example.invalid/data?format=json','```bash\necho "what?"\n```','量化校准集应覆盖实际输入分布。','请保存以下命令：\ngit status']){
+  const before=calls.length;input.value=text;await form.onsubmit({preventDefault(){}});
+  assert(calls.slice(before).some(c=>c.path==='/api/ingest'&&c.body.text===text&&!c.body.url),text);
+  assert(!calls.slice(before).some(c=>c.path==='/api/ingest'&&c.body.url),text);
+  assert.equal(countAsk(),askBeforeNotes,text);
+ }
+ elements.get('#input-mode').value='group';input.value='一份纯文字组合资料';await form.onsubmit({preventDefault(){}});
+ assert(calls.some(c=>c.path==='/api/ingest'&&c.body.text==='一份纯文字组合资料'&&!c.body.attachments));
+ elements.get('#input-mode').value='auto';input.value='什么是量化校准集';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+1);
+ input.value='量化校准集有哪些要求';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+2);
+ elements.get('#input-mode').value='note';input.value='为什么命令中需要引号？';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+2);
+ elements.get('#input-mode').value='ask';input.value='tar -czf samples.tar.gz samples/';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+3);
+ console.log('PASS: automatic command/knowledge archiving, literal whitespace and URLs retained, no retrieval or URL fetch for commands, explicit archive/ask overrides and text-only group');
  console.log('PASS: startup, link archive, question with sources, save note, history persistence, new chat preserves archive, legacy backend and false-success rejection, delegated confirmation click, expired-token retry, persistent failure feedback');
 })().catch(e=>{console.error(e);process.exitCode=1});
 const inputUrl='https://chatgpt.com/c/test';
