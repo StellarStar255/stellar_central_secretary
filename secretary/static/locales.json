@@ -620,5 +620,7 @@
   "请从 Windows 或 macOS 安装版启动程序，才能切换桌面窗口": "Start the Windows or macOS installed app to switch to a desktop window.",
   "桌面连接标识无效": "Invalid desktop connection identifier",
   "已有桌面窗口正在运行": "A desktop window is already running",
-  "桌面状态无效": "Invalid desktop state"
+  "桌面状态无效": "Invalid desktop state",
+  "归档文字 / 命令": "Archive text / commands",
+  "自动识别：文字和命令默认归档，明确的问题才检索；不会执行命令。": "Auto detect: text and commands are archived; clear questions search the library. Commands are never executed."
 }
