@@ -1,0 +1,39 @@
+name: Linux packages
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt -r packaging/requirements-build.txt
+      - run: python -m unittest discover -s tests -v
+      - run: node tests/test_chat_ui.cjs
+      - name: Build and test Linux x64 packages
+        run: PYTHON=python bash packaging/build_linux.sh
+      - name: Verify installed Debian package
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y desktop-file-utils
+          sudo dpkg -i dist/*-linux-x64.deb
+          test -x /usr/bin/stellar-secretary
+          desktop-file-validate /usr/share/applications/stellar-secretary.desktop
+          SECRETARY_SMOKE_BINARY=/usr/bin/stellar-secretary python packaging/smoke.py
+      - name: Verify portable package
+        run: |
+          mkdir "$RUNNER_TEMP/portable"
+          tar -xzf dist/*-linux-x64.tar.gz -C "$RUNNER_TEMP/portable"
+          SECRETARY_SMOKE_BINARY="$RUNNER_TEMP/portable/Stellar-Secretary/start.sh" python packaging/smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux-x64
+          path: |
+            dist/*-linux-x64.deb
+            dist/*-linux-x64.tar.gz
+          if-no-files-found: error
