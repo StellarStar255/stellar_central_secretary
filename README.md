@@ -16,12 +16,15 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 
 - **Apple Silicon Mac:** open the DMG, drag Stellar Secretary into Applications, then launch it. macOS releases use Apple Developer ID signing and notarization.
 - **Windows 10/11 x64:** run the setup EXE.
+- **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Linux uses your default browser; native desktop/tray mode is currently available on macOS and Windows. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
 
 Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
 
 In **Models & settings → Display language**, choose **English** or **简体中文**. The interface updates immediately and remembers your choice across desktop and browser modes. Saved titles, originals and existing summaries are not translated.
 
 Use **Models & settings → Version & updates → Check for updates** to install a newer release. Updates preserve your data and verify installer checksums; macOS also verifies the developer signature. Wait for active tasks to finish before updating.
+
+On Linux, update by installing the newer `.deb` or replacing the portable application directory after stopping the old process. Automatic installer updates are not supported. To run without opening a browser, use `stellar-secretary --no-browser`; Ctrl+C stops a terminal-launched instance.
 
 ## Learn with examples
 
@@ -62,6 +65,7 @@ Data stays outside the replaceable application bundle:
 
 - macOS: `~/Library/Application Support/Stellar Secretary`
 - Windows: `%LOCALAPPDATA%\Stellar Secretary`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`
 
 Use **Export library backup** for a ZIP containing originals, the database and a JSON list. **Import library backup** merges items and skips duplicates. Archived originals may use item IDs as filenames; downloading through the app restores the original filename.
 

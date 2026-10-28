@@ -70,6 +70,8 @@ def _get(url, timeout=20):
 def _asset_pattern():
     if MAC:
         return re.compile(r"-macos-" + ("arm64" if platform.machine() == "arm64" else "x64") + r"\.dmg$")
+    if sys.platform.startswith('linux'):
+        return re.compile(r"-linux-x64\.deb$")
     return re.compile(r"-windows-x64-setup\.exe$")
 
 
