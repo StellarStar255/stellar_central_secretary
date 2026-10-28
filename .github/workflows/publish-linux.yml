@@ -1,0 +1,40 @@
+name: Attach verified Linux packages
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Linux packages workflow run ID in this repository
+        required: true
+      tag:
+        description: Existing release tag matching the package version
+        required: true
+permissions:
+  actions: read
+  contents: write
+jobs:
+  attach:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify successful build and existing release
+        run: |
+          test "$TAG" = "v$(python3 -c 'from secretary import __version__; print(__version__)')"
+          gh run view "$RUN_ID" --json conclusion,workflowName,event --jq . > /tmp/build.json
+          python3 -c 'import json; r=json.load(open("/tmp/build.json")); assert r["conclusion"]=="success" and r["workflowName"]=="Linux packages"'
+          gh release view "$TAG" --json tagName
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-linux-x64
+          path: artifacts
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Attach Linux files without replacing existing assets
+        run: |
+          VERSION="${TAG#v}"
+          test -f "artifacts/Stellar-Secretary-$VERSION-linux-x64.deb"
+          test -f "artifacts/Stellar-Secretary-$VERSION-linux-x64.tar.gz"
+          gh release upload "$TAG" "artifacts/Stellar-Secretary-$VERSION-linux-x64.deb" "artifacts/Stellar-Secretary-$VERSION-linux-x64.tar.gz"
