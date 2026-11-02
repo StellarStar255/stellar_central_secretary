@@ -77,7 +77,9 @@ def launch(path,reveal=False):
     elif os.name=='nt':
         if reveal:subprocess.Popen(['explorer.exe','/select,'+path])
         else:os.startfile(path)
-    else:subprocess.run(['xdg-open',str(Path(path).parent) if reveal else path],check=True,timeout=15)
+    else:
+        from .system_integration import external_env
+        subprocess.run(['xdg-open',str(Path(path).parent) if reveal else path],env=external_env(),check=True,timeout=15)
 def open_file(archive,item_id,batch_id='',key='',reveal=False):
     with archive.lock:target,meta,conflict=local_copy(archive,item_id,batch_id,key)
     launch(target,reveal)

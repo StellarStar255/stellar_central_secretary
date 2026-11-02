@@ -1,10 +1,10 @@
-# Third-party components in the Windows desktop build
+# Third-party components in the Windows and Linux desktop builds
 
-The Windows desktop window uses dynamically linked PySide6 / Qt and Qt WebEngine.
+The Windows and Linux desktop window uses dynamically linked PySide6 / Qt and Qt WebEngine.
 PySide6 and the included Qt modules are distributed under their applicable LGPL v3
 terms. The package includes the component metadata and license files in the
 PySide6, PySide6_Essentials, PySide6_Addons and shiboken6 metadata directories.
-The application uses replaceable shared DLLs rather than a statically linked Qt.
+The application uses replaceable shared libraries rather than a statically linked Qt.
 
 Upstream source, licenses and build instructions:
 

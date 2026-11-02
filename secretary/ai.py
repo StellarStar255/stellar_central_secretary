@@ -117,6 +117,8 @@ def run(prompt, backend, images=None, timeout=240, reasoning_effort=None):
         if len(images)>8:raise ValueError('一次最多分析 8 张图片')
         if sum(len(image['data']) for image in images)>8*1024*1024:raise ValueError('图片分析数据过大，请减少图片或降低分辨率后重试')
         env = network.child_env(policy=getattr(backend,'proxy',None))
+        from .system_integration import external_env
+        env=external_env(env)
         if backend == 'gemini':
             from .gemini_cli import prepare
             cmd,prompt,env=prepare(cli,cwd,prompt,images,env,RULES)

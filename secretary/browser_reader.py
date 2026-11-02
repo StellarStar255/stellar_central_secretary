@@ -175,8 +175,9 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
             startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startup.wShowWindow = 7  # SW_SHOWMINNOACTIVE
             options['startupinfo'] = startup
+    from .system_integration import external_env
     proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True, **options)
+                            stderr=subprocess.DEVNULL, start_new_session=True, env=external_env(), **options)
     deadline = time.monotonic()+timeout
     rediscover_at=time.monotonic()+1
     while time.monotonic()<deadline:

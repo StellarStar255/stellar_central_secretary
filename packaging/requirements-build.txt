@@ -2,3 +2,4 @@ pyinstaller>=6.10,<7
 pyobjc-framework-Cocoa>=11,<13; sys_platform == 'darwin'
 pyobjc-framework-WebKit>=11,<13; sys_platform == 'darwin'
 PySide6>=6.8,<7; sys_platform == 'win32'
+PySide6>=6.8,<6.11; sys_platform == 'linux'
