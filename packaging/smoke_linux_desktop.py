@@ -63,7 +63,7 @@ def main():
             def tray_action(index):
                 tray_window=subprocess.check_output(['xdotool','search','--onlyvisible','--class','stalonetray'],text=True).splitlines()[0]
                 subprocess.run(['xdotool','mousemove','--window',tray_window,'12','12','click','3'],check=True);time.sleep(.5)
-                subprocess.run(['xdotool','key','End',*(['Up']*(6-index)),'Return'],check=True)
+                subprocess.run(['xdotool','key','Home',*(['Down']*(index+1)),'Return'],check=True)
             try:
                 status=wait(lambda:(lambda s:s if s['desktop'].get('tray') else None)(request('/api/status')))
                 assert status['desktop']['platform']=='linux'
