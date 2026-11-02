@@ -33,7 +33,13 @@ def main():
             browser_port=port();browser_profile=root/'system-browser';browser_wrapper=root/'open-browser'
             browser_wrapper.write_text('#!/bin/sh\nexec /usr/bin/google-chrome --no-sandbox --no-first-run --no-default-browser-check --disable-dev-shm-usage --user-data-dir='+str(browser_profile)+' --remote-debugging-port='+str(browser_port)+' \"$@\"\n');browser_wrapper.chmod(0o755)
             env={**os.environ,'BROWSER':str(browser_wrapper),'XDG_CURRENT_DESKTOP':'openbox','SECRETARY_DATA_DIR':str(root),'SECRETARY_UPDATE_API':f'http://127.0.0.1:{feed.server_port}/latest','QTWEBENGINE_REMOTE_DEBUGGING':f'127.0.0.1:{debug_port}','QTWEBENGINE_CHROMIUM_FLAGS':f'--disable-gpu --no-sandbox --disable-dev-shm-usage --remote-allow-origins=http://127.0.0.1:{debug_port}'}
-            proc=subprocess.Popen(command+common+['--no-browser'],env=env);channel=None;serial=0;status={}
+            browser_profile.mkdir()
+            applications=root/'xdg-data'/'applications';applications.mkdir(parents=True)
+            config=root/'xdg-config';config.mkdir()
+            (applications/'stellar-browser-probe.desktop').write_text('[Desktop Entry]\nType=Application\nName=Stellar browser launch probe\nExec='+str(browser_wrapper)+' %U\nMimeType=x-scheme-handler/http;x-scheme-handler/https;\n')
+            env.update(XDG_DATA_HOME=str(applications.parent),XDG_CONFIG_HOME=str(config));env.pop('BROWSER',None)
+            for scheme in ('http','https'):subprocess.run(['xdg-mime','default','stellar-browser-probe.desktop','x-scheme-handler/'+scheme],env=env,check=True)
+            proc=subprocess.Popen(command+common+['--no-browser'],env=env);channel=None;serial=0;status={} 
             opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
             def request(path,body=None):
                 req=urllib.request.Request(address+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json','X-Knowledge-Token':status.get('token','')})
