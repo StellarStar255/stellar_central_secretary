@@ -161,8 +161,12 @@ def run(address,service=None,server=None,open_browser=True):
     threading.Thread(target=poll,name='knowledge-status',daemon=True).start()
     try:app.exec()
     finally:
+        print('Desktop shutdown: disposing window',flush=True)
         stopped.set();timer.stop();tray.hide();window.exiting=True;window.close();window.deleteLater()
-        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete);profile.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        print('Desktop shutdown: disposing browser profile',flush=True)
+        profile.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+        print('Desktop shutdown: stopping service',flush=True)
         if server is not None:server.shutdown();worker.join(timeout=5)
         else:
             try:post('/api/desktop/heartbeat',{'owner':owner,'detach':True})

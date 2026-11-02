@@ -1,5 +1,5 @@
 """Real Ubuntu Qt/tray/dock lifecycle checks with isolated data and a local update feed."""
-import argparse,base64,json,os,socket,subprocess,sys,tempfile,threading,time,urllib.request
+import argparse,base64,json,os,signal,socket,subprocess,sys,tempfile,threading,time,urllib.request
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
@@ -28,7 +28,7 @@ def main():
             item,_=archive.add('Linux fixture','Shared desktop/browser library fixture')
             (root/'conversations.json').write_text(json.dumps({'conversations':[{'id':'fixture','title':'Shared Linux history','updated':1,'messages':[{'id':'message','role':'user','text':'Shared Linux history fixture'}]}],'activeId':'fixture'}))
             app_port,debug_port=port(),port();address=f'http://127.0.0.1:{app_port}'
-            command=[sys.executable,'-m','secretary.launcher'] if args.source else [str(Path(args.binary or 'dist/Stellar Secretary/Stellar Secretary').resolve())]
+            command=[sys.executable,'-c',"import faulthandler,runpy,signal; faulthandler.register(signal.SIGUSR1,all_threads=True); runpy.run_module('secretary.launcher',run_name='__main__')"] if args.source else [str(Path(args.binary or 'dist/Stellar Secretary/Stellar Secretary').resolve())]
             common=['--desktop','--port',str(app_port),'--data-dir',str(root)]
             browser_port=port();browser_profile=root/'system-browser';browser_wrapper=root/'open-browser'
             browser_wrapper.write_text('#!/bin/sh\nexec /usr/bin/google-chrome --no-sandbox --no-first-run --no-default-browser-check --disable-dev-shm-usage --user-data-dir='+str(browser_profile)+' --remote-debugging-port='+str(browser_port)+' \"$@\"\n');browser_wrapper.chmod(0o755)
@@ -118,7 +118,9 @@ def main():
                 subprocess.run(['xdotool','key','ctrl+q'],check=True);assert proc.wait(timeout=20)==0
                 print('PASS: Linux native window, tray menu settings/updates/quit, dock identity and minimized recovery, desktop/browser switching, shared history/library, close and relaunch reuse, no-tray Dock restore and native quit')
             except BaseException:
-                print('LAST DESKTOP STATUS:',request('/api/status'),flush=True)
+                if args.source and proc.poll() is None:proc.send_signal(signal.SIGUSR1);time.sleep(.3)
+                try:print('LAST DESKTOP STATUS:',request('/api/status'),flush=True)
+                except Exception as error:print('STATUS UNAVAILABLE:',error,flush=True)
                 subprocess.run(['xwininfo','-root','-tree'],check=False)
                 screenshot=folder/('linux-desktop-source-failure.png' if args.source else 'linux-desktop-frozen-failure.png')
                 subprocess.run([sys.executable,'-c',"from PySide6.QtWidgets import QApplication; from PySide6.QtGui import QGuiApplication; app=QApplication([]); QGuiApplication.primaryScreen().grabWindow(0).save("+repr(str(screenshot))+")"],check=False)
