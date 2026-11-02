@@ -27,7 +27,7 @@ jobs:
         run: |
           gh release download "$RELEASE_TAG" --pattern '*-linux-x64.deb' --pattern '*-linux-x64.tar.gz' --dir "$RUNNER_TEMP/linux-release"
           sudo apt-get update -qq
-          sudo apt-get install -y desktop-file-utils xdg-utils xvfb dbus-x11 libgtk-3-bin
+          sudo apt-get install -y desktop-file-utils xdg-utils xvfb dbus-x11 libgtk-3-bin fonts-noto-cjk
           sudo dpkg -i "$RUNNER_TEMP"/linux-release/*.deb
           mkdir "$RUNNER_TEMP/portable"
           tar -xzf "$RUNNER_TEMP"/linux-release/*.tar.gz -C "$RUNNER_TEMP/portable"
