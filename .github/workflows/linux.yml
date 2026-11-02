@@ -20,7 +20,10 @@ jobs:
       - name: Check Qt runtime dependencies
         run: |
           python -c 'from pathlib import Path; import PySide6,subprocess; subprocess.run(["ldd",str(Path(PySide6.__file__).parent/"Qt/plugins/platforms/libqxcb.so")],check=True)'
+      - name: Verified Debian installer helper
+        run: python packaging/check_linux_install.py
       - name: Native Linux source window and tray
+        timeout-minutes: 5
         run: dbus-run-session -- xvfb-run -a python packaging/smoke_linux_desktop.py --source
       - run: python -m unittest discover -s tests -v
       - run: node tests/test_chat_ui.cjs
@@ -35,6 +38,7 @@ jobs:
           desktop-file-validate /usr/share/applications/stellar-secretary.desktop
           SECRETARY_SMOKE_BINARY=/usr/bin/stellar-secretary python packaging/smoke.py
       - name: Native installed Linux window and tray
+        timeout-minutes: 5
         run: dbus-run-session -- xvfb-run -a python packaging/smoke_linux_desktop.py --binary /usr/bin/stellar-secretary
       - uses: actions/upload-artifact@v4
         if: always()
