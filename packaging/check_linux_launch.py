@@ -2,7 +2,7 @@
 import argparse,json,os,shlex,shutil,socket,subprocess,tempfile,time,urllib.request
 from pathlib import Path
 
-parser=argparse.ArgumentParser();parser.add_argument('--installed',action='store_true');parser.add_argument('--portable');args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--installed',action='store_true');parser.add_argument('--portable');parser.add_argument('--browser',choices=['chrome','firefox'],default='chrome');args=parser.parse_args()
 result=Path('test-results/linux-launch').resolve();result.mkdir(parents=True,exist_ok=True)
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}));checks=[]
 def get(url):
@@ -22,14 +22,16 @@ def free_port():
 with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
     root=Path(root);data_home=root/'data';config_home=root/'config'
     applications=data_home/'applications';applications.mkdir(parents=True);config_home.mkdir()
-    chrome=shutil.which('google-chrome') or shutil.which('chromium')
-    if not chrome:raise SystemExit('Install Google Chrome or Chromium for the graphical launch check')
+    browser=(shutil.which('google-chrome') or shutil.which('chromium')) if args.browser=='chrome' else shutil.which('firefox')
+    if not browser:raise SystemExit('Install the selected browser for the graphical launch check')
     modes=[]
     if args.installed:modes.append(('installed-desktop',['gtk-launch','stellar-secretary'],8768))
     if args.portable:modes.append(('portable-default',[str(Path(args.portable).resolve())],free_port()))
     for name,command,port in modes:
         browser_port=free_port();profile=root/(name+'-chrome');data=root/(name+'-data')
-        browser_command=[chrome,'--no-sandbox','--disable-dev-shm-usage','--no-first-run',f'--user-data-dir={profile}',f'--remote-debugging-port={browser_port}']
+        screenshot=result/(name+'-browser.png')
+        browser_command=([browser,'--no-sandbox','--disable-dev-shm-usage','--no-first-run',f'--user-data-dir={profile}',f'--remote-debugging-port={browser_port}'] if args.browser=='chrome'
+                         else [browser,'--no-remote','--profile',str(profile),'--headless','--screenshot',str(screenshot),'--window-size','1280,900'])
         wrapper=root/(name+'-browser')
         wrapper.write_text('#!/bin/sh\nprintf "%s\\n" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "LD_LIBRARY_PATH_ORIG=$LD_LIBRARY_PATH_ORIG" "$@" >> '+shlex.quote(str(result/(name+'-browser-env.log')))+'\n'+shlex.join(browser_command)+' "$@" > '+shlex.quote(str(result/(name+'-browser.log')))+' 2>&1 &\n')
         wrapper.chmod(0o755)
@@ -44,8 +46,9 @@ with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
         process=subprocess.Popen(command,cwd='/tmp',env=env,stdout=capture,stderr=subprocess.STDOUT)
         address=f'http://127.0.0.1:{port}'
         status=wait(lambda:get(address+'/api/status'))
-        tabs=wait(lambda:[tab for tab in get(f'http://127.0.0.1:{browser_port}/json/list') if tab.get('url','').startswith(address)],seconds=20) if status else None
-        checks.append({'case':name,'service_started':bool(status),'browser_opened':bool(tabs),'launcher_exit':process.poll()})
+        browser_check=(lambda:[tab for tab in get(f'http://127.0.0.1:{browser_port}/json/list') if tab.get('url','').startswith(address)]) if args.browser=='chrome' else screenshot.exists
+        opened=wait(browser_check,seconds=20) if status else None
+        checks.append({'case':name,'browser':args.browser,'service_started':bool(status),'browser_opened':bool(opened),'launcher_exit':process.poll()})
         if status:
             request=urllib.request.Request(address+'/api/shutdown',data=b'{"force":true}',headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
             try:opener.open(request,timeout=3).close()
