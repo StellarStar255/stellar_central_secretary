@@ -19,7 +19,7 @@ def wait(check,seconds=40):
 def free_port():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
-with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
+with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-',ignore_cleanup_errors=True) as root:
     root=Path(root);data_home=root/'data';config_home=root/'config'
     applications=data_home/'applications';applications.mkdir(parents=True);config_home.mkdir()
     browser=(shutil.which('google-chrome') or shutil.which('chromium')) if args.browser=='chrome' else shutil.which('firefox')
@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
     if args.installed:modes.append(('installed-desktop',['gtk-launch','stellar-secretary'],8768))
     if args.portable:modes.append(('portable-default',[str(Path(args.portable).resolve())],free_port()))
     for name,command,port in modes:
-        browser_port=free_port();profile=root/(name+'-chrome');data=root/(name+'-data')
+        browser_port=free_port();profile=root/(name+'-'+args.browser);data=root/(name+'-data')
         profile.mkdir()
         screenshot=result/(name+'-browser.png')
         browser_command=([browser,'--no-sandbox','--disable-dev-shm-usage','--no-first-run',f'--user-data-dir={profile}',f'--remote-debugging-port={browser_port}'] if args.browser=='chrome'
@@ -59,6 +59,10 @@ with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
         capture.close()
         if (data/'app.log').exists():shutil.copy2(data/'app.log',result/(name+'-app.log'))
         subprocess.run(['pkill','-f',str(profile)],check=False)
+        gone=lambda:subprocess.run(['pgrep','-f',str(profile)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
+        if not wait(gone,seconds=5):
+            subprocess.run(['pkill','-KILL','-f',str(profile)],check=False)
+            wait(gone,seconds=3)
         print(json.dumps(checks[-1]),flush=True)
     (result/'result.json').write_text(json.dumps(checks,indent=2))
     if not all(check['service_started'] and check['browser_opened'] for check in checks):raise SystemExit('Default Linux launch failed; see uploaded diagnostics')
