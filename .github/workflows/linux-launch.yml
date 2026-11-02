@@ -1,0 +1,40 @@
+name: Linux launch diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to install and test
+        default: v0.1.53
+        required: true
+permissions:
+  contents: read
+jobs:
+  installed-launch:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install published packages and graphical test tools
+        run: |
+          gh release download "$RELEASE_TAG" --pattern '*-linux-x64.deb' --pattern '*-linux-x64.tar.gz' --dir "$RUNNER_TEMP/linux-release"
+          sudo apt-get update -qq
+          sudo apt-get install -y desktop-file-utils xdg-utils xvfb dbus-x11 libgtk-3-bin
+          sudo dpkg -i "$RUNNER_TEMP"/linux-release/*.deb
+          mkdir "$RUNNER_TEMP/portable"
+          tar -xzf "$RUNNER_TEMP"/linux-release/*.tar.gz -C "$RUNNER_TEMP/portable"
+          lsb_release -a
+          google-chrome --version
+          desktop-file-validate /usr/share/applications/stellar-secretary.desktop
+      - name: Exercise installed desktop entry and portable default launch
+        run: dbus-run-session -- xvfb-run -a python packaging/check_linux_launch.py --installed --portable "$RUNNER_TEMP/portable/Stellar-Secretary/start.sh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-launch-diagnostics
+          path: test-results/linux-launch/
+          if-no-files-found: warn
