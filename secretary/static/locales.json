@@ -684,5 +684,15 @@
   "自定义代理无法连接：": "Cannot connect to the custom proxy: ",
   "。请启动代理软件并确认 HTTP 端口；本次不会改用直连。": ". Start your proxy app and verify its HTTP port. This request will not fall back to a direct connection.",
   "请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口": "Launch the Windows, macOS or Linux desktop application to switch to a desktop window.",
-  "无效的界面入口": "Invalid interface entry"
+  "无效的界面入口": "Invalid interface entry",
+  "资料目录位于程序目录中，请手动升级并保留资料目录。": "Your data is inside the application directory. Upgrade manually and retain the data directory.",
+  "程序目录不可写，安装包已下载并校验，请手动升级。": "The application directory is not writable. The installer is downloaded and verified; install it manually.",
+  "无法确认便携程序目录，请使用已下载的安装包手动升级。": "Cannot identify the portable application directory. Use the downloaded installer to upgrade manually.",
+  "自动升级需要系统 Python 3；安装包已下载并校验，可手动替换程序目录。": "Automatic updates require system Python 3. The download is verified; you can replace the application directory manually.",
+  "系统未提供图形授权工具。安装包已下载并校验，请手动安装。": "No graphical authorization tool is available. The installer is downloaded and verified; install it manually.",
+  "系统安装未完成或授权已取消；程序继续运行，可查看升级日志后重试。": "Installation did not complete or authorization was cancelled. The app remains running; check the update log and retry.",
+  "升级归档过大": "Update archive is too large",
+  "升级归档路径无效": "Invalid update archive path",
+  "升级归档缺少完整程序": "Update archive is missing the complete application",
+  "升级程序缺少执行权限": "The update executable lacks execute permission"
 }
