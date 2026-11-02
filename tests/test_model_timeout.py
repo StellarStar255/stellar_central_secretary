@@ -9,7 +9,7 @@ class ModelTimeoutTest(unittest.TestCase):
             proc=popen([sys.executable,'-c','import sys,time; sys.stdin.read(); time.sleep(30)'],**kwargs)
             workers.append(proc)
             return proc
-        with patch.object(ai,'executable',return_value='synthetic-cli'),patch.object(ai.subprocess,'Popen',side_effect=worker):
+        with patch.object(ai,'executable',return_value='synthetic-cli'),patch.object(ai.network,'child_env',return_value={}),patch.object(ai.subprocess,'Popen',side_effect=worker):
             with self.assertRaises(ai.ModelTimeoutError):ai.run('Test','codex',timeout=.05)
         proc=workers[0]
         self.assertIsNotNone(proc.poll());self.assertNotIn(proc,ai._processes)
@@ -22,5 +22,5 @@ class ModelTimeoutTest(unittest.TestCase):
             ai.cancel_all()
             return json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'late'}}),''
         proc.communicate.side_effect=stop
-        with patch.object(ai,'executable',return_value='synthetic-cli'),patch.object(ai.subprocess,'Popen',return_value=proc),patch('secretary.capture_worker.terminate_job'):
+        with patch.object(ai,'executable',return_value='synthetic-cli'),patch.object(ai.network,'child_env',return_value={}),patch.object(ai.subprocess,'Popen',return_value=proc),patch('secretary.capture_worker.terminate_job'):
             with self.assertRaisesRegex(RuntimeError,'停止'):ai.run('Test','codex')

@@ -14,7 +14,7 @@ class LinuxPackagingTests(unittest.TestCase):
             with patch.dict(os.environ, {'XDG_DATA_HOME': '/test-xdg'}, clear=True):
                 self.assertEqual(paths.data_dir(), Path('/test-xdg/stellar-secretary'))
             with patch.dict(os.environ, {'SECRETARY_DATA_DIR': '/override', 'XDG_DATA_HOME': '/test-xdg'}, clear=True):
-                self.assertEqual(paths.data_dir(), Path('/override'))
+                self.assertEqual(paths.data_dir(), Path('/override').resolve())
 
     def test_linux_update_check_never_selects_windows_installer(self):
         with patch.object(updater, 'MAC', False), patch.object(updater, 'WINDOWS', False), patch.object(updater.sys, 'platform', 'linux'), patch.object(paths, 'FROZEN', True):
