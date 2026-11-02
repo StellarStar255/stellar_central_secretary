@@ -37,11 +37,15 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#settings-open').click();page.locator('#backend').select_option('api')
     expect(page.locator('#model-api-settings')).to_be_visible()
     page.locator('#api-base-url').fill(base_api);page.locator('#api-model').fill('synthetic-model');page.locator('#api-key').fill(key)
+    page.locator('#model-proxy-mode').select_option('custom');page.locator('#model-proxy-url').fill('http://127.0.0.1:1')
+    page.locator('#model-connection-test').click();expect(page.locator('#model-connection-result')).to_have_text('模型连接测试成功',timeout=15000)
+    assert page.request.get(base+'/api/status').json()['settings']['model_proxy']['mode']=='auto','Connection test must not save proxy settings'
+
     page.locator('#api-test').click();expect(page.locator('#api-test-result')).to_have_text('API 连接测试成功',timeout=15000)
-    assert len(requests)==1 and 'connection test' in requests[0][1]['messages'][1]['content']
+    assert len(requests)==2 and 'connection test' in requests[0][1]['messages'][1]['content']
     page.locator('#settings-save').click();expect(page.locator('#settings-dialog')).not_to_be_visible()
     expect(page.locator('#model-label')).to_contain_text('synthetic-model');expect(page.locator('#api-key')).to_have_value('')
-    status=page.request.get(base+'/api/status').json();assert key not in json.dumps(status) and status['model_api']['has_key']
+    status=page.request.get(base+'/api/status').json();assert status['settings']['model_proxy']=={'mode':'custom','url':'http://127.0.0.1:1'};assert key not in json.dumps(status) and status['model_api']['has_key']
     assert key not in page.evaluate('JSON.stringify(localStorage)')
     page.locator('#message-input').fill('What is the synthetic reference?');page.locator('#send-button').click()
     expect(page.locator('#messages')).to_contain_text('Synthetic API answer',timeout=15000)
@@ -64,13 +68,18 @@ with tempfile.TemporaryDirectory() as root:
     with zipfile.ZipFile(io.BytesIO(service.backup())) as backup:assert all(key.encode() not in backup.read(name) for name in backup.namelist())
     page.locator('#settings-open').click();page.screenshot(path='/tmp/secretary-custom-model-api.png')
     expect(page.locator('#api-key')).to_have_value('');expect(page.locator('#api-key')).to_have_attribute('placeholder','密钥已保存，留空保持')
-    page.reload();page.locator('#settings-open').click();expect(page.locator('#api-model')).to_have_value('synthetic-model')
+    page.reload();page.locator('#settings-open').click();expect(page.locator('#api-model')).to_have_value('synthetic-model');expect(page.locator('#model-proxy-mode')).to_have_value('custom');expect(page.locator('#model-proxy-url')).to_have_value('http://127.0.0.1:1')
+    page.locator('#backend').select_option('gemini');expect(page.locator('#model-label')).to_have_text('Gemini');expect(page.locator('#gemini-cli-help')).to_be_visible()
+    page.locator('#backend').select_option('api');expect(page.locator('#gemini-cli-help')).not_to_be_visible();expect(page.locator('#model-label')).to_contain_text('API')
+    page.locator('#model-proxy-settings').scroll_into_view_if_needed();page.screenshot(path='/tmp/secretary-model-proxy-settings.png')
+    page.locator('#ui-language').select_option('en');expect(page.locator('#model-proxy-settings h3')).to_have_text('Model connection & proxy')
+    page.locator('#model-proxy-settings').scroll_into_view_if_needed();page.screenshot(path='/tmp/secretary-model-proxy-settings-en.png')
     assert not errors,errors
     redirect={**model_api.read(root),'base_url':f'http://127.0.0.1:{provider.server_port}/redirect'}
     try:ai.run('Synthetic redirect test',redirect)
     except RuntimeError:pass
     else:raise AssertionError('Redirect must not forward the key')
     assert not any(path.startswith('/leak') for path,_,_ in requests)
-    print('PASS: configurable API endpoint/model/key; real isolated worker and HTTP test; archive question; text-only image fallback; enabled base64 vision; saved key never returned or cached; backup excludes key; reload preserves config; redirects blocked; synthetic local service only')
+    print('PASS: proxy mode/address saved and restored; unsaved model connection test; local API bypasses unavailable external proxy; configurable API endpoint/model/key; real isolated worker and HTTP test; archive question; text-only image fallback; enabled base64 vision; saved key never returned or cached; backup excludes key; reload preserves config; redirects blocked; synthetic local service only')
    finally:browser.close()
  finally:service.close();server.shutdown();server.server_close();provider.shutdown();provider.server_close()

@@ -1,18 +1,43 @@
 """Resolve model-process proxy routes without changing system configuration."""
 import os
+import ipaddress
 import re
 import socket
 import subprocess
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,urlunsplit
 
 
 PROXY_KEYS=('https_proxy','HTTPS_PROXY','http_proxy','HTTP_PROXY','all_proxy','ALL_PROXY')
 
+def is_loopback_url(url):
+    try:
+        host=urlsplit(url).hostname
+        if host=='localhost':return True
+        return ipaddress.ip_address(host).is_loopback
+    except (ValueError,TypeError):return False
+
+def proxy_config(value=None):
+    if value is None:return {'mode':'auto','url':''}
+    if not isinstance(value,dict) or value.get('mode') not in ('auto','direct','custom'):raise ValueError('无效的模型代理设置')
+    mode=value['mode']
+    if mode!='custom':return {'mode':mode,'url':''}
+    url=value.get('url','')
+    message='请填写有效的 HTTP 代理地址，例如 http://127.0.0.1:7897；地址不能包含账号密码、路径或查询参数。'
+    if not isinstance(url,str) or len(url)>2048:raise ValueError(message)
+    url=url.strip()
+    try:
+        parsed=urlsplit(url);port=parsed.port
+        if (parsed.scheme!='http' or not parsed.hostname or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ('','/') or parsed.query or parsed.fragment or any(ord(c)<=32 for c in url)
+            or (port is not None and not 1<=port<=65535)):raise ValueError(message)
+    except ValueError:raise ValueError(message) from None
+    return {'mode':mode,'url':urlunsplit(('http',parsed.netloc,'','',''))}
+
 
 def local_proxy_alive(url):
     parsed=urlsplit(url)
-    if parsed.hostname not in ('127.0.0.1','localhost','::1'): return True
+    if not is_loopback_url(url): return True
     try:
         with socket.create_connection((parsed.hostname,parsed.port or 80),timeout=.5):return True
     except ConnectionRefusedError:return False
@@ -46,9 +71,23 @@ def http_proxy_works(url):
     except OSError:return False
 
 
-def child_env(source=None):
+def child_env(source=None,policy=None):
     env=dict(os.environ if source is None else source)
     env.pop('CLAUDECODE',None)
+    policy=proxy_config(policy)
+    if policy['mode']=='direct':
+        for key in PROXY_KEYS:env.pop(key,None)
+        env['no_proxy']=env['NO_PROXY']='*'
+        env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
+        return env
+    if policy['mode']=='custom':
+        route=policy['url']
+        if not local_proxy_alive(route):raise RuntimeError('自定义代理无法连接：'+describe({'HTTP_PROXY':route})+'。请启动代理软件并确认 HTTP 端口；本次不会改用直连。')
+        for key in PROXY_KEYS:env.pop(key,None)
+        for key in ('http_proxy','HTTP_PROXY','https_proxy','HTTPS_PROXY'):env[key]=route
+        env['no_proxy']=env['NO_PROXY']='localhost,127.0.0.1,::1'
+        env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
+        return env
     explicit=next((env[k] for k in PROXY_KEYS if env.get(k)),None)
     route=explicit if explicit and local_proxy_alive(explicit) else None
     if not route:

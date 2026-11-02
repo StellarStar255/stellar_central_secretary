@@ -1,13 +1,13 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const html=fs.readFileSync('secretary/static/index.html','utf8');
 const elements=new Map();
-function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,open:false,style:{},dataset:{},scrollHeight:100,scrollTop:0,clientHeight:500,classList:{add(){},remove(){},toggle(){}},querySelectorAll(){return[]},querySelector(){return element()},addEventListener(){},focus(){},showModal(){this.open=true},close(){this.open=false},append(){}}}
+function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,open:false,style:{},dataset:{},scrollHeight:100,scrollTop:0,clientHeight:500,classList:{add(){},remove(){},toggle(){}},querySelectorAll(){return[]},querySelector(){return element()},addEventListener(type,callback){this.listeners??={};(this.listeners[type]??=[]).push(callback)},focus(){},showModal(){this.open=true},close(){this.open=false},append(){}}}
 for(const id of html.matchAll(/id="([^"]+)"/g))elements.set('#'+id[1],element());
 elements.get('#backend').value='codex';elements.get('#input-mode').value='auto';
-const calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current';
-const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:()=>1,clearTimeout(){},setInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:{classList:{add(){},remove(){},toggle(){}}},hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{
+const timerDelays=[],calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current';
+const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:(callback,delay)=>{timerDelays.push(delay);return 1},clearTimeout(){},setInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:{classList:{add(){},remove(){},toggle(){}}},hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{
  const body=options?.body?JSON.parse(options.body):undefined;calls.push({path,body});
- let data;if(path==='/api/status')data={token:'test',capabilities:captureCapability?{conversation_capture:true,manual_browser_login:true,profile_window_reuse:true,in_place_browser_read:true}:{},settings:{backend:'codex',auto_ai:true},backends:{codex:true,claude:true},data_dir:'/tmp/test'};
+ let data;if(path==='/api/status')data={token:'test',capabilities:captureCapability?{conversation_capture:true,manual_browser_login:true,profile_window_reuse:true,in_place_browser_read:true}:{},settings:{backend:'codex',auto_ai:true},backends:{codex:true,claude:true,gemini:true},data_dir:'/tmp/test'};
  else if(path.endsWith('/confirm-login')){
   if(rejectNextConfirmation){rejectNextConfirmation=false;return{ok:false,status:403,json:async()=>({error:'请求验证失败'})}}
   if(failNextConfirmation){failNextConfirmation=false;return{ok:false,status:400,json:async()=>({error:'登录任务已经结束，请重新打开浏览器'})}}
@@ -18,12 +18,13 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else if(path.startsWith('/api/items'))data=archive;
  else if(path==='/api/ingest'){const item={id:'a'+archive.length,title:body.url||'笔记',url:body.url||'',kind:body.url?'link':'note',category:'未分类',state:'pending',text:body.text||'',summary:'',tags:[],created:new Date().toISOString()};archive.push(item);data={created:true,item}}
  else if(path==='/api/conversations')data=body||{conversations:[],activeId:''};
+ else if(path==='/api/model-connection/test')data={ok:true};
  else if(path==='/api/interface')data={ok:true,mode:body.mode};
  else if(path==='/api/ask')data={answer:'这是带来源的答案。',sources:[{number:1,item_id:'a0',title:'来源资料'}]};
  else throw Error('unexpected API '+path);
  return{ok:true,json:async()=>data};
 }};
-vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
+vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','model-proxy-ui.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
 const sample='用户：\n解释一下 ETF\n\nChatGPT：\n## 基金\n\n**重点**\n\n1. 第一项\n2. 第二项\n\n```text\n用户：\n<script>alert(1)</script>\n```\n\n用户：\n继续\n\nClaude：\n[原件](https://example.com)';
 context.readerSample=sample;
 assert.equal(vm.runInContext('parseArchivedConversation(readerSample).length',context),4);
@@ -39,6 +40,16 @@ assert(vm.runInContext('renderArchivedBody({kind:"file",text:readerSample})',con
 async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r))}
 (async()=>{
  await flush();assert.equal(elements.get('#model-label').textContent,'ChatGPT · Codex');
+ assert(html.includes('<option value="gemini">Gemini · Gemini CLI</option>'));
+ elements.get('#backend').value='gemini';for(const change of elements.get('#backend').listeners.change)change();assert.equal(elements.get('#model-label').textContent,'Gemini');assert.equal(elements.get('#gemini-cli-help').hidden,false);
+ elements.get('#backend').value='codex';vm.runInContext('updateModelLabel()',context);
+ assert.equal(elements.get('#model-proxy-mode').value,'auto');
+ elements.get('#model-proxy-mode').value='custom';elements.get('#model-proxy-mode').listeners.input[0]();elements.get('#model-proxy-url').value='http://127.0.0.1:4567';
+ vm.runInContext('StellarModelProxy.sync({mode:"direct",url:""})',context);assert.equal(elements.get('#model-proxy-mode').value,'custom');
+ const beforeConnectionTimers=timerDelays.length;await elements.get('#model-connection-test').onclick();assert(timerDelays.slice(beforeConnectionTimers).includes(300000),'Model tests must not use the 12-second local-request deadline');
+ const connection=calls.filter(c=>c.path==='/api/model-connection/test').pop();assert.equal(connection.body.backend,'codex');assert.deepEqual(connection.body.model_proxy,{mode:'custom',url:'http://127.0.0.1:4567'});
+ vm.runInContext('StellarModelProxy.saved({mode:"auto",url:""})',context);assert.equal(elements.get('#model-proxy-mode').value,'auto');
+
  const input=elements.get('#message-input'),form=elements.get('#composer-form');
  input.value='https://chatgpt.com/c/test';await form.onsubmit({preventDefault(){}});
  assert(calls.some(c=>c.path==='/api/ingest'&&c.body.url===inputUrl));

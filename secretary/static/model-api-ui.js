@@ -7,6 +7,6 @@
  function saved(value){$('#api-key').value='';dirty=false;sync(value)}
  function bind({api}){for(const node of $('#model-api-settings').querySelectorAll('input,select'))node.addEventListener('input',()=>{dirty=true;toggle()});$('#backend').addEventListener('change',toggle);
   $('#api-deepseek').onclick=()=>{dirty=true;$('#api-base-url').value='https://api.deepseek.com';$('#api-model').value='deepseek-flash';$('#api-vision').checked=true;$('#api-json').checked=true;$('#api-no-key').checked=false;$('#api-max-tokens').value=8192;$('#api-token-parameter').value='max_tokens';toggle()};
-  $('#api-test').onclick=async()=>{const button=$('#api-test');button.disabled=true;$('#api-test-result').textContent=t('正在测试 API 连接…');try{await api('/api/model-api/test',collect());$('#api-test-result').textContent=t('API 连接测试成功')}catch(error){$('#api-test-result').textContent=StellarI18n.message(error.message)}finally{button.disabled=false}}}
+  $('#api-test').onclick=async()=>{const button=$('#api-test');button.disabled=true;$('#api-test-result').textContent=t('正在测试 API 连接…');try{await api('/api/model-api/test',{...collect(),model_proxy:globalThis.StellarModelProxy?.collect()});$('#api-test-result').textContent=t('API 连接测试成功')}catch(error){$('#api-test-result').textContent=StellarI18n.message(error.message)}finally{button.disabled=false}}}
  globalThis.StellarModelAPI={sync,collect,saved,bind};
 })();

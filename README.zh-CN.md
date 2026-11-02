@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.52** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.52.md)
+版本 **v0.1.53** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.53.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -24,7 +24,7 @@
 
 Linux 的资料保存在 `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`。停止旧进程后安装新版 `.deb` 或替换便携程序目录即可升级，资料保留；暂不支持程序内自动安装升级。运行 `stellar-secretary --no-browser` 可不自动打开浏览器；从终端启动时按 Ctrl+C 停止。
 
-安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI 或 Claude Code。Windows 与 macOS 安装版均支持独立桌面窗口和网页模式。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 自带 Chromium 内核，无需另装 WebView2；关闭桌面窗口后常驻系统托盘，可从托盘菜单或再次双击应用恢复窗口。支持 Windows 10 1809 及以上版本与 Windows 11 x64。
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI、Claude Code 或 Gemini CLI。Windows 与 macOS 安装版均支持独立桌面窗口和网页模式。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 自带 Chromium 内核，无需另装 WebView2；关闭桌面窗口后常驻系统托盘，可从托盘菜单或再次双击应用恢复窗口。支持 Windows 10 1809 及以上版本与 Windows 11 x64。
 
 在「模型与设置 → 显示语言」选择「简体中文」或「English」即可即时切换界面，选择会保留并同步到网页和桌面模式。资料标题、原文和已有摘要不会被翻译。交互教程跟随当前语言，也可在教程页单独选择语言；教程内切换不改变程序设置。
 
@@ -95,7 +95,7 @@ PDF 支持无需打开密码的 AES 加密文档与特殊字体文字提取。�
 - 从旧版迁移到 v0.1.4 时，会使用新的专用目录；第一次需在新窗口登录一次。旧版浏览器目录保留，不迁移 Cookie 或密码。
 - 该窗口仅用于知识采集；程序只提取目标会话中标记为用户和助手的消息，不读取登录表单，不代输密码，不点击登录或验证码。
 - 登录等待最长 10 分钟，确认后正文读取最长 90 秒。当前窗口未登录时会直接提示，保留窗口供你完成登录。
-- 网页登录用于读取私有会话，本机 Codex / Claude CLI 登录用于生成摘要，两者独立。需安装 Google Chrome 和启动脚本提供的 Playwright 包。
+- 网页登录用于读取私有会话，本机 Codex / Claude / Gemini CLI 登录用于生成摘要，两者独立。需安装 Google Chrome 和启动脚本提供的 Playwright 包。
 
 本流程针对关闭重开导致会话丢失的问题做了模拟回归验证，包括：连接原浏览器、复用原上下文、保留页面、不关闭浏览器、未登录页面的明确提示。真实 Google 登录和 ChatGPT 会话采集仍需在用户桌面环境验证。长对话只总结实际读取到的正文，可在资料详情核对。
 
@@ -128,12 +128,17 @@ Claude 私有链接目前使用下述扩展或粘贴正文方式。
 
 - **ChatGPT · Codex CLI**：调用本机 `codex exec`，复用已有 CLI 登录。
 - **Claude · Claude Code**：调用本机 `claude -p`，复用已有登录。
+- **Gemini · Gemini CLI**：调用本机 `gemini` 的非交互 JSON 接口，复用已有 CLI 登录或环境中的鉴权配置，支持文字和显式附加的图片。请使用新版 CLI（已核验 0.66.0）；安装命令为 `npm install -g @google/gemini-cli`，首次运行 `gemini` 完成登录，再在知识秘书中选择 Gemini。
 
-无需另填 API Key。需要相应 CLI 可用且已经登录；仅安装 ChatGPT/Claude 桌面 App 并不等同于 CLI 已登录。程序会检测本机可用的 CLI，实际登录状态和账户额度在调用时验证。调用使用账户对应额度，资料会发送给对应的在线模型服务；原件存储、搜索和下载可离线使用。
+无需另填 API Key。需要相应 CLI 可用且已经登录；仅安装 ChatGPT/Claude/Gemini 桌面 App 并不等同于 CLI 已登录。程序会检测本机可用的 CLI，实际登录状态和账户额度在调用时验证。调用使用账户对应额度，资料会发送给对应的在线模型服务；原件存储、搜索和下载可离线使用。
 
 程序关闭模型工具、外部 MCP 配置和联网搜索，模型仅处理显式传入的资料文本。摘要任务在后台串行处理；长文按段落先提炼后汇总。失败或超时在详情中显示，不阻碍归档。可关闭自动 AI，稍后逐条点击「重新整理」。
 
+Gemini 调用依据：[非交互接口](https://geminicli.com/docs/cli/headless/)和[CLI 配置](https://geminicli.com/docs/reference/configuration/)。调用在临时工作目录关闭工具、钩子、扩展与 MCP，归档文字中的 `@文件` 不会触发文件展开；仅显式附加的图片会载入。Gemini CLI 可能按自身机制保留本机会话记录。
+
 Codex 非交互调用依据：[官方文档](https://learn.chatgpt.com/docs/non-interactive-mode)。
+
+在「模型与设置 → 模型连接与代理」选择自动检测、直连或自定义 HTTP 代理。配置同时用于 Claude、Codex、Gemini、自定义模型 API 和连接测试。可填写代理软件的 HTTP / Mixed 端口（如 `http://127.0.0.1:7897`），不接受 SOCKS 地址或 URL 中的账号密码。自定义代理不可用时明确报错，不会回退直连；本机模型 API 始终直连，浏览器采集保持原有连接方式。「测试当前模型连接」使用尚未保存的选项，不发送知识库资料，也不会修改已保存设置。
 
 ## 检索与当前边界
 
@@ -181,7 +186,7 @@ v0.1.4 改为通过 CDP 连接仍在运行的浏览器，不再关闭重开窗�
 
 ## 正文已保存但摘要连接失败
 
-双击「重试摘要.command」，直接使用已保存的正文调用当前设置的 Codex / Claude，无需重新读取网页，也无需重启主服务。成功后刷新页面查看摘要。该脚本不会重复启动已经处于处理中的资料。
+双击「重试摘要.command」，直接使用已保存的正文调用当前设置的 Codex / Claude / Gemini，无需重新读取网页，也无需重启主服务。成功后刷新页面查看摘要。该脚本不会重复启动已经处于处理中的资料。
 
 模型子进程会检查继承的本地代理是否拒绝连接。无可用配置时，检查系统代理与正在运行的本机代理进程；自动发现的代理必须通过 HTTP CONNECT 验证才能采用。此选择只作用于模型子进程，不修改系统代理或 CLI 配置。连接方式和结果保存在 `data/last-ai-diagnostic.json`，不包含代理密码、Cookie 或模型提示正文。
 
@@ -197,7 +202,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.52 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.53 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 
@@ -263,7 +268,7 @@ AI 图片解读与原文分开显示并参与搜索，识别内容仍需核对�
 
 ## 自定义模型 API
 
-在「模型与设置 → AI 后端」选择「自定义模型 API（OpenAI 兼容）」，填写 API 地址、模型名和 API Key，测试连接后保存。提供 DeepSeek 示例，也可手动配置其他兼容的云端或本地服务；API 模式不需要安装 Codex / Claude CLI。支持 Chat Completions 格式，其他原生协议需要兼容端点或适配器。远程地址要求 HTTPS，本机回环地址可用 HTTP，无鉴权的本地服务可勾选「无需 API Key」。
+在「模型与设置 → AI 后端」选择「自定义模型 API（OpenAI 兼容）」，填写 API 地址、模型名和 API Key，测试连接后保存。提供 DeepSeek 示例，也可手动配置其他兼容的云端或本地服务；API 模式不需要安装 Codex / Claude / Gemini CLI。支持 Chat Completions 格式，其他原生协议需要兼容端点或适配器。远程地址要求 HTTPS，本机回环地址可用 HTTP，无鉴权的本地服务可勾选「无需 API Key」。
 
 只有模型支持图片时才启用图片输入；未启用时仅整理文字，明确标注图片未识别，原件保留。可选 JSON 输出模式，并按服务要求选择 `max_tokens` 或 `max_completion_tokens`。
 

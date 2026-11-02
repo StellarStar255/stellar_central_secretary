@@ -154,13 +154,17 @@ class Archive:
         except (TypeError,ValueError):content_scale=100
         if not 70<=content_scale<=200:content_scale=100
         return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
+                'model_proxy':{'mode':values.get('model_proxy_mode','auto'),'url':values.get('model_proxy_url','')},
                 'capture_background': values.get('capture_background', 'true') == 'true',
                 'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
                 'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size, 'content_font_scale':content_scale}
-    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None):
-        if backend not in ('codex', 'claude','api'): raise ValueError('未知模型后端')
+    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None, model_proxy=None):
+        if backend not in ('codex', 'claude','gemini','api'): raise ValueError('未知模型后端')
+        from . import network
+        proxy=network.proxy_config(model_proxy) if model_proxy is not None else None
         with self.db() as db:
             pairs=[('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())]
+            if proxy is not None:pairs.extend([('model_proxy_mode',proxy['mode']),('model_proxy_url',proxy['url'])])
             if capture_scope is not None:
                 if capture_scope not in ('recent','loaded','full'):raise ValueError('无效的会话读取范围')
                 pairs.append(('capture_scope',capture_scope))

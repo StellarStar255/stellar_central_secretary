@@ -2,7 +2,7 @@
 import argparse
 import json
 from pathlib import Path
-from . import ai, network
+from . import ai, network, model_api
 from .core import Archive
 
 
@@ -14,7 +14,9 @@ def retry(archive, item_id):
         raise RuntimeError('该资料正在处理或尚无正文，本次没有重复启动任务。')
     try:
         item = archive.get(item_id)
-        archive.update(item_id, **ai.summary_fields(item, archive.settings()['backend']))
+        settings=archive.settings();proxy=settings['model_proxy'];name=settings['backend']
+        backend={**model_api.prepare(archive.root,{}),'_proxy':proxy} if name=='api' else ai.CLIBackend(name,proxy)
+        archive.update(item_id, **ai.summary_fields(item, backend))
     except BaseException as exc:
         archive.update(item_id, state='error', error=str(exc)[:1600] or '摘要任务已中断，可重新运行。')
         raise
@@ -35,7 +37,7 @@ def run():
     diagnostic = {'item_id': item_id, 'backend': archive.settings()['backend']}
     try:
         print('正在检查模型连接；本次只处理已保存的正文。', flush=True)
-        diagnostic['route'] = network.describe(network.child_env())
+        diagnostic['route'] = network.describe(network.child_env(policy=archive.settings()['model_proxy']))
         print('模型连接方式：'+diagnostic['route'], flush=True)
         print('正在生成摘要；模型超时会自动分段重试，正文与原件保持保存…', flush=True)
         item = retry(archive, item_id)

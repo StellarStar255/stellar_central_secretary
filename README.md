@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.52** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.52.md)
+Version **v0.1.53** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.53.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -18,7 +18,11 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 - **Windows 10/11 x64:** run the setup EXE.
 - **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Linux uses your default browser; native desktop/tray mode is currently available on macOS and Windows. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
 
-Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
+Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code / Gemini CLI, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
+
+Model connections support **Automatic**, **Direct**, or **Custom HTTP proxy** in Models & settings. The selected route applies to Claude, Codex, Gemini and custom model APIs, including connection tests. Use the HTTP / Mixed port of your proxy app (for example `http://127.0.0.1:7897`); SOCKS URLs and credentials in proxy URLs are not supported. Custom proxy failures do not fall back to direct connections. Local model APIs bypass the proxy; browser capture keeps its existing route.
+
+For Gemini, install the current [Gemini CLI](https://geminicli.com/docs/get-started/installation/) (`npm install -g @google/gemini-cli`), run `gemini` once to sign in, then select **Gemini · Gemini CLI** in Models & settings. Text and explicitly attached images are supported; a Gemini website sign-in alone does not sign in the CLI. The adapter is verified with CLI 0.66.0 using a local simulated Gemini API.
 
 In **Models & settings → Display language**, choose **English** or **简体中文**. The interface updates immediately and remembers your choice across desktop and browser modes. Saved titles, originals and existing summaries are not translated.
 

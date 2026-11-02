@@ -73,9 +73,14 @@ def complete(config,prompt,images):
     if config['json_mode'] and '仅输出 JSON' in prompt:payload['response_format']={'type':'json_object'}
     headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'StellarSecretary'}
     if config['use_key']:headers['Authorization']='Bearer '+config['api_key']
-    host=urlsplit(base).hostname
+    from .network import is_loopback_url
     handlers=[NoRedirect()]
-    if host in ('localhost','127.0.0.1','::1'):handlers.append(urllib.request.ProxyHandler({}))
+    if is_loopback_url(base):handlers.append(urllib.request.ProxyHandler({}))
+    elif '_proxy' in config:
+        from .network import proxy_config
+        proxy=proxy_config(config['_proxy'])
+        if proxy['mode']=='direct':handlers.append(urllib.request.ProxyHandler({}))
+        elif proxy['mode']=='custom':handlers.append(urllib.request.ProxyHandler({'http':proxy['url'],'https':proxy['url']}))
     opener=urllib.request.build_opener(*handlers)
     try:
         with opener.open(urllib.request.Request(base+'/chat/completions',data=json.dumps(payload,ensure_ascii=False).encode(),headers=headers),timeout=120) as response:
