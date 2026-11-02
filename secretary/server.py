@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Archive, PageText, extract
-from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor
+from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
 from . import __version__
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -142,9 +142,11 @@ class Service:
         self.interface_request={'mode':mode,'id':secrets.token_hex(16)}
         return {'ok':True,'mode':mode}
 
-    def model_backend(self):
-        backend=self.archive.settings()['backend']
-        return model_api.prepare(self.archive.root,{}) if backend=='api' else backend
+    def model_backend(self,backend=None,proxy=None,api_config=None):
+        settings=self.archive.settings();backend=settings['backend'] if backend is None else backend
+        if backend not in (*ai.CLI_BACKENDS,'api'):raise ValueError('未知模型后端')
+        proxy=network.proxy_config(settings['model_proxy'] if proxy is None else proxy)
+        return {**model_api.prepare(self.archive.root,api_config or {}),'_proxy':proxy} if backend=='api' else ai.CLIBackend(backend,proxy)
 
     def desktop_status(self):
         with self.lock:
@@ -177,20 +179,30 @@ class Service:
         value=model_api.prepare(self.archive.root,body.get('model_api',{})) if body.get('backend')=='api' else None
         try:
             if value is not None:model_api.write(self.archive.root,value)
-            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'))
+            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'))
         except BaseException:
             if value is not None:
                 if previous is None:path.unlink(missing_ok=True)
                 else:model_api.write(self.archive.root,json.loads(previous))
             raise
-        return {'ok':True,'model_api':model_api.public(self.archive.root)}
+        return {'ok':True,'model_api':model_api.public(self.archive.root),'model_proxy':self.archive.settings()['model_proxy']}
 
     def test_model_api(self,body):
-        config=model_api.prepare(self.archive.root,body)
+        config=self.model_backend('api',body.get('model_proxy'),body)
         with self.lock:self.questions+=1
         try:
             with self.summary_jobs.session('api-test-'+secrets.token_hex(8),short=True):
-                ai.run('Reply with exactly OK. This is a connection test, no user documents are included.',config)
+                ai.run('Reply with exactly OK. This is a connection test, no user documents are included.',config,timeout=60)
+            return {'ok':True}
+        finally:
+            with self.lock:self.questions-=1
+
+    def test_model_connection(self,body):
+        backend=self.model_backend(body.get('backend'),body.get('model_proxy'),body.get('model_api'))
+        with self.lock:self.questions+=1
+        try:
+            with self.summary_jobs.session('model-test-'+secrets.token_hex(8),short=True):
+                ai.run('Reply with exactly OK. This is a connection test, no user documents are included.',backend,timeout=60,reasoning_effort='low')
             return {'ok':True}
         finally:
             with self.lock:self.questions-=1
@@ -631,7 +643,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ('codex','claude')}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 batch_download=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions/([a-f0-9]{32})/file',path)
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
@@ -673,7 +685,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -710,6 +722,7 @@ def handler(service):
                         service.archive.set_content_font_scale(body['content_font_scale']);return self.send(200,{'ok':True,'content_font_scale':body['content_font_scale']})
                     service.archive.set_font_size(body.get('ui_font_size'));return self.send(200,{'ok':True,'ui_font_size':body['ui_font_size']})
                 if path=='/api/model-api/test':return self.send(200,service.test_model_api(body))
+                if path=='/api/model-connection/test':return self.send(200,service.test_model_connection(body))
                 if path=='/api/settings':return self.send(200,service.save_settings(body))
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
