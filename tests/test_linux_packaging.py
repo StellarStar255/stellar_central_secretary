@@ -26,7 +26,7 @@ class LinuxPackagingTests(unittest.TestCase):
         with patch.object(paths, 'FROZEN', True), patch.object(paths.sys, 'platform', 'linux'), patch.object(Path, 'is_file', return_value=True):
             with patch.dict(os.environ, {}, clear=True):
                 paths.configure_tls()
-                self.assertEqual(os.environ['SSL_CERT_FILE'], '/etc/ssl/certs/ca-certificates.crt')
+                self.assertEqual(os.environ['SSL_CERT_FILE'], str(Path('/etc/ssl/certs/ca-certificates.crt')))
             with patch.dict(os.environ, {'SSL_CERT_FILE': '/custom-roots'}, clear=True):
                 paths.configure_tls()
                 self.assertEqual(os.environ['SSL_CERT_FILE'], '/custom-roots')
