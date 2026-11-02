@@ -29,6 +29,7 @@ with tempfile.TemporaryDirectory(prefix='stellar-linux-launch-') as root:
     if args.portable:modes.append(('portable-default',[str(Path(args.portable).resolve())],free_port()))
     for name,command,port in modes:
         browser_port=free_port();profile=root/(name+'-chrome');data=root/(name+'-data')
+        profile.mkdir()
         screenshot=result/(name+'-browser.png')
         browser_command=([browser,'--no-sandbox','--disable-dev-shm-usage','--no-first-run',f'--user-data-dir={profile}',f'--remote-debugging-port={browser_port}'] if args.browser=='chrome'
                          else [browser,'--no-remote','--profile',str(profile),'--headless','--screenshot',str(screenshot),'--window-size','1280,900'])
