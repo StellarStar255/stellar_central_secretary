@@ -138,7 +138,7 @@ def run(address,service=None,server=None,open_browser=True):
         state['desktop']=metadata
         if service is not None:service.desktop=metadata
     def tick():
-        if state['exit'] or worker is not None and not worker.is_alive():app.quit();return
+        if state['exit'] or worker is not None and not worker.is_alive():window.exiting=True;app.quit();return
         value=state['value']
         if value and not mode['started']:
             mode['started']=True
