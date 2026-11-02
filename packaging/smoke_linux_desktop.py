@@ -61,7 +61,8 @@ def main():
                 if result.get('exceptionDetails'):raise AssertionError(result['exceptionDetails'])
                 return result.get('result',{}).get('value')
             def tray_action(index):
-                subprocess.run(['xdotool','mousemove','12','12','click','3'],check=True);time.sleep(.3)
+                tray_window=subprocess.check_output(['xdotool','search','--onlyvisible','--class','stalonetray'],text=True).splitlines()[0]
+                subprocess.run(['xdotool','mousemove','--window',tray_window,'12','12','click','3'],check=True);time.sleep(.5)
                 subprocess.run(['xdotool','key','Home',*(['Down']*index),'Return'],check=True)
             try:
                 status=wait(lambda:(lambda s:s if s['desktop'].get('tray') else None)(request('/api/status')))
@@ -100,6 +101,12 @@ def main():
                 png=rpc('Page.captureScreenshot',{'format':'png'})['data'];(folder/('linux-desktop-source.png' if args.source else 'linux-desktop-frozen.png')).write_bytes(base64.b64decode(png))
                 tray_action(6);assert proc.wait(timeout=20)==0
                 print('PASS: Linux native window, tray menu settings/updates/quit, dock identity and minimized recovery, desktop/browser switching, shared history/library, close and relaunch reuse')
+            except BaseException:
+                print('LAST DESKTOP STATUS:',request('/api/status'),flush=True)
+                subprocess.run(['xwininfo','-root','-tree'],check=False)
+                screenshot=folder/('linux-desktop-source-failure.png' if args.source else 'linux-desktop-frozen-failure.png')
+                subprocess.run([sys.executable,'-c',"from PySide6.QtWidgets import QApplication; from PySide6.QtGui import QGuiApplication; app=QApplication([]); QGuiApplication.primaryScreen().grabWindow(0).save("+repr(str(screenshot))+")"],check=False)
+                raise
             finally:
                 if channel:channel.close()
                 if proc.poll() is None:
