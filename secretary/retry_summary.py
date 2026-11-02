@@ -37,7 +37,7 @@ def run():
         print('正在检查模型连接；本次只处理已保存的正文。', flush=True)
         diagnostic['route'] = network.describe(network.child_env())
         print('模型连接方式：'+diagnostic['route'], flush=True)
-        print('正在生成摘要，最长约 4 分钟…', flush=True)
+        print('正在生成摘要；模型超时会自动分段重试，正文与原件保持保存…', flush=True)
         item = retry(archive, item_id)
         diagnostic.update(state=item['state'], summary_length=len(item['summary']))
         print(f'摘要已保存：{item["title"]}（{len(item["summary"])} 字符）。请刷新知识秘书页面。', flush=True)
