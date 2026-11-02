@@ -682,5 +682,7 @@
   "无效的模型代理设置": "Invalid model proxy settings",
   "请填写有效的 HTTP 代理地址，例如 http://127.0.0.1:7897；地址不能包含账号密码、路径或查询参数。": "Enter a valid HTTP proxy URL, for example http://127.0.0.1:7897, without credentials, paths or query parameters.",
   "自定义代理无法连接：": "Cannot connect to the custom proxy: ",
-  "。请启动代理软件并确认 HTTP 端口；本次不会改用直连。": ". Start your proxy app and verify its HTTP port. This request will not fall back to a direct connection."
+  "。请启动代理软件并确认 HTTP 端口；本次不会改用直连。": ". Start your proxy app and verify its HTTP port. This request will not fall back to a direct connection.",
+  "请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口": "Launch the Windows, macOS or Linux desktop application to switch to a desktop window.",
+  "无效的界面入口": "Invalid interface entry"
 }

@@ -136,10 +136,11 @@ class Service:
             finally:temporary.unlink(missing_ok=True)
         return {'ok':True,'history':self.chat_history(),'warning':warning}
 
-    def switch_interface(self,mode):
-        if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows 或 macOS 安装版启动程序，才能切换桌面窗口')
+    def switch_interface(self,mode,panel=None):
+        if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口')
+        if panel not in (None,'settings','updates'):raise ValueError('无效的界面入口')
         self.archive.set_interface_mode(mode)
-        self.interface_request={'mode':mode,'id':secrets.token_hex(16)}
+        self.interface_request={'mode':mode,'id':secrets.token_hex(16),'panel':panel}
         return {'ok':True,'mode':mode}
 
     def model_backend(self,backend=None,proxy=None,api_config=None):
@@ -165,13 +166,15 @@ class Service:
             if self.desktop_peer and self.desktop_peer!=owner and time.monotonic()-self.desktop_heartbeat_at<=10:raise ValueError('已有桌面窗口正在运行')
             value=body.get('desktop')
             if not isinstance(value,dict) or value.get('mode') not in ('desktop','browser') or value.get('state') not in ('ready','busy','error','starting'):raise ValueError('桌面状态无效')
-            fields={key:value.get(key,False) for key in ('tray','window_visible','window_loaded','window_minimized')}
+            platform=value.get('platform','windows')
+            if platform not in ('windows','linux'):raise ValueError('桌面状态无效')
+            fields={key:value.get(key,False) for key in ('tray','dock','window_visible','window_loaded','window_minimized')}
             if any(type(flag) is not bool for flag in fields.values()):raise ValueError('桌面状态无效')
             for key in ('window_id','browser_opens'):
                 if type(value.get(key,0)) is not int or value.get(key,0)<0:raise ValueError('桌面状态无效')
                 fields[key]=value.get(key,0)
             self.desktop_peer=owner;self.desktop_heartbeat_at=time.monotonic()
-            self.desktop={**fields,'enabled':True,'supports_window':True,'platform':'windows','mode':value['mode'],'state':value['state'],'language':'en' if value.get('language')=='en' else 'zh'}
+            self.desktop={**fields,'enabled':True,'supports_window':True,'platform':platform,'mode':value['mode'],'state':value['state'],'language':'en' if value.get('language')=='en' else 'zh'}
         return {'ok':True}
 
     def save_settings(self,body):
@@ -452,7 +455,9 @@ class Service:
                 temporary.unlink(missing_ok=True)
         if sys.platform=='darwin':subprocess.run(['/usr/bin/open',str(target.resolve())],check=True,timeout=15)
         elif os.name=='nt':os.startfile(str(target.resolve()))
-        else:subprocess.run(['xdg-open',str(target.resolve())],check=True,timeout=15)
+        else:
+            from .system_integration import external_env
+            subprocess.run(['xdg-open',str(target.resolve())],env=external_env(),check=True,timeout=15)
         return {'ok':True}
 
     def edit_file(self,item_id,action,batch_id='',key=''):
@@ -726,7 +731,7 @@ def handler(service):
                 if path=='/api/settings':return self.send(200,service.save_settings(body))
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
-                if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode')))
+                if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
                     editor=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/editor/(open|reveal|save)',path)
@@ -793,13 +798,15 @@ def main(desktop=False):
     updater.check_periodically()
     try:
         if desktop:
-            if sys.platform=='win32':
-                from .desktop_windows import run
-            else:
+            if sys.platform=='darwin':
                 from .desktop_macos import run
+            else:
+                from .desktop_qt import run
             run(address, service=service, server=server, open_browser=not args.no_browser)
         else:
-            if not args.no_browser: webbrowser.open(address)
+            if not args.no_browser:
+                from .system_integration import open_browser
+                open_browser(address)
             server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close(); service.close()

@@ -44,7 +44,7 @@ _state = {"current": __version__, "latest": None, "available": False, "notes": "
 
 
 def supported():
-    return paths.FROZEN and (MAC or WINDOWS)
+    return paths.FROZEN and (MAC or WINDOWS or sys.platform.startswith('linux') and platform.machine() in ('x86_64','AMD64'))
 
 
 def status():
@@ -71,7 +71,9 @@ def _asset_pattern():
     if MAC:
         return re.compile(r"-macos-" + ("arm64" if platform.machine() == "arm64" else "x64") + r"\.dmg$")
     if sys.platform.startswith('linux'):
-        return re.compile(r"-linux-x64\.deb$")
+        from .linux_update import install_kind
+        suffix=r'\.deb' if install_kind()=='deb' else r'\.tar\.gz'
+        return re.compile(r'-linux-x64'+suffix+'$')
     return re.compile(r"-windows-x64-setup\.exe$")
 
 
@@ -274,7 +276,15 @@ def start(on_ready_to_quit):
             if not expected:
                 raise RuntimeError("这个版本没有提供校验文件，为了安全不自动安装，请到 Release 页面手动下载")
             _set(phase="installing")
-            if (_mac_install if MAC else _windows_install)(dest, work):
+            if MAC:ready=_mac_install(dest,work)
+            elif WINDOWS:ready=_windows_install(dest,work)
+            else:
+                from .linux_update import install,ManualInstall
+                try:ready=install(dest,work,expected,st['latest'])
+                except ManualInstall as error:
+                    from .system_integration import open_browser
+                    open_browser(work.as_uri());_set(phase='manual',error=str(error));ready=False
+            if ready:
                 on_ready_to_quit()
         except Exception as e:
             _set(phase="error", error=str(e))

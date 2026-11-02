@@ -17,10 +17,10 @@ class LinuxPackagingTests(unittest.TestCase):
                 self.assertEqual(paths.data_dir(), Path('/override').resolve())
 
     def test_linux_update_check_never_selects_windows_installer(self):
-        with patch.object(updater, 'MAC', False), patch.object(updater, 'WINDOWS', False), patch.object(updater.sys, 'platform', 'linux'), patch.object(paths, 'FROZEN', True):
+        with patch.object(updater, 'MAC', False), patch.object(updater, 'WINDOWS', False), patch.object(updater.sys, 'platform', 'linux'), patch.object(paths, 'FROZEN', True), patch.object(updater.platform,'machine',return_value='x86_64'), patch('secretary.linux_update.install_kind',return_value='deb'):
             self.assertIsNone(updater._asset_pattern().search('Stellar-Secretary-0.1.50-windows-x64-setup.exe'))
             self.assertIsNotNone(updater._asset_pattern().search('Stellar-Secretary-0.1.50-linux-x64.deb'))
-            self.assertFalse(updater.supported())
+            self.assertTrue(updater.supported())
 
     def test_linux_tls_uses_system_roots_and_preserves_override(self):
         with patch.object(paths, 'FROZEN', True), patch.object(paths.sys, 'platform', 'linux'), patch.object(Path, 'is_file', return_value=True):
