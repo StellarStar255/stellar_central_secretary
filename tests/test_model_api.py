@@ -58,6 +58,27 @@ class APITests(unittest.TestCase):
             with patch.object(ai.subprocess,'Popen',return_value=proc),patch('secretary.capture_worker.terminate_job'):
                 with self.assertRaisesRegex(RuntimeError,'停止'):ai.run('Test',config)
 
+    def test_http_and_worker_timeouts_are_distinct_from_connection_errors(self):
+        from urllib.error import URLError
+        with tempfile.TemporaryDirectory() as root:
+            config=self.config(root);opener=Mock()
+            for error in (TimeoutError('late'),URLError(TimeoutError('late'))):
+                opener.open.side_effect=error
+                with patch.object(model_api.urllib.request,'build_opener',return_value=opener):
+                    with self.assertRaises(ai.ModelTimeoutError):model_api.complete(config,'Test',[])
+            opener.open.side_effect=URLError('connection refused')
+            with patch.object(model_api.urllib.request,'build_opener',return_value=opener):
+                with self.assertRaises(RuntimeError) as error:model_api.complete(config,'Test',[])
+            self.assertNotIsInstance(error.exception,ai.ModelTimeoutError)
+            proc=Mock();proc.communicate.return_value=(json.dumps({'error':'late','timeout':True}),'')
+            with patch.object(ai.subprocess,'Popen',return_value=proc):
+                with self.assertRaises(ai.ModelTimeoutError):ai.run('Test',config,timeout=12)
+            self.assertEqual(proc.communicate.call_args.kwargs['timeout'],12)
+            proc.communicate.return_value=(json.dumps({'error':'bad key'}),'')
+            with patch.object(ai.subprocess,'Popen',return_value=proc):
+                with self.assertRaises(RuntimeError) as error:ai.run('Test',config)
+            self.assertNotIsInstance(error.exception,ai.ModelTimeoutError)
+
     def test_text_model_keeps_images_unread_without_erasing_previous_vision(self):
         config={**model_api.DEFAULT,'vision':False}
         with patch.object(ai,'run',return_value=json.dumps({'summary':'Based on supplied text only','tags':[]})) as run:

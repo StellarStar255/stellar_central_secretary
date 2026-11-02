@@ -22,6 +22,54 @@ class SummaryPerformanceTest(unittest.TestCase):
         self.assertIn('100到200',ai.summary_instruction('x'*2000))
         self.assertIn('200到500',ai.summary_instruction('image description',images=True))
 
+    def test_timeout_recovery_splits_only_failed_request_and_preserves_coverage(self):
+        output=json.dumps({'summary':'Recovered summary','tags':[]})
+        source='FIRST HALF '+('a'*11000)+'SECOND HALF '+('b'*11000)+'END'
+        stages=[]
+        with patch.object(ai,'run',side_effect=[ai.ModelTimeoutError('deadline'),'first facts','second facts',output]) as model,ai.progress(stages.append):
+            result=ai.summarize(source,'PDF','codex')
+        self.assertEqual(result['summary'],'Recovered summary')
+        self.assertEqual(model.call_count,4)
+        calls=model.call_args_list
+        self.assertIn('FIRST HALF',calls[1].args[0]);self.assertIn('END',calls[2].args[0])
+        self.assertIn('first facts',calls[3].args[0]);self.assertIn('second facts',calls[3].args[0])
+        self.assertIn('retrying_model',stages)
+        self.assertTrue(all(call.kwargs['reasoning_effort']=='low' for call in calls))
+        self.assertTrue(all(0<call.kwargs['timeout']<=90 for call in calls[1:]))
+
+    def test_timeout_recovery_keeps_previously_completed_segments(self):
+        output=json.dumps({'summary':'All parts','tags':[]})
+        with patch.object(ai,'run',side_effect=['completed first part',ai.ModelTimeoutError('deadline'),'last part facts',output]) as model:
+            ai.summarize('a'*24000+'TAIL'*200,'PDF','codex')
+        self.assertEqual(model.call_count,4)
+        self.assertIn('completed first part',model.call_args.args[0])
+        self.assertIn('last part facts',model.call_args.args[0])
+
+    def test_recovery_does_not_retry_auth_format_stop_or_repeated_timeout(self):
+        for error in (RuntimeError('login failed'),RuntimeError('任务已停止'),ValueError('invalid result')):
+            with self.subTest(error=error),patch.object(ai,'run',side_effect=error) as model:
+                with self.assertRaises(type(error)):ai.summarize('text'*2000,'PDF','codex')
+                self.assertEqual(model.call_count,1)
+        with patch.object(ai,'run',side_effect=ai.ModelTimeoutError('deadline')) as model:
+            with self.assertRaises(ai.ModelTimeoutError):ai.summarize('text'*2000,'PDF','codex')
+            self.assertEqual(model.call_count,2)
+        with patch.object(ai,'run',side_effect=['not JSON']) as model:
+            with self.assertRaises(ValueError):ai.summarize('text','PDF','codex')
+            self.assertEqual(model.call_count,1)
+
+    def test_stopping_during_timeout_prevents_recovery_model_call(self):
+        def stop(*args,**kwargs):
+            ai.cancel_all()
+            raise ai.ModelTimeoutError('deadline')
+        with patch.object(ai,'run',side_effect=stop) as model:
+            with self.assertRaisesRegex(RuntimeError,'停止'):ai.summarize('text'*2000,'PDF','codex')
+            self.assertEqual(model.call_count,1)
+
+    def test_recovery_budget_expires_without_launching_another_request(self):
+        with patch.object(ai,'run',side_effect=ai.ModelTimeoutError('deadline')) as model,patch.object(ai.time,'monotonic',side_effect=[0,241]):
+            with self.assertRaisesRegex(ai.ModelTimeoutError,'分段重试仍超时'):ai.summarize('text'*2000,'PDF','codex')
+            self.assertEqual(model.call_count,1)
+
     def test_short_job_runs_while_both_long_executor_workers_are_occupied(self):
         with tempfile.TemporaryDirectory() as root:
             service=Service(root);release=threading.Event();long_started=threading.Event();short_done=threading.Event()

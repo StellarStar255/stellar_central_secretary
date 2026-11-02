@@ -1,5 +1,6 @@
 """OpenAI-compatible API configuration and isolated, tool-free HTTP requests."""
 import ipaddress,json,os,re,sys,tempfile,urllib.error,urllib.request
+import socket
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 
@@ -67,7 +68,7 @@ def complete(config,prompt,images):
     if images:
         if not config['vision']:raise ValueError('当前 API 未启用图片输入')
         content=[{'type':'text','text':prompt}]+[{'type':'image_url','image_url':{'url':'data:'+image['media']+';base64,'+image['data']}} for image in images]
-    from .ai import RULES
+    from .ai import RULES,ModelTimeoutError
     payload={'model':config['model'],'messages':[{'role':'system','content':RULES},{'role':'user','content':content}],'stream':False,config.get('token_parameter','max_tokens'):config['max_tokens']}
     if config['json_mode'] and '仅输出 JSON' in prompt:payload['response_format']={'type':'json_object'}
     headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'StellarSecretary'}
@@ -88,7 +89,10 @@ def complete(config,prompt,images):
     except urllib.error.HTTPError as error:
         messages={400:'请求不被支持，请检查模型、图片输入和 JSON 输出选项',401:'API Key 无效或已过期',403:'API 没有访问权限',404:'API 地址或模型不存在',429:'API 限流或额度不足，请稍后重试'}
         raise RuntimeError('模型 API：'+messages.get(error.code,'服务请求失败（HTTP '+str(error.code)+'）')) from None
-    except (urllib.error.URLError,TimeoutError,OSError):raise RuntimeError('模型 API 连接失败，请检查地址、网络、代理和证书') from None
+    except (urllib.error.URLError,TimeoutError,OSError) as error:
+        if isinstance(error,TimeoutError) or isinstance(getattr(error,'reason',None),(TimeoutError,socket.timeout)):
+            raise ModelTimeoutError('模型 API 响应超时，资料已保留，可稍后重试。') from None
+        raise RuntimeError('模型 API 连接失败，请检查地址、网络、代理和证书') from None
     except (ValueError,KeyError,IndexError,TypeError) as error:
         if isinstance(error,ValueError) and not isinstance(error,json.JSONDecodeError):raise
         raise RuntimeError('模型 API 返回格式不兼容，请确认使用 Chat Completions 接口') from None
@@ -115,8 +119,9 @@ def main():
         value=json.loads(__import__('sys').stdin.read());answer=complete(value['config'],value['prompt'],value.get('images',[]))
         print(json.dumps({'answer':answer},ensure_ascii=False),flush=True)
     except Exception as error:
+        from .ai import ModelTimeoutError
         message=str(error);key=value.get('config',{}).get('api_key','')
         if key:message=message.replace(key,'[redacted]')
-        print(json.dumps({'error':message},ensure_ascii=False),flush=True)
+        print(json.dumps({'error':message,'timeout':isinstance(error,ModelTimeoutError)},ensure_ascii=False),flush=True)
 
 if __name__=='__main__':main()
