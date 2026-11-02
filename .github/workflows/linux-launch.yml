@@ -11,6 +11,10 @@ permissions:
 jobs:
   installed-launch:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag }}
@@ -29,12 +33,13 @@ jobs:
           tar -xzf "$RUNNER_TEMP"/linux-release/*.tar.gz -C "$RUNNER_TEMP/portable"
           lsb_release -a
           google-chrome --version
+          firefox --version
           desktop-file-validate /usr/share/applications/stellar-secretary.desktop
       - name: Exercise installed desktop entry and portable default launch
-        run: dbus-run-session -- xvfb-run -a python packaging/check_linux_launch.py --installed --portable "$RUNNER_TEMP/portable/Stellar-Secretary/start.sh"
+        run: dbus-run-session -- xvfb-run -a python packaging/check_linux_launch.py --browser "${{ matrix.browser }}" --installed --portable "$RUNNER_TEMP/portable/Stellar-Secretary/start.sh"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-launch-diagnostics
+          name: linux-launch-diagnostics-${{ matrix.browser }}
           path: test-results/linux-launch/
           if-no-files-found: warn
