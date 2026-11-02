@@ -16,7 +16,7 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 
 - **Apple Silicon Mac:** open the DMG, drag Stellar Secretary into Applications, then launch it. macOS releases use Apple Developer ID signing and notarization.
 - **Windows 10/11 x64:** run the setup EXE.
-- **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Linux uses your default browser; native desktop/tray mode is currently available on macOS and Windows. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
+- **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Linux includes a desktop window, tray menu and a browser display mode selectable in settings. Closing the window minimizes it to the Dock/taskbar. GNOME requires AppIndicator support for tray icons; the Dock and application menu remain available without it. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
 
 Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code / Gemini CLI, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
 
@@ -28,7 +28,7 @@ In **Models & settings → Display language**, choose **English** or **简体中
 
 Use **Models & settings → Version & updates → Check for updates** to install a newer release. Updates preserve your data and verify installer checksums; macOS also verifies the developer signature. Wait for active tasks to finish before updating.
 
-On Linux, update by installing the newer `.deb` or replacing the portable application directory after stopping the old process. Automatic installer updates are not supported. To run without opening a browser, use `stellar-secretary --no-browser`; Ctrl+C stops a terminal-launched instance.
+Linux installer builds also support updates from settings. Debian installation asks for system authorization; cancelling leaves the app running. Portable updates require a writable application directory and system Python 3, and restore the previous program if the replacement fails to start. Data must remain outside the program directory. You can also install a newer `.deb` manually. To run the service without a desktop host, use `stellar-secretary --no-browser`; Ctrl+C stops a terminal-launched instance.
 
 ## Learn with examples
 
@@ -57,7 +57,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.
 - PDF overviews use the first five pages by default. The full extracted text and original are retained. Select **Summarize full document** when needed.
 - AES-encrypted PDFs without an opening password are supported. Password-protected documents must first be exported as accessible copies. Scanned PDFs need OCR.
-- On Windows and macOS, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app running in the notification area (Windows) or menu bar (macOS). Use the tray menu or reopen the app to restore its window. Windows includes its own Chromium engine; no separate WebView2 installation is needed.
+- On Windows, macOS and Linux, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app running in the notification area (Windows) or menu bar (macOS). Use the tray menu or reopen the app to restore its window. Windows includes its own Chromium engine; no separate WebView2 installation is needed.
 - For authenticated or dynamic webpages, choose **Read webpage in browser**, sign in and expand the content, then click **Page is ready, start reading**. Failed direct text fetches open this flow automatically. Capture includes loaded text and HTML tables, with an explicit scope note; it does not load all comments or pages. Success closes only the new task tab according to settings; failure leaves it open. Canvas, iframe and restricted content may require the extension or manual text.
 - The browser extension is an alternative for capturing conversations from an already signed-in browser.
 

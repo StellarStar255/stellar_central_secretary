@@ -20,11 +20,11 @@
 
 - **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
 - **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
-- **Linux x64（Ubuntu 22.04+ / Debian 12+，glibc 2.35+）**：用 `sudo apt install ./Stellar-Secretary-*-linux-x64.deb` 安装，从应用菜单启动 Stellar Secretary，或运行 `stellar-secretary`。也可解压 `.tar.gz` 后运行 `./Stellar-Secretary/start.sh`。自带 Python，界面使用默认浏览器；独立桌面窗口和托盘模式目前仅支持 macOS、Windows。网页采集需另装 Google Chrome。
+- **Linux x64（Ubuntu 22.04+ / Debian 12+，glibc 2.35+）**：用 `sudo apt install ./Stellar-Secretary-*-linux-x64.deb` 安装，从应用菜单启动 Stellar Secretary，或运行 `stellar-secretary`。也可解压 `.tar.gz` 后运行 `./Stellar-Secretary/start.sh`。自带 Python，支持独立窗口、托盘菜单，以及设置中可切换的网页模式。关闭窗口会最小化到 Dock/任务栏；GNOME 显示托盘需启用 AppIndicator 支持，没有托盘时仍可通过 Dock 和窗口菜单操作。网页采集需另装 Google Chrome。
 
-Linux 的资料保存在 `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`。停止旧进程后安装新版 `.deb` 或替换便携程序目录即可升级，资料保留；暂不支持程序内自动安装升级。运行 `stellar-secretary --no-browser` 可不自动打开浏览器；从终端启动时按 Ctrl+C 停止。
+Linux 的资料保存在 `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`。可在设置中检查更新并升级，资料保留。Debian 安装需要系统授权，取消授权后原程序继续运行。便携版自动升级要求程序目录可写、系统安装 Python 3，且资料位于程序目录之外；新版启动失败会恢复旧程序。也可手动安装新版 `.deb`。运行 `stellar-secretary --no-browser` 可仅启动后台服务；从终端启动时按 Ctrl+C 停止。
 
-安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI、Claude Code 或 Gemini CLI。Windows 与 macOS 安装版均支持独立桌面窗口和网页模式。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 自带 Chromium 内核，无需另装 WebView2；关闭桌面窗口后常驻系统托盘，可从托盘菜单或再次双击应用恢复窗口。支持 Windows 10 1809 及以上版本与 Windows 11 x64。
+安装版自带 Python 与 Playwright 驱动；登录读取仍需 Google Chrome，AI 摘要和问答仍需已登录的 Codex CLI、Claude Code 或 Gemini CLI。Windows、macOS 与 Linux 安装版均支持独立桌面窗口和网页模式。macOS 安装版常驻菜单栏和 Dock：菜单栏使用与 Dock 一致的橙色星芒专属图标，通过角标圆点显示状态，悬停或展开菜单查看启动、就绪、处理中和异常详情，支持打开主界面、资料目录、日志和退出。处理任务时 Dock 显示状态角标；关闭网页后后台继续运行，点击 Dock 图标可重新打开页面。Windows 自带 Chromium 内核，无需另装 WebView2；关闭桌面窗口后常驻系统托盘，可从托盘菜单或再次双击应用恢复窗口。支持 Windows 10 1809 及以上版本与 Windows 11 x64。
 
 在「模型与设置 → 显示语言」选择「简体中文」或「English」即可即时切换界面，选择会保留并同步到网页和桌面模式。资料标题、原文和已有摘要不会被翻译。交互教程跟随当前语言，也可在教程页单独选择语言；教程内切换不改变程序设置。
 
@@ -216,7 +216,7 @@ v0.1.8 起，登录读取和浏览器扩展会把 HTML 表格保存为结构化�
 
 v0.1.9 补齐新版 ChatGPT 的 search-unit 消息容器和角色标题 DOM 采集路径；这两种页面结构同样保留表格、SVG 曲线和按钮式图例。图表的原始数据与说明可在图形下方展开，避免图形被散乱文本替代。
 
-Windows 与 macOS 安装版支持独立桌面窗口和网页模式，在「模型与设置 → 使用方式」或托盘菜单中随时切换，程序记住选择。关闭桌面窗口后服务继续在托盘运行，点击 Dock 可重新打开。两种模式共用知识库、设置和本机对话记录；旧浏览器对话会在刷新页面后迁移到本机共享存储。
+Windows、macOS 与 Linux 安装版支持独立桌面窗口和网页模式，在「模型与设置 → 使用方式」或托盘菜单中随时切换，程序记住选择。关闭桌面窗口后服务继续在托盘运行，点击 Dock 可重新打开。两种模式共用知识库、设置和本机对话记录；旧浏览器对话会在刷新页面后迁移到本机共享存储。
 
 ## 更新教程与动图
 

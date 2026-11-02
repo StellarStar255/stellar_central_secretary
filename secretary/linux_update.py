@@ -1,8 +1,8 @@
 """Verified Linux package installation and rollback-capable portable replacement."""
-import argparse,hashlib,os,shlex,shutil,subprocess,sys,tarfile,tempfile
+import argparse,os,shlex,shutil,subprocess,sys,tarfile,tempfile
 from pathlib import Path,PurePosixPath
 from . import paths
-from .system_integration import external_env,open_browser
+from .system_integration import external_env
 
 
 class ManualInstall(RuntimeError):pass
