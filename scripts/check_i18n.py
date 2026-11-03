@@ -26,8 +26,8 @@ with tempfile.TemporaryDirectory() as temp:
     assert page.locator('#settings-save').inner_text()=='Save settings'
     page.screenshot(path='/tmp/secretary-english-settings.png',full_page=True)
     page.locator('#settings-dialog .dialog-head button').click();assert page.locator('#chat-scroll').bounding_box()['height']>150;page.screenshot(path='/tmp/secretary-english-home.png');page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click()
-    page.locator('#edit-title').wait_for();assert page.locator('#edit-title').inner_text().strip()=='知识库 ✎'
-    assert page.get_by_role('heading',name='Summary',exact=True).count()==1
+    page.locator('#preview-full').click();page.locator('#edit-title').wait_for();assert page.locator('#edit-title').inner_text().strip()=='知识库 ✎'
+    assert page.locator('#detail-content').get_by_role('heading',name='Summary',exact=True).count()==1
     assert '保留这段中文摘要' in page.locator('#detail-content .detail-text').first.inner_text()
     assert '这段原文叫模型与设置' in page.locator('#detail-content').inner_text()
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as temp:
     tutorial.locator('#tutorial-language').select_option('en');assert tutorial.locator('#completion').inner_text()=='Completed 6 / 6'
     tutorial.set_viewport_size({'width':390,'height':844});assert tutorial.evaluate('document.documentElement.scrollWidth<=innerWidth')
     offline=browser.new_page();offline.goto((ROOT/'docs/tutorial.html').as_uri()+'?lang=en');assert offline.locator('h1').inner_text()=='Learn by trying it yourself.'
-    assert service.archive.export()==before,'display language must not alter archived content'
+    assert [{k:v for k,v in item.items() if k!='last_viewed'} for item in service.archive.export()]==[{k:v for k,v in item.items() if k!='last_viewed'} for item in before],'display language must not alter archived content'
     assert service.archive.settings()['ui_language']=='zh','tutorial language must not change real app preference'
     assert not errors,errors
     print('PASS: live Chinese/English switching, saved preference, draft/unsaved-setting preservation, raw titles/text/summaries unchanged, English six-step tutorial, tutorial progress/name retention, offline English and mobile layout')

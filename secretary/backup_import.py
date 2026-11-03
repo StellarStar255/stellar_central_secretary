@@ -53,6 +53,14 @@ def import_backup(archive, data):
             if len(item.get('text', '')) > 2_000_000:
                 raise ValueError('备份单条正文超过 200 万字符')
             if len(item.get('user_context',''))>20000:raise ValueError('链接说明不能超过 20000 个字符')
+            for flag in ('favorite','pinned'):
+                if type(item.get(flag,False)) not in (bool,int) or item.get(flag,False) not in (0,1):raise ValueError('备份中的收藏或置顶格式无效')
+            for field in ('last_viewed','trashed_at'):
+                value=item.get(field,'')
+                if not isinstance(value,str) or len(value)>80:raise ValueError('备份中的资料时间无效')
+                if value:
+                    try:datetime.fromisoformat(value)
+                    except ValueError:raise ValueError('备份中的资料时间无效')
             tags = item.get('tags', [])
             if not isinstance(tags, list) or len(tags) > 100 or any(not isinstance(t, str) for t in tags):
                 raise ValueError('备份中的标签格式无效')
@@ -128,6 +136,7 @@ def import_backup(archive, data):
                                 item.get('created') or now, item.get('updated') or now,int(item.get('tags_manual',0)),item.get('note',''),json.dumps(note_images,ensure_ascii=False),0))
                     db.execute('UPDATE items SET vision_text=?,user_context=? WHERE id=?',(item.get('vision_text','')[:60000],item.get('user_context','')[:20000],item_id))
                     db.execute('UPDATE items SET additions=?,group_links=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),json.dumps(item.get('group_links',[]),ensure_ascii=False),item_id))
+                    db.execute('UPDATE items SET favorite=?,pinned=?,last_viewed=?,trashed_at=? WHERE id=?',(int(item.get('favorite',False)),int(item.get('pinned',False)),item.get('last_viewed',''),item.get('trashed_at',''),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

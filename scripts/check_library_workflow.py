@@ -1,5 +1,5 @@
 """Real-browser library checks with isolated synthetic material and no model calls."""
-import json,sys,tempfile,threading
+import json,os,sys,tempfile,threading
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
@@ -22,9 +22,9 @@ with tempfile.TemporaryDirectory() as folder:
      ai.check_cancelled();threading.Event().wait(.02)
    return {'summary':'Synthetic retry result','state':'ready','error':''}
   with sync_playwright() as pw,patch.object(ai,'summary_fields',side_effect=fake_summary):
-   browser=pw.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)
+   browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
-    page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);page.locator('#library-open').click()
+    page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);expect(page.locator('#count')).to_have_text('106');page.locator('#library-open').click()
     expect(page.locator('#items .library-row')).to_have_count(100);expect(page.locator('#library-next')).to_be_enabled();page.locator('#library-next').click();expect(page.locator('#items .library-row')).to_have_count(6)
     page.locator('#search').fill('robot camera');expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked);expect(page.locator('#items .library-row').first.locator('mark')).to_have_count(4)
     expect(page.locator('#items .library-row').first.locator('p')).not_to_contain_text('网页已加载');expect(page.locator('#items .library-row').first.locator('.coverage-badge')).to_have_text('部分内容')
@@ -33,13 +33,21 @@ with tempfile.TemporaryDirectory() as folder:
     popup=opened.value;popup.wait_for_load_state();assert popup.url==base+'/tutorial?lang=en#fixture';popup.close();expect(page.locator('#detail-dialog')).not_to_be_visible()
     row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible();page.locator('#preview-full').click();expect(page.locator('#detail-dialog')).to_be_visible();page.evaluate("document.querySelector('#detail-dialog').close()")
     page.locator('#sort-filter').select_option('viewed');expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked)
-    page.locator('#search').focus();page.locator('#search').press('ArrowDown');expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
+    page.locator('#preview-close').click();page.locator('#search').focus();page.locator('#search').press('ArrowDown');expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#items .library-row').first.press('ArrowDown');expect(page.locator('#preview-title')).not_to_have_text('Robot camera source');page.locator('#items .library-row[aria-pressed="true"]').press('Enter');expect(page.locator('#preview-material')).to_be_visible()
     page.keyboard.press('Escape');expect(page.locator('#preview-empty')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
     page.locator('#state-filter').select_option('ready');expect(page.locator('#items .library-row')).to_have_count(1);page.locator('#items .library-row').click();expect(page.locator('#preview-title')).to_have_text('Robot camera source')
     with page.expect_popup() as keyboard_opened:page.locator('#items .library-row').press('Control+Enter')
     keyboard_popup=keyboard_opened.value;keyboard_popup.wait_for_load_state();assert keyboard_popup.url==base+'/tutorial?lang=en#fixture';keyboard_popup.close()
-    page.screenshot(path='/tmp/secretary-library-workflow.png')
+    flag=page.locator('[data-result-id="'+linked+'"] [data-flag="favorite"]');flag.click();expect(flag).to_have_attribute('aria-pressed','true')
+    page.locator('[data-result-id="'+linked+'"] [data-flag="pinned"]').click();page.locator('#favorite-filter').select_option('1');expect(page.locator('#items .library-row')).to_have_count(1)
+    page.locator('#preview-trash').click();page.locator('#delete-archive-confirm').click();expect(page.locator('#items .library-row')).to_have_count(0);expect(page.locator('#toast button')).to_have_text('撤销');page.locator('#toast button').click();expect(page.locator('#items .library-row')).to_have_count(1)
+    page.locator('#items .library-row').click();page.locator('#preview-trash').click();page.locator('#delete-archive-confirm').click();expect(page.locator('#items .library-row')).to_have_count(0)
+    page.locator('#library-trash').click();expect(page.locator('.trash-row')).to_have_count(1);page.locator('.trash-row').get_by_role('button',name='恢复',exact=True).click();expect(page.locator('.trash-row')).to_have_count(0);page.locator('#trash-dialog .dialog-head button').click();expect(page.locator('#items .library-row')).to_have_count(1)
+    disposable,_=service.archive.add('Purge fixture','Purge only this synthetic original');service.trash_item(disposable,service.archive.get(disposable)['updated'])
+    page.locator('#library-trash').click();page.locator('.trash-row').get_by_role('button',name='永久删除…',exact=True).click();page.locator('#purge-cancel').click();expect(page.locator('.trash-row')).to_have_count(1);page.locator('.trash-row').get_by_role('button',name='永久删除…',exact=True).click();page.locator('#purge-confirm').click();expect(page.locator('.trash-row')).to_have_count(0);assert disposable in service.archive.deletion_refs()['deletedItemIds'];page.locator('#trash-dialog .dialog-head button').click()
+    page.locator('#favorite-filter').select_option('');
+    page.locator('#items .library-row').click();expect(page.locator('#preview-material')).to_be_visible();page.screenshot(path='/tmp/secretary-library-workflow.png')
     task,_=service.archive.add('Cancellable fixture','Task original source remains available');service.queue(task,force=True)
     page.locator('#library-tasks').click();row=page.locator('[data-task-key="summary:'+task+'"]');expect(row).to_be_visible();row.get_by_role('button',name='停止这条任务').click();expect(row).to_contain_text('已停止',timeout=8000);assert service.archive.get(task)['text']=='Task original source remains available'
     failed,_=service.archive.add('Failed fixture','Failure original source');service.archive.update(failed,state='error',error='proxy connection refused')
@@ -47,5 +55,7 @@ with tempfile.TemporaryDirectory() as folder:
     page.screenshot(path='/tmp/secretary-tasks-workflow.png');page.evaluate("document.querySelector('#tasks-dialog').close()")
     assert not errors,errors
     print('PASS: compact scope badges, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
+   except Exception:
+    print({'page_errors':errors,'toast':page.locator('#toast').inner_text(),'html':page.locator('#result-count').inner_text()},flush=True);raise
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

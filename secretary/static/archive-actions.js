@@ -38,8 +38,8 @@
   document.querySelector('#archive-delete-menu').focus();
  });
  menu.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();document.querySelector('#archive-delete-menu').focus()}});
- document.querySelector('#archive-delete-menu').onclick=async()=>{
-  const id=target;menu.close();
+ async function requestTrash(id){
+  if(menu.open)menu.close();
   if(sending){toast(t('请等待当前消息处理完成后再删除。'));return}
   try{
    candidate=await api('/api/items/'+id);
@@ -47,6 +47,8 @@
    dialog.showModal();document.querySelector('#delete-archive-cancel').focus();
   }catch(error){toast(error.message)}
  };
+ globalThis.StellarArchiveActions.trash=requestTrash;
+ document.querySelector('#archive-delete-menu').onclick=()=>requestTrash(target);
  dialog.addEventListener('cancel',event=>{if(deleting)event.preventDefault()});
  dialog.addEventListener('close',()=>{document.querySelector('#delete-archive-title').textContent='';if(!deleting)candidate=null});
  document.querySelector('#delete-archive-cancel').onclick=()=>dialog.close();
@@ -56,9 +58,9 @@
   deleting=true;button.disabled=true;cancel.disabled=true;
   try{
    await sharedChatSaves;
-   const result=await api('/api/items/'+item.id+'/delete',{confirmed:true,expected_updated:item.updated});
-   accept(result.history);mergeChats(result.history);allItems=allItems.filter(value=>!items.has(value.id));
-   candidate=null;dialog.close();lastMessageMarkup=null;renderSidebar();renderChat(false);await refresh();toast(result.warning?StellarI18n.message(result.warning):t('归档已删除'));
+   const result=await api('/api/items/'+item.id+'/trash',{expected_updated:item.updated});
+   allItems=allItems.filter(value=>value.id!==item.id);if(selectedId===item.id){$('#detail-dialog').close();selectedId=''}
+   candidate=null;dialog.close();lastMessageMarkup=null;renderSidebar();renderChat(false);await refresh();StellarLibraryManagement.undo(item.id);
   }catch(error){toast(error.message)}
   finally{deleting=false;button.disabled=false;cancel.disabled=false}
  };

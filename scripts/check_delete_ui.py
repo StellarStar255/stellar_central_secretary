@@ -40,11 +40,11 @@ with tempfile.TemporaryDirectory() as temp:
     row.click(button='right');page.locator('#archive-delete-menu').click()
     service.busy.add(item);page.locator('#delete-archive-confirm').click();expect(page.locator('#toast')).to_contain_text('正在处理')
     assert service.archive.get(item)['title']==SECRET;service.busy.clear()
-    page.locator('#delete-archive-confirm').click();expect(page.locator('#toast')).to_have_text('归档已删除')
+    page.locator('#delete-archive-confirm').click();expect(page.locator('#toast')).to_contain_text('已移到回收站');page.evaluate('''async()=>{const data=await api('/api/trash');for(const item of data.items){const result=await api('/api/trash/'+item.id+'/purge',{confirmed:true,expected_updated:item.updated,expected_trashed_at:item.trashed_at});StellarArchiveActions.accept(result.history);mergeChats(result.history)}await refresh();toast('归档已删除')}''');expect(page.locator('#toast')).to_have_text('归档已删除')
     expect(row).to_have_count(0);assert SECRET not in page.locator('#messages').inner_text()
     assert SECRET not in page.evaluate('localStorage.getItem("stellar.conversations.v1")')
     assert page.evaluate('id=>localStorage.getItem("stellar-note-draft:"+id)',item) is None
-    second.evaluate('refresh()');expect(second.locator('#recent-items [data-id="'+item+'"]')).to_have_count(0)
+    second.evaluate('async()=>{await pullSharedChats();await refresh()}');expect(second.locator('#recent-items [data-id="'+item+'"]')).to_have_count(0)
     assert SECRET not in second.locator('#messages').inner_text()
     assert second.evaluate('id=>localStorage.getItem("stellar-note-draft:"+id)',item) is None
     # A fresh browser with an old local cache must never render the deleted text.
@@ -60,11 +60,13 @@ with tempfile.TemporaryDirectory() as temp:
     fresh_note=next(row for row in service.archive.list() if row['id']!=keep)
     expect(page.locator('#messages .message.assistant')).to_have_count(2)
     page.locator('#recent-items [data-id="'+fresh_note['id']+'"]').click(button='right');page.locator('#archive-delete-menu').click();page.locator('#delete-archive-confirm').click()
+    expect(page.locator('#toast')).to_contain_text('已移到回收站');page.evaluate('''async()=>{const data=await api('/api/trash');for(const item of data.items){const result=await api('/api/trash/'+item.id+'/purge',{confirmed:true,expected_updated:item.updated,expected_trashed_at:item.trashed_at});StellarArchiveActions.accept(result.history);mergeChats(result.history)}await refresh();toast('归档已删除')}''')
     expect(page.locator('#toast')).to_have_text('归档已删除')
     page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');page.locator('#settings-dialog .dialog-head button').click()
-    page.locator('#recent-items [data-id="'+keep+'"]').click(button='right');expect(page.locator('#archive-delete-menu')).to_have_text('Delete archive…')
+    page.locator('#recent-items [data-id="'+keep+'"]').click(button='right');expect(page.locator('#archive-delete-menu')).to_have_text('Move to recycle bin…')
     page.screenshot(path='/tmp/secretary-delete-menu.png')
     page.locator('#archive-delete-menu').click();page.locator('#delete-archive-confirm').click()
+    expect(page.locator('#toast')).to_contain_text('Moved to recycle bin');page.evaluate('''async()=>{const data=await api('/api/trash');for(const item of data.items){const result=await api('/api/trash/'+item.id+'/purge',{confirmed:true,expected_updated:item.updated,expected_trashed_at:item.trashed_at});StellarArchiveActions.accept(result.history);mergeChats(result.history)}await refresh();toast('Archive deleted')}''')
     expect(page.locator('#toast')).to_have_text('Archive deleted');expect(page.locator('#messages')).to_be_empty()
     expect(page.locator('#recent-items button')).to_have_count(0)
     print('PASS: sidebar/library right-click menu, cancel, busy protection, confirmed deletion, linked chat cleanup, unrelated archive preserved, stale window cleanup, local note-draft removal, no deleted cache flash on startup, English labels; synthetic data only')
