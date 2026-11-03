@@ -198,6 +198,15 @@ async function refreshNow(){
  if($('#library-dialog').open)await renderLibrary();
  if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
 }
+function libraryPresentation(item){
+ let summary=(item.summary||'').trim(),scope='';
+ const scopeStart=/^(?:【(?:部分对话归档|网页已加载内容归档|PDF 前 5 页概览|PDF 开头概览|PDF 全文摘要|用户说明归档|附用户说明)】|\[Loaded webpage capture\])/;
+ while(scopeStart.test(summary)){const end=summary.indexOf('\n\n');if(end<0){scope+=(scope?'\n':'')+summary;summary='';break}scope+=(scope?'\n':'')+summary.slice(0,end);summary=summary.slice(end+2).trim()}
+ const partial=Boolean(/^(?:【(?:部分对话归档|网页已加载内容归档|PDF 前 5 页概览|PDF 开头概览|用户说明归档)】|\[Loaded webpage capture\])/m.test(scope)||item.tags?.some(tag=>['部分对话','网页片段','前部概览','Loaded webpage'].includes(tag)));
+ let source=item.filename||t('本机笔记');try{if(item.url)source=new URL(item.url).hostname}catch{}
+ return {summary:summary||item.error||t('正文已保存，可随时查阅。'),scope,partial,source};
+}
+function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${esc(view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
 let lastLibraryMarkup='';
 async function renderLibrary(){
  const q=$('#search').value.trim(),kind=$('#kind-filter').value,category=$('#category-filter').value;
@@ -205,7 +214,7 @@ async function renderLibrary(){
  if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(c=>`<option value="${esc(c)}" ${c===category?'selected':''}>${esc(displayCategory(c))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(items.length,'份资料','item','items');$('#empty').hidden=items.length>0;
- const markup=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p>${i.summary_progress?`<div class="summary-progress" data-summary-id="${i.id}"></div>`:''}</div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');if(markup!==lastLibraryMarkup){lastLibraryMarkup=markup;$('#items').innerHTML=markup;bindDetails($('#items'),items)}updateSummaryProgress();
+ const markup=items.map(libraryRow).join('');if(markup!==lastLibraryMarkup){lastLibraryMarkup=markup;$('#items').innerHTML=markup;bindDetails($('#items'),items)}updateSummaryProgress();
 }
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));

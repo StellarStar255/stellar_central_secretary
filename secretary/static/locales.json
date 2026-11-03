@@ -760,5 +760,9 @@
   "浏览器代理：": "Browser proxy: ",
   "选择示例后会自动填好，只需核对端口数字。": "Choose an example to fill the form, then check the port number.",
   "模型正在处理其他任务，请稍后再测试连接。": "The model is busy with another task. Test the connection again shortly.",
-  "单击查看资料；双击打开原始链接": "Click to view the item; double-click to open its original link"
+  "单击查看资料；双击打开原始链接": "Click to view the item; double-click to open its original link",
+  "本机笔记": "Local note",
+  "仅整理了部分内容": "Only part of the source was summarized",
+  "部分内容": "Partial content",
+  "采集与处理详情": "Capture & processing details"
 }
