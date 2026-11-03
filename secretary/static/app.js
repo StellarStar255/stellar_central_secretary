@@ -142,9 +142,10 @@ function renderSidebar(){
  bindDetails($('#recent-items'));
 }
 function originalLink(item){try{const url=new URL(item?.url||'');return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:''}catch{return ''}}
-function bindDetails(container){container.querySelectorAll('[data-id]').forEach(button=>{
+function bindDetails(container,items=allItems){container.querySelectorAll('[data-id]').forEach(button=>{
  const show=()=>detail(button.dataset.id).catch(error=>toast(error.message));
- const url=container===$('#messages')&&button.classList.contains('archive-card')?originalLink(allItems.find(item=>item.id===button.dataset.id)):'';
+ const linkedRow=container===$('#messages')&&button.classList.contains('archive-card')||container===$('#items')&&button.classList.contains('library-row');
+ const url=linkedRow?originalLink(items.find(item=>item.id===button.dataset.id)):'';
  if(!url){button.onclick=show;return}
  let pending;
  button.title=t('单击查看资料；双击打开原始链接');
@@ -204,7 +205,7 @@ async function renderLibrary(){
  if(q!==$('#search').value.trim()||kind!==$('#kind-filter').value||category!==$('#category-filter').value)return;
  const cats=[...new Set(allItems.map(i=>i.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(c=>`<option value="${esc(c)}" ${c===category?'selected':''}>${esc(displayCategory(c))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(items.length,'份资料','item','items');$('#empty').hidden=items.length>0;
- const markup=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p>${i.summary_progress?`<div class="summary-progress" data-summary-id="${i.id}"></div>`:''}</div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');if(markup!==lastLibraryMarkup){lastLibraryMarkup=markup;$('#items').innerHTML=markup;bindDetails($('#items'))}updateSummaryProgress();
+ const markup=items.map(i=>`<button class="library-row" data-id="${i.id}"><span class="file-icon">${i.kind==='file'?'▧':i.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${esc(i.title)}</strong><p>${esc(i.summary||i.error||t('正文已保存，可随时查阅。'))}</p>${i.summary_progress?`<div class="summary-progress" data-summary-id="${i.id}"></div>`:''}</div><small>${itemState(i)}<br>${date(i.created)}</small></button>`).join('');if(markup!==lastLibraryMarkup){lastLibraryMarkup=markup;$('#items').innerHTML=markup;bindDetails($('#items'),items)}updateSummaryProgress();
 }
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
