@@ -31,9 +31,15 @@ with tempfile.TemporaryDirectory() as folder:
     row=page.locator('#items .library-row').first
     with page.expect_popup() as opened:row.dblclick(delay=60)
     popup=opened.value;popup.wait_for_load_state();assert popup.url==base+'/tutorial?lang=en#fixture';popup.close();expect(page.locator('#detail-dialog')).not_to_be_visible()
-    row.click();expect(page.locator('#detail-dialog')).to_be_visible();page.evaluate("document.querySelector('#detail-dialog').close()")
+    row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible();page.locator('#preview-full').click();expect(page.locator('#detail-dialog')).to_be_visible();page.evaluate("document.querySelector('#detail-dialog').close()")
     page.locator('#sort-filter').select_option('viewed');expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked)
-    page.locator('#state-filter').select_option('ready');expect(page.locator('#items .library-row')).to_have_count(1);page.screenshot(path='/tmp/secretary-library-workflow.png')
+    page.locator('#search').focus();page.locator('#search').press('ArrowDown');expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
+    page.locator('#items .library-row').first.press('ArrowDown');expect(page.locator('#preview-title')).not_to_have_text('Robot camera source');page.locator('#items .library-row[aria-pressed="true"]').press('Enter');expect(page.locator('#preview-material')).to_be_visible()
+    page.keyboard.press('Escape');expect(page.locator('#preview-empty')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
+    page.locator('#state-filter').select_option('ready');expect(page.locator('#items .library-row')).to_have_count(1);page.locator('#items .library-row').click();expect(page.locator('#preview-title')).to_have_text('Robot camera source')
+    with page.expect_popup() as keyboard_opened:page.locator('#items .library-row').press('Control+Enter')
+    keyboard_popup=keyboard_opened.value;keyboard_popup.wait_for_load_state();assert keyboard_popup.url==base+'/tutorial?lang=en#fixture';keyboard_popup.close()
+    page.screenshot(path='/tmp/secretary-library-workflow.png')
     task,_=service.archive.add('Cancellable fixture','Task original source remains available');service.queue(task,force=True)
     page.locator('#library-tasks').click();row=page.locator('[data-task-key="summary:'+task+'"]');expect(row).to_be_visible();row.get_by_role('button',name='停止这条任务').click();expect(row).to_contain_text('已停止',timeout=8000);assert service.archive.get(task)['text']=='Task original source remains available'
     failed,_=service.archive.add('Failed fixture','Failure original source');service.archive.update(failed,state='error',error='proxy connection refused')

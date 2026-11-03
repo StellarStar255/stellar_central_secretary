@@ -643,10 +643,12 @@ class Service:
                 self.archive.update(item_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
                 fields,answer=ai.analyze_material(source,item['title'],self.model_backend(),images,scope,question=question)
-                self.archive.update(item_id,**fields)
+                with self.lock:
+                    self.summary_jobs.check(item_id)
+                    self.archive.update(item_id,**fields);self.summary_jobs.commit(item_id)
             return {'answer':answer,'sources':[{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
         except Exception as error:
-            self.archive.update(item_id,state='error',error=str(error)[:1600]);raise
+            self.summary_failed(item_id,error);raise
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.questions-=1
 
@@ -747,6 +749,11 @@ def handler(service):
                     q = urllib.parse.parse_qs(parsed.query)
                     return self.send(200, [service.with_progress(item) for item in service.archive.list(**{k:q.get(k,[''])[0] for k in ('q','category','kind')})])
                 if path=='/api/backup': return self.send(200, service.backup(), 'application/zip', {'Content-Disposition':'attachment; filename="stellar-knowledge-backup.zip"'})
+                preview_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/quick-preview',path)
+                if preview_match:
+                    from .rich_text import searchable_text
+                    item=service.archive.get(preview_match[1]);text=searchable_text(item['text'])
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
@@ -761,7 +768,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
