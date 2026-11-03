@@ -141,7 +141,17 @@ function renderSidebar(){
  $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
  bindDetails($('#recent-items'));
 }
-function bindDetails(container){container.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>detail(b.dataset.id).catch(e=>toast(e.message)))}
+function originalLink(item){try{const url=new URL(item?.url||'');return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:''}catch{return ''}}
+function bindDetails(container){container.querySelectorAll('[data-id]').forEach(button=>{
+ const show=()=>detail(button.dataset.id).catch(error=>toast(error.message));
+ const url=container===$('#messages')&&button.classList.contains('archive-card')?originalLink(allItems.find(item=>item.id===button.dataset.id)):'';
+ if(!url){button.onclick=show;return}
+ let pending;
+ button.title=t('单击查看资料；双击打开原始链接');
+ // Keep the first click from opening a modal over the second mouse click.
+ button.onclick=event=>{clearTimeout(pending);if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},400)};
+ button.ondblclick=event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);window.open(url,'_blank','noopener,noreferrer')};
+})}
 function summaryProgress(item){
  const p=item?.summary_progress;if(!p)return '';
  const labels={queued:'排队中',reading_sources:'正在读取来源',preparing:'正在准备摘要',starting_model:'正在启动模型',waiting_model:'模型处理中',processing_result:'正在保存结果',done:'处理完成',saved:'已保存',error:'整理失败',stopped:'已停止'};
