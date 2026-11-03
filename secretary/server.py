@@ -113,7 +113,7 @@ class Service:
             temporary=path.with_suffix('.tmp');temporary.write_text(encoded,encoding='utf-8');temporary.replace(path)
         return {**result,**refs} if refs['deletedItemIds'] or refs['deletedMessages'] else result
 
-    def delete_item(self,item_id,expected_updated):
+    def delete_item(self,item_id,expected_updated,expected_trashed_at=None):
         warning=''
         with self.lock:
             if item_id in self.busy or item_id in self.captures:raise ValueError('这份资料正在处理，请先停止读取或等待整理完成后再删除。')
@@ -127,7 +127,7 @@ class Service:
                 # Finish the fallible chat-file replacement before deleting the
                 # archive; restore it if file staging or revision checks fail.
                 if changed:temporary.write_text(json.dumps(cleaned,ensure_ascii=False),encoding='utf-8');temporary.replace(path)
-                try:self.archive.delete(item_id,expected_updated,sorted(removed))
+                try:self.archive.delete(item_id,expected_updated,sorted(removed),expected_trashed_at)
                 except Exception as error:
                     if item_id not in self.archive.deletion_refs()['deletedItemIds']:
                         if changed:temporary.write_text(original,encoding='utf-8');temporary.replace(path)
@@ -136,6 +136,10 @@ class Service:
             finally:temporary.unlink(missing_ok=True)
         return {'ok':True,'history':self.chat_history(),'warning':warning}
 
+    def trash_item(self,item_id,expected_updated):
+        with self.lock:
+            if item_id in self.busy or item_id in self.captures:raise ValueError('这份资料正在处理，请先停止任务后再移到回收站。')
+            return self.archive.trash_item(item_id,expected_updated)
     def switch_interface(self,mode,panel=None):
         if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口')
         if panel not in (None,'settings','updates'):raise ValueError('无效的界面入口')
@@ -736,13 +740,14 @@ def handler(service):
                     image,source=notes.note_image(service.archive,*image_match.groups())
                     return self.send(200,source.read_bytes(),image['media'])
                 if path=='/api/conversations':return self.send(200,service.chat_history())
+                if path=='/api/trash':return self.send(200,{'items':service.archive.trash_items()})
                 if path=='/api/tasks':return self.send(200,service.task_status())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/library':
                     from .library import query
                     values=urllib.parse.parse_qs(parsed.query)
                     with service.lock:active=set(service.busy)|set(service.captures)
-                    result=query(service.archive,active_ids=active,**{key:values.get(key,[''])[0] for key in ('q','category','kind','state','days','sort')},offset=values.get('offset',[0])[0],limit=values.get('limit',[100])[0])
+                    result=query(service.archive,active_ids=active,**{key:values.get(key,[''])[0] for key in ('q','category','kind','state','days','sort','favorite')},offset=values.get('offset',[0])[0],limit=values.get('limit',[100])[0])
                     result['items']=[service.with_progress(item) for item in result['items']]
                     return self.send(200,result)
                 if path=='/api/items':
@@ -753,7 +758,7 @@ def handler(service):
                 if preview_match:
                     from .rich_text import searchable_text
                     item=service.archive.get(preview_match[1]);text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000})
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
@@ -768,7 +773,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -785,6 +790,13 @@ def handler(service):
                     return self.send(200, import_backup(service.archive, self.rfile.read(length)))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                trash_match=re.fullmatch(r'/api/trash/([a-f0-9]{32})/(restore|purge)',path)
+                if trash_match:
+                    item=service.archive.get(trash_match[1],include_trashed=True)
+                    if trash_match[2]=='restore':return self.send(200,service.archive.restore_item(item['id']))
+                    if not item['trashed_at'] or not isinstance(body.get('expected_trashed_at'),str) or not body['expected_trashed_at']:raise ValueError('请重新选择回收站中的资料并确认永久删除。')
+                    if body.get('confirmed') is not True:raise ValueError('请先确认永久删除。')
+                    return self.send(200,service.delete_item(item['id'],body.get('expected_updated'),body['expected_trashed_at']))
                 task_match=re.fullmatch(r'/api/tasks/([a-f0-9]{32})/(cancel|retry)',path)
                 if task_match:
                     if task_match[2]=='retry':
@@ -831,9 +843,11 @@ def handler(service):
                     append_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions(?:/([a-f0-9]{32})/summarize)?',path)
                     if append_match:
                         return self.send(200,service.retry_addition(append_match[1],append_match[2]) if append_match[2] else service.append_material(append_match[1],body))
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete|view))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete|view|flags|trash))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
+                    if path.endswith('/flags'):return self.send(200,service.archive.set_flags(item_id,body))
+                    if path.endswith('/trash'):return self.send(200,service.trash_item(item_id,body.get('expected_updated')))
                     if path.endswith('/view'):return self.send(200,service.archive.mark_viewed(item_id))
                     if path.endswith('/delete'):
                         if body.get('confirmed') is not True:raise ValueError('请先确认删除这份归档。')

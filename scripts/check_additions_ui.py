@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#append-material').click();page.locator('#append-text').fill('Private pending supplementary draft')
     page.locator('#append-dialog .dialog-head button').click();page.locator('#detail-dialog .dialog-head button').click()
     page.locator('#recent-items [data-id="'+item_id+'"]').click(button='right');page.locator('#archive-delete-menu').click();page.locator('#delete-archive-confirm').click()
+    expect(page.locator('#toast')).to_contain_text('已移到回收站');page.evaluate('''async()=>{const data=await api('/api/trash');for(const item of data.items){const result=await api('/api/trash/'+item.id+'/purge',{confirmed:true,expected_updated:item.updated,expected_trashed_at:item.trashed_at});StellarArchiveActions.accept(result.history);mergeChats(result.history)}await refresh();toast('归档已删除')}''')
     expect(page.locator('#toast')).to_have_text('归档已删除');expect(page.locator('#append-text')).to_have_value('')
     assert not list((Path(root)/'files').iterdir()) and not errors,errors
     print('PASS: paste image+clipboard text+file into existing archive; cancel/reopen draft; one incremental model call; old title/text/summary/original intact; attachment preview; reload; second text-only batch without cloud call; parent deletion clears batches and pending append draft')

@@ -124,7 +124,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
+            for name,definition in [('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
@@ -189,6 +189,9 @@ class Archive:
         if mode not in ('desktop','browser'):raise ValueError('未知的使用方式')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('interface_mode',mode))
     def _index(self, db, item_id, text):
+        state=db.execute('SELECT trashed_at FROM items WHERE id=?',(item_id,)).fetchone()
+        if state and state['trashed_at']:
+            db.execute('DELETE FROM search WHERE item_id=?',(item_id,));db.execute('DELETE FROM chunks WHERE item_id=?',(item_id,));return
         visual=db.execute('SELECT vision_text,user_context,additions,group_links FROM items WHERE id=?',(item_id,)).fetchone()
         if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
         if visual and visual[1]:text+='\n\n【用户提供的说明，非网页正文】\n'+visual[1]
@@ -208,8 +211,9 @@ class Archive:
         digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
-            old = db.execute("SELECT id,text FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY created LIMIT 1", (digest, url, url)).fetchone()
+            old = db.execute("SELECT id,text,trashed_at FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY created LIMIT 1", (digest, url, url)).fetchone()
             if old:
+                if old['trashed_at']:raise ValueError('这份资料在回收站中，请先恢复或永久删除后再归档。')
                 if text.strip() and not old['text'].strip():
                     db.execute("UPDATE items SET text=?,title=?,state='pending',error='',updated=? WHERE id=?", (text, title or filename or url, now, old['id']))
                     if data is not None:
@@ -223,10 +227,10 @@ class Archive:
                        (item_id, title or filename or url or '未命名笔记', 'file' if filename else ('link' if url else 'note'), url, filename, digest, text, state, warning, now, now))
             self._index(db, item_id, text)
         return item_id, True
-    def get(self, item_id):
+    def get(self, item_id, include_trashed=False):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
-        if not row: raise KeyError('资料不存在')
-        item = dict(row); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
+        if not row or row['trashed_at'] and not include_trashed: raise KeyError('资料不存在')
+        item = dict(row);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -272,10 +276,11 @@ class Archive:
                             target.parent.mkdir(parents=True,exist_ok=True);staged.rename(target)
                     shutil.rmtree(path)
             except (OSError,ValueError,TypeError):pass
-    def delete(self,item_id,expected_updated,deleted_messages=()):
+    def delete(self,item_id,expected_updated,deleted_messages=(),expected_trashed_at=None):
         if not re.fullmatch('[a-f0-9]{32}',item_id):raise ValueError('无效的资料编号')
         with self.lock:
-            item=self.get(item_id)
+            item=self.get(item_id,include_trashed=True)
+            if expected_trashed_at is not None and (not expected_trashed_at or item['trashed_at']!=expected_trashed_at):raise ValueError('回收站状态已变化，请刷新后重新确认。')
             if item['updated']!=expected_updated:raise ValueError('资料已更新，请关闭确认框后重新选择删除。')
             images={image['id'] for image in item['note_images']+item['additions']}
             if any(not re.fullmatch('[a-f0-9]{32}',key) for key in images):raise ValueError('速记图片编号无效，未删除资料。')
@@ -352,22 +357,43 @@ class Archive:
             (history/(item_id+'-'+uuid.uuid4().hex+'.json')).write_text(json.dumps(previous,ensure_ascii=False))
         self.update(item_id,text=text,title=title or previous['title'],summary='',tags=[],category='未分类',state='pending',error='')
         return True
+    def set_flags(self,item_id,values):
+        if not isinstance(values,dict) or not values or set(values)-{'favorite','pinned'} or any(type(value) is not bool for value in values.values()):raise ValueError('收藏与置顶选项格式无效')
+        with self.lock,self.db() as db:
+            self.get(item_id)
+            db.execute('UPDATE items SET '+','.join(key+'=?' for key in values)+' WHERE id=?',(*[int(value) for value in values.values()],item_id))
+        item=self.get(item_id);return {'ok':True,'favorite':item['favorite'],'pinned':item['pinned']}
+    def trash_item(self,item_id,expected_updated):
+        with self.lock,self.db() as db:
+            item=self.get(item_id)
+            if item['updated']!=expected_updated:raise ValueError('资料已更新，请刷新后重新移到回收站。')
+            db.execute('UPDATE items SET trashed_at=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),item_id))
+            db.execute('DELETE FROM search WHERE item_id=?',(item_id,));db.execute('DELETE FROM chunks WHERE item_id=?',(item_id,))
+        return {'ok':True}
+    def restore_item(self,item_id):
+        with self.lock,self.db() as db:
+            item=self.get(item_id,include_trashed=True)
+            if item['trashed_at']:
+                db.execute("UPDATE items SET trashed_at='' WHERE id=?",(item_id,));self._index(db,item_id,item['text'])
+        return {'ok':True}
+    def trash_items(self):
+        return sorted((item for item in self.list(include_trashed=True) if item['trashed_at']),key=lambda item:item['trashed_at'],reverse=True)
     def mark_viewed(self,item_id):
         self.get(item_id)
         with self.lock,self.db() as db:db.execute('UPDATE items SET last_viewed=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),item_id))
         return {'ok':True}
-    def list(self, q='', category='', kind=''):
+    def list(self, q='', category='', kind='', include_trashed=False):
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,last_viewed,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
+        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+' FROM items ORDER BY created DESC')]
+            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
         result=[]
         for row in rows:
             body=row.pop('text','')
             visual=row.pop('vision_text','');group_values=links.records(json.loads(row.pop('group_links','[]')))
-            row['tags']=json.loads(row['tags'])
+            row['favorite']=bool(row['favorite']);row['pinned']=bool(row['pinned']);row['tags']=json.loads(row['tags'])
             batches=additions.records(row.pop('additions'));row['summary']=additions.combined_summary(row['summary'],batches);row['addition_count']=len(batches)
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
@@ -389,6 +415,6 @@ class Archive:
         with self.db() as db:
             return [dict(r) for r in db.execute('''SELECT c.id,c.item_id,c.position,c.text,i.title,i.url,i.filename,bm25(search) AS score
             FROM search JOIN chunks c ON c.id=search.chunk_id JOIN items i ON i.id=c.item_id
-            WHERE search MATCH ? ORDER BY score LIMIT ?''', (match, limit))]
+            WHERE search MATCH ? AND i.trashed_at='' ORDER BY score LIMIT ?''', (match, limit))]
     def export(self):
-        with self.db() as db: return [self.get(r['id']) for r in db.execute('SELECT id FROM items')]
+        with self.db() as db: return [self.get(r['id'],include_trashed=True) for r in db.execute('SELECT id FROM items')]

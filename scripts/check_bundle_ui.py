@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory() as temp:
     page.locator('#detail-dialog .dialog-head button').click();page.reload()
     expect(page.locator('.message.user .message-images img')).to_be_visible()
     page.locator('#recent-items [data-id="'+grouped['id']+'"]').click(button='right');page.locator('#archive-delete-menu').click();page.locator('#delete-archive-confirm').click()
+    expect(page.locator('#toast')).to_contain_text('已移到回收站');page.evaluate('''async()=>{const data=await api('/api/trash');for(const item of data.items){const result=await api('/api/trash/'+item.id+'/purge',{confirmed:true,expected_updated:item.updated,expected_trashed_at:item.trashed_at});StellarArchiveActions.accept(result.history);mergeChats(result.history)}await refresh();toast('归档已删除')}''')
     expect(page.locator('#toast')).to_have_text('归档已删除');expect(page.locator('.message-images img')).to_have_count(0)
     assert service.archive.get(other)==before and len(service.archive.list())==1 and not errors,errors
     # Annotation-only groups respect disabled automatic AI; no implicit question.
