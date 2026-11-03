@@ -7,7 +7,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from PIL import Image
 from playwright.sync_api import sync_playwright,expect
 from secretary.server import Service,handler
-from secretary import ai
+from secretary import ai,attachment_editor as editor
 
 stream=io.BytesIO();Image.new('RGB',(60,40),'blue').save(stream,format='PNG');png=stream.getvalue()
 with tempfile.TemporaryDirectory() as root:
@@ -16,8 +16,8 @@ with tempfile.TemporaryDirectory() as root:
  service.archive.update(item_id,summary='Original summary retained')
  server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
-  with patch.object(ai,'run',return_value=json.dumps({'summary':'New supplemental findings','vision_text':'SyntheticBlueDiagram','tags':[]})) as model,sync_playwright() as pw:
-   browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
+  with patch.object(ai,'run',return_value=json.dumps({'summary':'New supplemental findings','vision_text':'SyntheticBlueDiagram','tags':[]})) as model,patch.object(editor,'launch') as launched,sync_playwright() as pw:
+   browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
     page=browser.new_page(viewport={'width':1280,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(base);expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex',timeout=15000)
@@ -38,6 +38,7 @@ with tempfile.TemporaryDirectory() as root:
     assert page.request.get(base+'/api/items/'+item_id+'/file').body()==b'Original paper text'
     batch=service.item_detail(item_id)['additions'][0];attachment=batch['attachments'][0]
     assert page.request.get(base+'/api/items/'+item_id+'/additions/'+batch['id']+'/attachments/'+attachment['id']+'/preview').body()==png
+    page.locator('.addition-batch .bundle-file img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==1 and launched.call_args.args[0].name=='new.png' and launched.call_args.args[0].read_bytes()==png;assert len(browser.contexts[0].pages)==1
     page.screenshot(path='/tmp/secretary-append-materials.png')
     page.reload();page.locator('#recent-items [data-id="'+item_id+'"]').click();expect(page.locator('.addition-batch')).to_have_count(1)
     page.locator('#append-material').click();page.locator('#append-text').fill('Second batch, text only');page.locator('#append-summarize').uncheck();page.locator('#append-save').click()

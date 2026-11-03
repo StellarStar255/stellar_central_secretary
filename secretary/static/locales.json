@@ -851,5 +851,7 @@
   "取消置顶": "Unpin",
   "已置顶": "Pinned",
   "★ 已收藏": "★ Favorited",
-  "☆ 收藏": "☆ Favorite"
+  "☆ 收藏": "☆ Favorite",
+  "在默认程序中查看图片：": "View image in default app: ",
+  "已在默认程序中打开图片": "Image opened in default app"
 }

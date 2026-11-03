@@ -6,7 +6,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from PIL import Image
 from secretary.server import Service,handler
-from secretary import ai
+from secretary import ai,attachment_editor as editor
 from playwright.sync_api import sync_playwright,expect
 
 stream=io.BytesIO();Image.new('RGB',(50,40),'orange').save(stream,format='PNG');png=stream.getvalue()
@@ -20,8 +20,8 @@ with tempfile.TemporaryDirectory() as temp:
   assert 'Attached synthetic context' in prompt and len(options['images'])==1
   return json.dumps({'title':'Grouped example','summary':'Combined image and file summary','category':'Examples','tags':['Combined'],'vision_text':'DemoVisionOrange is visible in the image.','answer':'Synthetic combined answer [1]'})
  try:
-  with patch.object(ai,'run',side_effect=model) as mocked,sync_playwright() as pw:
-   browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
+  with patch.object(ai,'run',side_effect=model) as mocked,patch.object(editor,'launch') as launched,sync_playwright() as pw:
+   browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
     page=browser.new_page(viewport={'width':1280,'height':950});errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     page.goto(base);expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
@@ -36,8 +36,15 @@ with tempfile.TemporaryDirectory() as temp:
     assert mocked.call_count==1 and len(service.archive.list())==2
     grouped=next(item for item in service.archive.list() if item['id']!=other)
     expect(page.locator('.message.user .message-images img')).to_be_visible()
+    page.locator('.message.user .message-images img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==1 and launched.call_args.args[0].name=='pasted.png' and launched.call_args.args[0].read_bytes()==png
+    assert len(browser.contexts[0].pages)==1 and page.url==base+'/'
+    expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#messages .archive-card[data-id="'+grouped['id']+'"]').click()
     expect(page.locator('.bundle-file')).to_have_count(2);expect(page.locator('.bundle-file img')).to_be_visible()
+    page.locator('#toast').evaluate("node=>node.textContent=''");page.locator('.bundle-file img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==2 and len(browser.contexts[0].pages)==1
+    page.locator('#toast').evaluate("node=>node.textContent=''")
+    with page.expect_response(lambda response:response.url.endswith('/editor/open')) as opened:page.locator('.bundle-file .image-open').press('Enter')
+    assert opened.value.ok and launched.call_count==3,(opened.value.status,opened.value.text(),launched.call_count);expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');expect(page.locator('.bundle-file .image-open')).to_be_enabled()
     expect(page.get_by_role('heading',name='图片解读（AI 生成，请核对原图）')).to_be_visible()
     assert 'Question: Explain' in service.archive.get(grouped['id'])['text']
     image=service.item_detail(grouped['id'])['attachments'][0]
