@@ -674,6 +674,13 @@ def handler(service):
                     return self.send(200,source.read_bytes(),image['media'])
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/update': return self.send(200, updater.status())
+                if path=='/api/library':
+                    from .library import query
+                    values=urllib.parse.parse_qs(parsed.query)
+                    with service.lock:active=set(service.busy)|set(service.captures)
+                    result=query(service.archive,active_ids=active,**{key:values.get(key,[''])[0] for key in ('q','category','kind','state','days','sort')},offset=values.get('offset',[0])[0],limit=values.get('limit',[100])[0])
+                    result['items']=[service.with_progress(item) for item in result['items']]
+                    return self.send(200,result)
                 if path=='/api/items':
                     q = urllib.parse.parse_qs(parsed.query)
                     return self.send(200, [service.with_progress(item) for item in service.archive.list(**{k:q.get(k,[''])[0] for k in ('q','category','kind')})])
@@ -747,9 +754,10 @@ def handler(service):
                     append_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions(?:/([a-f0-9]{32})/summarize)?',path)
                     if append_match:
                         return self.send(200,service.retry_addition(append_match[1],append_match[2]) if append_match[2] else service.append_material(append_match[1],body))
-                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete))?', path):
+                    if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:capture|cancel-capture|confirm-login|reextract|title|tags|notes|open-file|delete|view))?', path):
                         return self.send(404, {'error':'不支持的资料操作'})
                     item_id = path.split('/')[3]; service.archive.get(item_id)
+                    if path.endswith('/view'):return self.send(200,service.archive.mark_viewed(item_id))
                     if path.endswith('/delete'):
                         if body.get('confirmed') is not True:raise ValueError('请先确认删除这份归档。')
                         return self.send(200,service.delete_item(item_id,body.get('expected_updated')))

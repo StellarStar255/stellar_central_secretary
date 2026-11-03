@@ -124,7 +124,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
+            for name,definition in [('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
@@ -352,11 +352,15 @@ class Archive:
             (history/(item_id+'-'+uuid.uuid4().hex+'.json')).write_text(json.dumps(previous,ensure_ascii=False))
         self.update(item_id,text=text,title=title or previous['title'],summary='',tags=[],category='未分类',state='pending',error='')
         return True
+    def mark_viewed(self,item_id):
+        self.get(item_id)
+        with self.lock,self.db() as db:db.execute('UPDATE items SET last_viewed=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),item_id))
+        return {'ok':True}
     def list(self, q='', category='', kind=''):
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
+        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,last_viewed,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+' FROM items ORDER BY created DESC')]
         result=[]
@@ -372,6 +376,10 @@ class Archive:
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue
+                readable=searchable_text(body)+'\n'+visual+'\n'+row.get('note','')+'\n'+additions.index_text(batches)
+                hits=[readable.casefold().find(word) for word in keywords if word in readable.casefold()]
+                if hits:
+                    start=max(0,min(hits)-65);row['search_snippet']=('…' if start else '')+readable[start:start+240]+('…' if len(readable)>start+240 else '')
             result.append(row)
         return result
     def retrieve(self, query, limit=8):
