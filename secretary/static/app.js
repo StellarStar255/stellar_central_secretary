@@ -155,7 +155,7 @@ function bindDetails(container,items=allItems){container.querySelectorAll('[data
 })}
 function summaryProgress(item){
  const p=item?.summary_progress;if(!p)return '';
- const labels={queued:'排队中',reading_sources:'正在读取来源',preparing:'正在准备摘要',starting_model:'正在启动模型',waiting_model:'模型处理中',processing_result:'正在保存结果',done:'处理完成',saved:'已保存',error:'整理失败',stopped:'已停止'};
+ const labels={queued:'排队中',reading_sources:'正在读取来源',preparing:'正在准备摘要',starting_model:'正在启动模型',waiting_model:'模型处理中',processing_result:'正在保存结果',done:'处理完成',saved:'已保存',error:'整理失败',stopped:'已停止',stopping:'正在停止',retrying_model:'正在分段重试'};
  return `<span>${esc(t(labels[p.stage]||'正在整理'))} · ${esc(t('耗时'))} ${Math.round(p.elapsed_seconds)}s</span><small>${esc(t('等待/准备'))} ${Math.round(p.queue_seconds)}s · ${esc(t('模型阶段（含启动）'))} ${Math.round(p.model_seconds)}s</small>`;
 }
 function updateSummaryProgress(){
@@ -204,7 +204,7 @@ function libraryPresentation(item){
  while(scopeStart.test(summary)){const end=summary.indexOf('\n\n');if(end<0){scope+=(scope?'\n':'')+summary;summary='';break}scope+=(scope?'\n':'')+summary.slice(0,end);summary=summary.slice(end+2).trim()}
  const partial=Boolean(/^(?:【(?:部分对话归档|网页已加载内容归档|PDF 前 5 页概览|PDF 开头概览|用户说明归档)】|\[Loaded webpage capture\])/m.test(scope)||item.tags?.some(tag=>['部分对话','网页片段','前部概览','Loaded webpage'].includes(tag)));
  let source=item.filename||t('本机笔记');try{if(item.url)source=new URL(item.url).hostname}catch{}
- return {summary:summary||item.error||t('正文已保存，可随时查阅。'),scope,partial,source};
+ return {summary:summary||item.error_hint?.message||item.error||t('正文已保存，可随时查阅。'),scope,partial,source};
 }
 function highlightMatches(value){const text=String(value||''),words=[...new Set($('#search').value.trim().split(/\s+/).filter(Boolean))].slice(0,20).sort((a,b)=>b.length-a.length);if(!words.length)return esc(text);const pattern=new RegExp(words.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'giu');let html='',end=0;for(const match of text.matchAll(pattern)){html+=esc(text.slice(end,match.index))+'<mark>'+esc(match[0])+'</mark>';end=match.index+match[0].length}return html+esc(text.slice(end))}
 function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${highlightMatches(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${highlightMatches(item.search_snippet||view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
@@ -546,3 +546,5 @@ $('#backup-input').onchange=async()=>{
 async function pollArchiveUpdates(){try{if(!document.hidden)await refresh()}catch{}finally{setTimeout(pollArchiveUpdates,!document.hidden&&activeWork?1000:10000)}}
 
 globalThis.StellarBundles?.bind({api,toast,onSaved:async id=>{await refresh();if(selectedId===id&&$('#detail-dialog').open)await detail(id)}});
+
+globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});

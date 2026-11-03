@@ -272,6 +272,7 @@ class ServiceTest(unittest.TestCase):
             self.service.start_capture(item_id, force_summary=True)
             self.service.capture_pool.shutdown(wait=True)
             self.service.pool.shutdown(wait=True)
+            self.service.quick_pool.shutdown(wait=True)
         saved = self.service.archive.get(item_id)
         self.assertEqual(saved['state'], 'ready')
         self.assertEqual(saved['text'], result['text'])
