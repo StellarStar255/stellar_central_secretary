@@ -14,7 +14,7 @@ class SummaryJobs:
     def enqueue(self,key,chars=0,short=False):
         with self.lock:
             now=time.monotonic()
-            self.jobs[key]={'stage':'queued','stage_at':now,'durations':{},'queued':now,'started':None,'ended':None,'input_chars':chars,'lane':'short' if short else 'long'}
+            self.jobs[key]={'stage':'queued','stage_at':now,'durations':{},'queued':now,'started':None,'ended':None,'input_chars':chars,'lane':'short' if short else 'long','cancel':threading.Event(),'committed':False}
             self.prune()
     def snapshot(self,key):
         with self.lock:
@@ -25,7 +25,7 @@ class SummaryJobs:
             if value['ended'] is None:durations[value['stage']]=durations.get(value['stage'],0)+now-value['stage_at']
             return {'stage':value['stage'],'active':value['ended'] is None,'lane':value['lane'],'input_chars':value['input_chars'],
                     'elapsed_seconds':round(now-value['queued'],1),'queue_seconds':round((start or now)-value['queued'],1),
-                    'model_seconds':round(now-start,1) if start else 0,'stages_seconds':{stage:round(seconds,2) for stage,seconds in durations.items()}}
+                    'batch_id':value.get('batch_id'),'operation':value.get('operation','summary'),'summarize':value.get('summarize'),'model_seconds':round(now-start,1) if start else 0,'stages_seconds':{stage:round(seconds,2) for stage,seconds in durations.items()}}
     def stage(self,key,stage):
         with self.lock:
             if key in self.jobs:
@@ -40,16 +40,32 @@ class SummaryJobs:
         with self.lock:
             if key not in self.jobs or self.jobs[key]['ended'] is not None:self.enqueue(key,chars,short)
             lane=self.lanes[self.jobs[key]['lane']]
-        acquired=False;failed=True;waiting=time.monotonic()
+        event=self.jobs[key]['cancel'];acquired=False;failed=True;waiting=time.monotonic()
         try:
-            while not self.stopped.is_set():
+            while not self.stopped.is_set() and not event.is_set():
                 if lane.acquire(timeout=.1):acquired=True;break
                 if wait_timeout is not None and time.monotonic()-waiting>=wait_timeout:raise RuntimeError('模型正在处理其他任务，请稍后再测试连接。')
-            if self.stopped.is_set():raise RuntimeError('任务已停止，已有资料保持不变。')
+            self.check(key)
             with self.lock:self.jobs[key].update(started=time.monotonic());self.stage(key,'preparing')
-            with ai.progress(lambda stage:self.stage(key,stage)):yield
+            with ai.cancellation(event),ai.progress(lambda stage:self.stage(key,stage)):yield
             failed=False
         finally:
-            self.finish(key,'stopped' if self.stopped.is_set() else 'error' if failed else 'done')
+            self.finish(key,'stopped' if self.stopped.is_set() or event.is_set() else 'error' if failed else 'done')
             if acquired:lane.release()
+    def target(self,key,batch_id=None,operation='summary',summarize=None):
+        with self.lock:self.jobs[key].update(batch_id=batch_id,operation=operation,summarize=summarize)
+    def cancelled(self,key):
+        with self.lock:return self.stopped.is_set() or bool(self.jobs.get(key,{}).get('cancel') and self.jobs[key]['cancel'].is_set())
+    def check(self,key):
+        if self.cancelled(key):raise ai.ModelCancelledError('已停止整理，原文和已有摘要保持不变。')
+    def commit(self,key):
+        with self.lock:
+            if key in self.jobs:self.jobs[key]['committed']=True
+    def cancel(self,key):
+        with self.lock:
+            job=self.jobs.get(key)
+            if not job or job['ended'] is not None or job['committed']:return None
+            job['cancel'].set();self.stage(key,'stopping');return job['cancel']
+    def records(self):
+        with self.lock:return [dict(id=key,**self.snapshot(key)) for key in sorted(self.jobs,key=lambda key:self.jobs[key]['queued'],reverse=True)]
     def close(self):self.stopped.set()

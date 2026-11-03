@@ -47,8 +47,35 @@ _cancel_generation=0
 class ModelTimeoutError(RuntimeError):
     """A model deadline, distinct from authentication, format and stop errors."""
 
-def cancel_all():
+class ModelCancelledError(RuntimeError):pass
+_job_cancel=ContextVar('model_job_cancel',default=None)
+@contextmanager
+def cancellation(event):
+    token=_job_cancel.set(event)
+    try:yield
+    finally:_job_cancel.reset(token)
+def is_cancelled(generation):return generation!=_cancel_generation or bool(_job_cancel.get() and _job_cancel.get().is_set())
+def check_cancelled():
+    if _job_cancel.get() and _job_cancel.get().is_set():raise ModelCancelledError('已停止整理，原文和已有摘要保持不变。')
+def cancel_job(event):
+    terminate_job=terminate_model
+    event.set()
+    with _process_lock:processes=[proc for proc in _processes if getattr(proc,'_stellar_cancel',None) is event]
+    for proc in processes:terminate_job(proc)
+
+def terminate_model(proc):
+    # A Node CLI on Windows can be launched through a .cmd wrapper. Stop only
+    # this model's process tree; capture workers retain their browser windows.
+    if sys.platform=='win32' and proc.poll() is None:
+        try:
+            tool=Path(os.environ.get('SystemRoot',r'C:\Windows'))/'System32'/'taskkill.exe'
+            subprocess.run([str(tool),'/PID',str(proc.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3,creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError,subprocess.TimeoutExpired):pass
     from .capture_worker import terminate_job
+    terminate_job(proc)
+
+def cancel_all():
+    terminate_job=terminate_model
     global _cancel_generation
     with _process_lock:
         _cancel_generation+=1;processes=list(_processes)
@@ -72,7 +99,7 @@ def executable(name):
     return next((str(p) for p in (Path('/opt/homebrew/bin')/name, Path.home()/'.local/bin'/name, Path('/usr/local/bin')/name) if p.is_file()), None)
 
 def _run_api(prompt,config,images,timeout=240):
-    from .capture_worker import terminate_job
+    terminate_job=terminate_model
     with _process_lock:generation=_cancel_generation
     images=images or []
     if len(images)>8 or sum(len(image['data']) for image in images)>8*1024*1024:raise ValueError('图片分析数据过大，请减少图片后重试')
@@ -82,17 +109,17 @@ def _run_api(prompt,config,images,timeout=240):
         policy={'mode':'direct'} if network.is_loopback_url(config.get('base_url','')) else config['_proxy']
         env=network.child_env(policy=policy)
     else:env={**os.environ,'PYTHONUTF8':'1','PYTHONIOENCODING':'utf-8'}
-    report('starting_model')
+    check_cancelled();report('starting_model')
     proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',env=env,start_new_session=True,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0,cwd=str(Path(__file__).resolve().parent.parent))
     report('waiting_model')
     with _process_lock:
-        _processes.add(proc);cancelled=generation!=_cancel_generation
+        proc._stellar_cancel=_job_cancel.get();_processes.add(proc);cancelled=is_cancelled(generation)
     try:
-        if cancelled:terminate_job(proc);raise RuntimeError('任务已停止，已有资料保持不变。')
+        if cancelled:terminate_job(proc);raise ModelCancelledError('任务已停止，已有资料保持不变。')
         try:output,_=proc.communicate(json.dumps(payload,ensure_ascii=False),timeout=timeout)
         except subprocess.TimeoutExpired:terminate_job(proc);raise ModelTimeoutError('模型 API 处理超时，资料已保留，请稍后重试。') from None
-        with _process_lock:cancelled=generation!=_cancel_generation
-        if cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+        with _process_lock:cancelled=is_cancelled(generation)
+        if cancelled:raise ModelCancelledError('任务已停止，已有资料保持不变。')
         try:result=json.loads(output)
         except ValueError:raise RuntimeError('模型 API 工作进程未返回有效结果，请重试') from None
         if result.get('error'):
@@ -138,29 +165,29 @@ def run(prompt, backend, images=None, timeout=240, reasoning_effort=None):
             for index,image in enumerate(images):
                 path=Path(cwd)/f'image-{index}.jpg';path.write_bytes(image['data']);cmd+=['--image',str(path)]
             cmd += ['--','-'] if images else ['-']
-        report('starting_model')
+        check_cancelled();report('starting_model')
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, cwd=cwd, env=env, start_new_session=True)
         report('waiting_model')
         with _process_lock:
-            _processes.add(proc);was_cancelled=generation!=_cancel_generation
+            proc._stellar_cancel=_job_cancel.get();_processes.add(proc);was_cancelled=is_cancelled(generation)
         try:
-            if was_cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+            if was_cancelled:raise ModelCancelledError('任务已停止，已有资料保持不变。')
             try: out, err = proc.communicate(prompt, timeout=timeout)
             except subprocess.TimeoutExpired:
-                from .capture_worker import terminate_job
+                terminate_job=terminate_model
                 terminate_job(proc)
-                with _process_lock:cancelled=generation!=_cancel_generation
-                if cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+                with _process_lock:cancelled=is_cancelled(generation)
+                if cancelled:raise ModelCancelledError('任务已停止，已有资料保持不变。')
                 raise ModelTimeoutError('模型处理超时，请检查网络、登录状态后重试。') from None
         finally:
-            from .capture_worker import terminate_job
+            terminate_job=terminate_model
             terminate_job(proc)
             for stream in (proc.stdin,proc.stdout,proc.stderr):
                 if stream:stream.close()
             with _process_lock:_processes.discard(proc)
-        with _process_lock:cancelled=generation!=_cancel_generation
-        if cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+        with _process_lock:cancelled=is_cancelled(generation)
+        if cancelled:raise ModelCancelledError('任务已停止，已有资料保持不变。')
         report('processing_result')
         if proc.returncode:
             message=(err or out or f'{backend} 返回 {proc.returncode}')[-1200:]
@@ -241,8 +268,8 @@ def summarize(text, title, backend):
     def request(source,build_prompt):
         nonlocal recovered
         def call(value,build,timeout=240):
-            with _process_lock:cancelled=generation!=_cancel_generation
-            if cancelled:raise RuntimeError('任务已停止，已有资料保持不变。')
+            with _process_lock:cancelled=is_cancelled(generation)
+            if cancelled:raise ModelCancelledError('任务已停止，已有资料保持不变。')
             return run(build(value),backend,timeout=timeout,reasoning_effort='low')
         try:return call(source,build_prompt)
         except ModelTimeoutError:

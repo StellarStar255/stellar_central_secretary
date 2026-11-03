@@ -72,10 +72,10 @@ class Service:
         self.quick_pool=ThreadPoolExecutor(max_workers=1);self.summary_jobs=summary_jobs.SummaryJobs()
         self.capture_pool = ThreadPoolExecutor(max_workers=4)
         self.captures = {}
-        self.capture_futures = {}
+        self.capture_futures = {};self.capture_records={}
         self.stopping = False
         self.login_confirmations = {}
-        self.busy = set(); self.lock = threading.Lock()
+        self.busy = set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
@@ -221,11 +221,11 @@ class Service:
             batch_id=additions.save(self.archive,item_id,body.get('text',''),body.get('attachments',[]),body.get('expected_updated'),urls)
             summarize=body.get('summarize',self.archive.settings()['auto_ai']) is True
             if urls:
-                self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.pool.submit(self.process_group_links,item_id,batch_id,summarize)
+                self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id,'read',summarize);self.summary_futures[item_id]=self.pool.submit(self.process_group_links,item_id,batch_id,summarize)
             elif summarize:
                 short=not body.get('attachments') and len(body.get('text',''))<=4000
                 self.busy.add(item_id);self.summary_jobs.enqueue(item_id,len(body.get('text','')),short)
-                (self.quick_pool if short else self.pool).submit(self.process_addition,item_id,batch_id)
+                self.summary_jobs.target(item_id,batch_id);self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process_addition,item_id,batch_id)
         return {'ok':True,'batch_id':batch_id,'item':self.item_detail(item_id)}
 
     def read_group_links(self,item_id,batch_id=None,summarize=None):
@@ -234,7 +234,7 @@ class Service:
             item=self.archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
             if batch_id and batch is None:raise KeyError('追加资料不存在')
             if not (batch.get('links',[]) if batch else item['group_links']):raise ValueError('这份资料没有组合链接')
-            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.pool.submit(self.process_group_links,item_id,batch_id,self.archive.settings()['auto_ai'] if summarize is None else summarize)
+            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id,'read',self.archive.settings()['auto_ai'] if summarize is None else summarize);self.summary_futures[item_id]=self.pool.submit(self.process_group_links,item_id,batch_id,self.archive.settings()['auto_ai'] if summarize is None else summarize)
         return {'ok':True}
 
     def process_group_links(self,item_id,batch_id,summarize):
@@ -245,30 +245,33 @@ class Service:
             previous=batch.get('links',[]) if batch else item['group_links']
             if batch:additions.update(self.archive,item_id,batch_id,state='processing',error='正在读取本组链接…')
             else:self.archive.update(item_id,state='processing',error='正在读取本组链接…')
-            values=links.read(previous,lambda url:('', '本地网页请手动打开后将正文追加到本档案。') if web_reader.is_loopback_url(url) else fetch_page(url),lambda:self.stopping)
+            values=links.read(previous,lambda url:('', '本地网页请手动打开后将正文追加到本档案。') if web_reader.is_loopback_url(url) else fetch_page(url),lambda:self.stopping or self.summary_jobs.cancelled(item_id))
+            self.summary_jobs.check(item_id)
             if self.stopping:return
             original,manifest=bundles.load((self.archive.root/'files'/(batch_id or item_id)).read_bytes());original.close()
             old_source=bundles.assemble(dict(manifest,links=previous));source=bundles.assemble(dict(manifest,links=values))
-            if batch:additions.update(self.archive,item_id,batch_id,links=values,text=source[:200000],state='pending',error='')
-            else:self.archive.update(item_id,group_links=values,text=source if item['text']==old_source else item['text'],vision_text=item['vision_text'],state='ready' if item['summary'] else 'pending',error='')
+            with self.lock:
+                self.summary_jobs.check(item_id)
+                if batch:additions.update(self.archive,item_id,batch_id,links=values,text=source[:200000],state='pending',error='')
+                else:self.archive.update(item_id,group_links=values,text=source if item['text']==old_source else item['text'],vision_text=item['vision_text'],state='ready' if item['summary'] else 'pending',error='')
+                if not summarize:self.summary_jobs.commit(item_id)
             if summarize:
                 delegated=True
                 if batch:self.process_addition(item_id,batch_id)
                 else:self.process(item_id)
         except Exception as error:
-            self.summary_jobs.finish(item_id,'error')
-            if batch_id:additions.update(self.archive,item_id,batch_id,state='error',error=str(error)[:1600])
-            else:self.archive.update(item_id,state='error',error=str(error)[:1600])
+            self.summary_jobs.finish(item_id,'stopped' if self.summary_jobs.cancelled(item_id) else 'error')
+            self.summary_failed(item_id,error,batch_id)
         finally:
             if not delegated:
                 if self.summary_jobs.snapshot(item_id) and self.summary_jobs.snapshot(item_id)['active']:self.summary_jobs.finish(item_id,'saved')
-                with self.lock:self.busy.discard(item_id)
+                with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
 
     def retry_addition(self,item_id,batch_id):
         with self.lock:
             if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后追加')
             if additions.find(self.archive.get(item_id),batch_id) is None:raise KeyError('追加资料不存在')
-            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.pool.submit(self.process_addition,item_id,batch_id)
+            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id);self.summary_futures[item_id]=self.pool.submit(self.process_addition,item_id,batch_id)
         return {'ok':True}
 
     def short_summary(self,item,full_pdf=False):
@@ -276,7 +279,10 @@ class Service:
 
     def with_progress(self,item):
         value=self.summary_jobs.snapshot(item["id"])
-        return dict(item,summary_progress=value) if value else item
+        from .task_status import explain
+        result=dict(item,summary_progress=value) if value else dict(item)
+        if item.get('error') and item['state'] in ('error','needs_content'):result['error_hint']=explain(item['error'])
+        return result
 
     def process_addition(self,item_id,batch_id):
         batch=additions.find(self.archive.get(item_id),batch_id)
@@ -290,11 +296,13 @@ class Service:
                 new_source=source;context_limit=1000 if not images and len(source)<=4000 else 8000
                 source='本次仅总结新追加资料，不重述旧摘要；旧摘要仅供理解背景。\n旧摘要：\n'+item['summary'][:context_limit]+'\n\n本次新增：\n'+source
                 fields,_=ai.analyze_material(source,item['title'],self.model_backend(),images,'【追加资料概览】'+scope,summary_text=new_source)
-                additions.update(self.archive,item_id,batch_id,summary=fields['summary'][:60000],vision_text=fields.get('vision_text',batch.get('vision_text','')),state='ready',error='')
+                with self.lock:
+                    self.summary_jobs.check(item_id)
+                    additions.update(self.archive,item_id,batch_id,summary=fields['summary'][:60000],vision_text=fields.get('vision_text',batch.get('vision_text','')),state='ready',error='');self.summary_jobs.commit(item_id)
         except Exception as error:
-            additions.update(self.archive,item_id,batch_id,state='error',error=str(error)[:1600])
+            self.summary_failed(item_id,error,batch_id)
         finally:
-            with self.lock:self.busy.discard(item_id)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
     def queue(self, item_id, force=False, full_pdf=False):
         item = self.archive.get(item_id)
         if self.stopping:return
@@ -302,9 +310,9 @@ class Service:
         with self.lock:
             if item_id in self.busy: return
             self.busy.add(item_id)
-        short=self.short_summary(item,full_pdf)
-        self.summary_jobs.enqueue(item_id,len(item["text"]),short)
-        (self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf)
+            short=self.short_summary(item,full_pdf)
+            self.summary_jobs.enqueue(item_id,len(item["text"]),short)
+            self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf)
     def process(self, item_id, full_pdf=False):
         if any(value['state']=='pending' for value in self.archive.get(item_id)['group_links']):return self.process_group_links(item_id,None,True)
         try:
@@ -317,10 +325,60 @@ class Service:
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(),images,scope)
                 else:fields=ai.summary_fields(item, self.model_backend(), full_pdf=full_pdf)
-                self.archive.update(item_id, **fields)
-        except Exception as exc: self.archive.update(item_id, state='error', error=str(exc)[:1600])
+                with self.lock:
+                    self.summary_jobs.check(item_id)
+                    self.archive.update(item_id, **fields);self.summary_jobs.commit(item_id)
+        except Exception as exc:self.summary_failed(item_id,exc)
         finally:
-            with self.lock: self.busy.discard(item_id)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+    def summary_failed(self,item_id,error,batch_id=None):
+        stopped=self.summary_jobs.cancelled(item_id)
+        message='已停止整理，可重新整理；原文和已有摘要保持不变。' if stopped else str(error)[:1600]
+        if batch_id:
+            batch=additions.find(self.archive.get(item_id),batch_id)
+            additions.update(self.archive,item_id,batch_id,state=('ready' if batch and batch['summary'] else 'saved') if stopped else 'error',error=message)
+        else:
+            item=self.archive.get(item_id)
+            self.archive.update(item_id,state=('ready' if item['summary'] else 'saved') if stopped else 'error',error=message)
+    def cancel_summary(self,item_id):
+        with self.lock:
+            self.archive.get(item_id)
+            event=self.summary_jobs.cancel(item_id) if item_id in self.busy else None
+            if event is None:return {'stopped':False,'message':'任务已经完成或不在运行。'}
+            future=self.summary_futures.get(item_id)
+            if future and future.cancel():
+                target=self.summary_jobs.snapshot(item_id)
+                self.summary_failed(item_id,ai.ModelCancelledError(),target.get('batch_id'))
+                self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+        ai.cancel_job(event)
+        return {'stopped':True}
+    def retry_task(self,item_id):
+        self.archive.get(item_id);record=self.summary_jobs.snapshot(item_id) or {}
+        if record.get('operation')=='read':return self.read_group_links(item_id,record.get('batch_id'),record.get('summarize'))
+        if record.get('batch_id'):return self.retry_addition(item_id,record['batch_id'])
+        self.queue(item_id,force=True);return {'ok':True}
+    def task_status(self):
+        from .task_status import explain
+        with self.lock:busy=set(self.busy);captures=set(self.captures);capture_records={key:dict(value) for key,value in self.capture_records.items()}
+        items={item['id']:item for item in self.archive.list()};result=[];seen=set()
+        for record in self.summary_jobs.records():
+            item=items.get(record['id'])
+            if not item:continue
+            seen.add(item['id']);active=item['id'] in busy and record['active']
+            batch=additions.find(self.archive.get(item['id']),record['batch_id']) if record.get('batch_id') else None
+            error=batch['error'] if batch else item['error']
+            result.append(dict(record,title=item['title'],kind='summary',active=active,retryable=bool(item['text_length'] or item['user_context'] or item['has_group_links'] or item['addition_count']),error=explain(error) if not active and error else None))
+        for key,record in capture_records.items():
+            item=items.get(key)
+            if not item:continue
+            seen.add(key);active=key in captures
+            result.insert(0,dict(id=key,title=item['title'],kind='capture',stage=item['state'] if active else record['stage'],active=active,retryable=True,error=explain(item['error']) if not active and record.get('stage')=='error' else None,elapsed_seconds=round((record.get('ended') or time.monotonic())-record['started'],1)))
+        for item in items.values():
+            if item['id'] not in seen and item['state'] in ('error','needs_content') and item['error']:
+                kind='capture' if item['url'] and not item['text_length'] else 'summary'
+                result.append(dict(id=item['id'],title=item['title'],kind=kind,stage='error',active=False,retryable=bool(item['text_length'] or item['user_context'] or item['url']),error=explain(item['error']),elapsed_seconds=0))
+        result.sort(key=lambda task:not task['active'])
+        return {'tasks':result[:100]}
     def start_capture(self, item_id, force_summary=False):
         item = self.archive.get(item_id)
         try: browser_reader.conversation_url(item['url'])
@@ -330,6 +388,7 @@ class Service:
             if item_id in self.captures or item_id in self.busy: return
             stop = threading.Event()
             self.captures[item_id] = stop
+            self.capture_records[item_id]={'started':time.monotonic(),'ended':None,'force_summary':force_summary}
             self.login_confirmations[item_id] = threading.Event()
             self.archive.update(item_id, state='queued_capture', error='读取任务已排队，可随时停止。')
             self.capture_futures[item_id]=self.capture_pool.submit(self.capture, item_id, stop, force_summary)
@@ -375,6 +434,7 @@ class Service:
             self.archive.update(item_id, state='ready' if item['summary'] else ('error' if item['text'] else 'needs_content'), error=str(exc)[:1600])
         finally:
             with self.lock:
+                self.capture_records.setdefault(item_id,{'started':time.monotonic(),'force_summary':force_summary}).update(ended=time.monotonic(),stage='stopped' if stop.is_set() else 'done' if completed else 'error')
                 self.captures.pop(item_id, None)
                 self.login_confirmations.pop(item_id, None)
                 self.capture_futures.pop(item_id,None)
@@ -428,6 +488,7 @@ class Service:
             if stop:stop.set()
             future=self.capture_futures.get(item_id)
             if future and future.cancel():
+                if item_id in self.capture_records:self.capture_records[item_id].update(ended=time.monotonic(),stage='stopped')
                 self.captures.pop(item_id,None);self.login_confirmations.pop(item_id,None);self.capture_futures.pop(item_id,None)
             if stop:
                 self.archive.update(item_id,state='ready' if item['summary'] else ('pending' if item['text'] else 'needs_content'),error='已停止读取，已有资料保持不变。')
@@ -473,7 +534,7 @@ class Service:
                 with self.summary_jobs.lock:self.summary_jobs.jobs.pop(item_id,None)
             return result
         finally:
-            with self.lock:self.busy.discard(item_id)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
 
     def reextract(self, item_id):
         item=self.archive.get(item_id)
@@ -495,7 +556,7 @@ class Service:
             self.archive.update(item_id,state='ready' if item['text'] else 'needs_content',error='重新解析失败，原文件与已有正文已保留：'+str(exc)[:500])
             raise
         finally:
-            with self.lock:self.busy.discard(item_id)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
         if parsed:self.queue(item_id)
         return {'ok':True,'parsed':parsed,'item':self.archive.get(item_id)}
 
@@ -587,7 +648,7 @@ class Service:
         except Exception as error:
             self.archive.update(item_id,state='error',error=str(error)[:1600]);raise
         finally:
-            with self.lock:self.busy.discard(item_id);self.questions-=1
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.questions-=1
 
     def ask(self, question,item_ids=None):
         if not question.strip(): raise ValueError('请输入问题')
@@ -673,6 +734,7 @@ def handler(service):
                     image,source=notes.note_image(service.archive,*image_match.groups())
                     return self.send(200,source.read_bytes(),image['media'])
                 if path=='/api/conversations':return self.send(200,service.chat_history())
+                if path=='/api/tasks':return self.send(200,service.task_status())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/library':
                     from .library import query
@@ -699,7 +761,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -716,6 +778,14 @@ def handler(service):
                     return self.send(200, import_backup(service.archive, self.rfile.read(length)))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                task_match=re.fullmatch(r'/api/tasks/([a-f0-9]{32})/(cancel|retry)',path)
+                if task_match:
+                    if task_match[2]=='retry':
+                        if body.get('kind')=='capture':
+                            service.start_capture(task_match[1],service.capture_records.get(task_match[1],{}).get('force_summary',False));return self.send(200,{'ok':True})
+                        return self.send(200,service.retry_task(task_match[1]))
+                    if task_match[1] in service.captures:return self.send(200,service.cancel_capture(task_match[1]))
+                    return self.send(200,service.cancel_summary(task_match[1]))
                 if path=='/api/proxy/check':
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
