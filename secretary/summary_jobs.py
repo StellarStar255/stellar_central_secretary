@@ -36,14 +36,15 @@ class SummaryJobs:
         with self.lock:
             if key in self.jobs:self.stage(key,stage);self.jobs[key]['ended']=time.monotonic();self.prune()
     @contextmanager
-    def session(self,key,chars=0,short=False):
+    def session(self,key,chars=0,short=False,wait_timeout=None):
         with self.lock:
             if key not in self.jobs or self.jobs[key]['ended'] is not None:self.enqueue(key,chars,short)
             lane=self.lanes[self.jobs[key]['lane']]
-        acquired=False;failed=True
+        acquired=False;failed=True;waiting=time.monotonic()
         try:
             while not self.stopped.is_set():
                 if lane.acquire(timeout=.1):acquired=True;break
+                if wait_timeout is not None and time.monotonic()-waiting>=wait_timeout:raise RuntimeError('模型正在处理其他任务，请稍后再测试连接。')
             if self.stopped.is_set():raise RuntimeError('任务已停止，已有资料保持不变。')
             with self.lock:self.jobs[key].update(started=time.monotonic());self.stage(key,'preparing')
             with ai.progress(lambda stage:self.stage(key,stage)):yield

@@ -254,13 +254,13 @@ def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
     raise RuntimeError(message+' ('+counts+')')
 
 
-def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,background=False,close_new_tabs=False,language='zh'):
+def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,background=False,close_new_tabs=False,language='zh',proxy=None):
     from playwright.sync_api import sync_playwright
     target=validate_browser_url(url);profile=Path(profile_dir).resolve();profile.mkdir(parents=True,exist_ok=True)
     if os.name!='nt':profile.chmod(0o700)
     notify('opening_browser','正在打开浏览器以读取网页')
     marker='about:blank#stellar-web-capture-'+uuid.uuid4().hex
-    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=None if is_loopback_url(target) else browser_proxy())
+    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=proxy if proxy is not None else (None if is_loopback_url(target) else browser_proxy()))
     confirmed=login_complete if login_complete is not None else threading.Event()
     page=None;completed=False
     with sync_playwright() as pw:

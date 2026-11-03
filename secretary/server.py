@@ -182,19 +182,19 @@ class Service:
         value=model_api.prepare(self.archive.root,body.get('model_api',{})) if body.get('backend')=='api' else None
         try:
             if value is not None:model_api.write(self.archive.root,value)
-            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'))
+            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'),body.get('capture_proxy'))
         except BaseException:
             if value is not None:
                 if previous is None:path.unlink(missing_ok=True)
                 else:model_api.write(self.archive.root,json.loads(previous))
             raise
-        return {'ok':True,'model_api':model_api.public(self.archive.root),'model_proxy':self.archive.settings()['model_proxy']}
+        return {'ok':True,'model_api':model_api.public(self.archive.root),'model_proxy':self.archive.settings()['model_proxy'],'capture_proxy':self.archive.settings()['capture_proxy']}
 
     def test_model_api(self,body):
         config=self.model_backend('api',body.get('model_proxy'),body)
         with self.lock:self.questions+=1
         try:
-            with self.summary_jobs.session('api-test-'+secrets.token_hex(8),short=True):
+            with self.summary_jobs.session('api-test-'+secrets.token_hex(8),short=True,wait_timeout=5):
                 ai.run('Reply with exactly OK. This is a connection test, no user documents are included.',config,timeout=60)
             return {'ok':True}
         finally:
@@ -204,7 +204,7 @@ class Service:
         backend=self.model_backend(body.get('backend'),body.get('model_proxy'),body.get('model_api'))
         with self.lock:self.questions+=1
         try:
-            with self.summary_jobs.session('model-test-'+secrets.token_hex(8),short=True):
+            with self.summary_jobs.session('model-test-'+secrets.token_hex(8),short=True,wait_timeout=5):
                 ai.run('Reply with exactly OK. This is a connection test, no user documents are included.',backend,timeout=60,reasoning_effort='low')
             return {'ok':True}
         finally:
@@ -347,6 +347,8 @@ class Service:
             try: browser_reader.conversation_url(item['url'])
             except ValueError: kind='web'; options={'language':settings.get('ui_language','zh')}
             else: kind='chatgpt'; options={'scope':settings['capture_scope']}
+            from .network import capture_proxy_route
+            options['proxy']=capture_proxy_route(settings['capture_proxy'],settings['model_proxy'])
             profile_name='browser-live-profile' if kind=='chatgpt' else 'web-browser-profile'
             result = capture_worker.run(kind,item['url'],self.archive.root/profile_name,notify,stop,self.login_confirmations[item_id],
                                         background=settings['capture_background'],close_new_tabs=settings['capture_close_tabs'],**options)
@@ -707,6 +709,10 @@ def handler(service):
                     return self.send(200, import_backup(service.archive, self.rfile.read(length)))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                if path=='/api/proxy/check':
+                    from .network import check_proxy_port,is_loopback_url
+                    if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
+                    return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/install':
                     with service.lock:

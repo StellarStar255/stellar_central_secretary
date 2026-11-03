@@ -31,7 +31,7 @@ def create_task_page(browser, session, background):
         cdp.detach()
 
 
-def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope='full'):
+def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope='full', proxy=None):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -42,7 +42,7 @@ def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, b
     if os.name != 'nt': profile.chmod(0o700)
     notify('opening_browser', '正在后台打开专用浏览器。' if background else '正在打开专用浏览器。')
     marker = 'about:blank#stellar-capture-'+uuid.uuid4().hex
-    session = reader.start_or_reuse_browser(marker, profile, cancelled, background=background)
+    session = reader.start_or_reuse_browser(marker, profile, cancelled, background=background, proxy=proxy)
     confirmed = login_complete if login_complete is not None else threading.Event()
     page = None
     with sync_playwright() as pw:

@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.54** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.54.md)
+版本 **v0.1.55** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.55.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -138,7 +138,11 @@ Gemini 调用依据：[非交互接口](https://geminicli.com/docs/cli/headless/
 
 Codex 非交互调用依据：[官方文档](https://learn.chatgpt.com/docs/non-interactive-mode)。
 
-在「模型与设置 → 模型连接与代理」选择自动检测、直连或自定义 HTTP 代理。配置同时用于 Claude、Codex、Gemini、自定义模型 API 和连接测试。可填写代理软件的 HTTP / Mixed 端口（如 `http://127.0.0.1:7897`），不接受 SOCKS 地址或 URL 中的账号密码。自定义代理不可用时明确报错，不会回退直连；本机模型 API 始终直连，浏览器采集保持原有连接方式。「测试当前模型连接」使用尚未保存的选项，不发送知识库资料，也不会修改已保存设置。
+在「模型与设置 → 网络连接与代理」选择“就在这台电脑”并填写端口数字，不用自己拼代理地址。先打开代理软件，在设置中找到“端口 / 入站 / 本地代理”。例如显示 **HTTP / Mixed 7897**，模型代理就填 **7897**。示例可以自动填好表单，但数字要以你软件实际显示的为准。
+
+专用 Chrome 可以跟随系统、沿用模型连接、直连或使用另一个 HTTP / SOCKS5 代理。例如显示 **SOCKS 1080**，浏览器选 **SOCKS5**、填 **1080**。模型调用使用 HTTP / Mixed 端口；浏览器支持无需账号密码的 SOCKS5。常用浏览器及采集扩展使用它们自己的设置。保存后，如果专用浏览器已经打开，请先点击“关闭专用浏览器”再重新读取，登录资料保留。
+
+“只检查代理端口”不会调用模型；“测试当前模型连接”会继续验证模型，并显示用时和结果。端口可连接不代表模型账号已登录或外部网页一定可用。本机模型 API 始终直连；测试使用未保存的选项，不发送知识库资料，也不修改已保存设置。
 
 ## 检索与当前边界
 
@@ -202,7 +206,7 @@ python3 -m venv .venv
 bash packaging/build_macos.sh
 ```
 
-产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.54 packaging/windows_installer.iss`。
+产物在 `dist/`。Windows 在安装 Inno Setup 6 后运行 `pyinstaller packaging/stellar-secretary.spec --noconfirm`，再运行 `iscc /DAppVersion=0.1.55 packaging/windows_installer.iss`。
 
 GitHub Actions 的 Build & Release 支持手动构建；推送与 `secretary/__init__.py` 一致的 `v*` 标签时，测试、构建两平台安装包并上传到 Release，同时发布自动更新需要的 `SHA256SUMS.txt`。未配置 CI 苹果签名和公证凭据时只生成草稿；需以本机签名公证后的 DMG 替换草稿附件、重算校验和后再公开发布。发布说明放在 `docs/releases/v版本号.md`。当前自动构建 macOS arm64、Windows x64。
 

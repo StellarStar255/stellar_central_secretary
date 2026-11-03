@@ -46,6 +46,8 @@ jobs:
       - name: Text and command archive UI
         if: runner.os == 'Windows'
         run: |
+          python scripts/check_browser_proxy.py
+          python scripts/check_model_api_ui.py
           python scripts/check_text_archive_ui.py
           python scripts/check_summary_performance_ui.py
           python scripts/check_attachment_editor_ui.py

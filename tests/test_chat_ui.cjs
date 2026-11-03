@@ -5,7 +5,7 @@ function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,h
 for(const id of html.matchAll(/id="([^"]+)"/g))elements.set('#'+id[1],element());
 elements.get('#backend').value='codex';elements.get('#input-mode').value='auto';
 const timerDelays=[],calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current';
-const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:(callback,delay)=>{timerDelays.push(delay);return 1},clearTimeout(){},setInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:{classList:{add(){},remove(){},toggle(){}}},hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{
+const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:(callback,delay)=>{timerDelays.push(delay);return 1},clearTimeout(){},setInterval(){},clearInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:{classList:{add(){},remove(){},toggle(){}}},hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{
  const body=options?.body?JSON.parse(options.body):undefined;calls.push({path,body});
  let data;if(path==='/api/status')data={token:'test',capabilities:captureCapability?{conversation_capture:true,manual_browser_login:true,profile_window_reuse:true,in_place_browser_read:true}:{},settings:{backend:'codex',auto_ai:true},backends:{codex:true,claude:true,gemini:true},data_dir:'/tmp/test'};
  else if(path.endsWith('/confirm-login')){
@@ -18,6 +18,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else if(path.startsWith('/api/items'))data=archive;
  else if(path==='/api/ingest'){const item={id:'a'+archive.length,title:body.url||'笔记',url:body.url||'',kind:body.url?'link':'note',category:'未分类',state:'pending',text:body.text||'',summary:'',tags:[],created:new Date().toISOString()};archive.push(item);data={created:true,item}}
  else if(path==='/api/conversations')data=body||{conversations:[],activeId:''};
+ else if(path==='/api/proxy/check')data={ok:true,message:'代理端口可以连接'};
  else if(path==='/api/model-connection/test')data={ok:true};
  else if(path==='/api/interface')data={ok:true,mode:body.mode};
  else if(path==='/api/ask')data={answer:'这是带来源的答案。',sources:[{number:1,item_id:'a0',title:'来源资料'}]};
@@ -44,11 +45,20 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  elements.get('#backend').value='gemini';for(const change of elements.get('#backend').listeners.change)change();assert.equal(elements.get('#model-label').textContent,'Gemini');assert.equal(elements.get('#gemini-cli-help').hidden,false);
  elements.get('#backend').value='codex';vm.runInContext('updateModelLabel()',context);
  assert.equal(elements.get('#model-proxy-mode').value,'auto');
- elements.get('#model-proxy-mode').value='custom';elements.get('#model-proxy-mode').listeners.input[0]();elements.get('#model-proxy-url').value='http://127.0.0.1:4567';
+ elements.get('#model-proxy-mode').value='custom';elements.get('#model-proxy-mode').listeners.input[0]();elements.get('#model-proxy-host').value='127.0.0.1';elements.get('#model-proxy-port').value='4567';
  vm.runInContext('StellarModelProxy.sync({mode:"direct",url:""})',context);assert.equal(elements.get('#model-proxy-mode').value,'custom');
  const beforeConnectionTimers=timerDelays.length;await elements.get('#model-connection-test').onclick();assert(timerDelays.slice(beforeConnectionTimers).includes(300000),'Model tests must not use the 12-second local-request deadline');
  const connection=calls.filter(c=>c.path==='/api/model-connection/test').pop();assert.equal(connection.body.backend,'codex');assert.deepEqual(connection.body.model_proxy,{mode:'custom',url:'http://127.0.0.1:4567'});
+ const staleProxyRevision=vm.runInContext('StellarModelProxy.revision()',context);vm.runInContext('StellarModelProxy.saved({mode:"custom",url:"http://127.0.0.1:4567"})',context);context.staleProxyRevision=staleProxyRevision;vm.runInContext('StellarModelProxy.sync({mode:"auto"},null,staleProxyRevision)',context);assert.equal(elements.get('#model-proxy-mode').value,'custom');
  vm.runInContext('StellarModelProxy.saved({mode:"auto",url:""})',context);assert.equal(elements.get('#model-proxy-mode').value,'auto');
+ elements.get('#capture-proxy-example').value='socks5:1080';elements.get('#capture-proxy-example').listeners.change[0]();
+ assert.equal(elements.get('#capture-proxy-mode').value,'custom');assert.equal(elements.get('#capture-proxy-type').value,'socks5');assert.equal(elements.get('#capture-proxy-port').value,'1080');
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(StellarModelProxy.collectBrowser())',context)),{mode:'custom',url:'socks5://127.0.0.1:1080'});
+ elements.get('#capture-proxy-port').value='';assert.throws(()=>vm.runInContext('StellarModelProxy.collectBrowser()',context),/端口数字/);
+ vm.runInContext('StellarModelProxy.saved({mode:"auto"},{mode:"system"})',context);
+ vm.runInContext('renderUpdate({current:"0.1.52",latest:"0.1.54",available:true,supported:false,phase:"idle"})',context);
+ assert.equal(elements.get('#update-download').hidden,false);assert(elements.get('#update-status').textContent.includes('下载安装包'));
+
 
  const input=elements.get('#message-input'),form=elements.get('#composer-form');
  input.value='https://chatgpt.com/c/test';await form.onsubmit({preventDefault(){}});
