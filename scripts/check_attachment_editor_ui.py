@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory() as root:
    try:
     page=browser.new_page(viewport={'width':1280,'height':1100});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
-    page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click()
+    page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click();page.locator('#preview-full').click()
     card=page.locator('.addition-batch .bundle-file').first
     expect(card.get_by_role('button',name='默认程序打开')).to_be_visible();card.get_by_role('button',name='默认程序打开').click()
     expect(card.get_by_role('button',name='保存修改回归档')).to_be_visible();assert opened and opened[0][0].name=='Research workbook.xlsx'
@@ -38,13 +38,17 @@ with tempfile.TemporaryDirectory() as root:
     assert bundles.attachment((service.archive.root/'files'/batch['id']).read_bytes(),key)[1]==sheet('ChangedCell')
     card.get_by_role('button',name='在文件夹中显示').click();expect(page.locator('#toast')).to_contain_text('已在文件夹中显示');assert opened[-1][1] is True
     page.screenshot(path='/tmp/secretary-edit-attachment.png',full_page=True)
-    page.reload();expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex');page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click()
-    expect(page.locator('.addition-batch .bundle-file').get_by_role('button',name='保存修改回归档')).to_be_visible()
+    page.reload();expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex');page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click();page.locator('#preview-full').click()
+    try:expect(page.locator('.addition-batch .bundle-file').get_by_role('button',name='保存修改回归档')).to_be_visible()
+    except AssertionError:
+     record=page.request.get(f'http://127.0.0.1:{server.server_port}/api/items/{parent["id"]}').json()
+     state=page.evaluate("item=>({module:typeof globalThis.StellarAdditions,count:item.additions?.length,render:globalThis.StellarAdditions?.render(item).length})",record)
+     raise AssertionError(repr({'state':state,'errors':errors,'item_keys':list(record),'detail_sections':page.locator('#detail-content section').count()})) from None
     # The write endpoint requires the same local POST token as archive mutations.
     status=page.request.post(f'http://127.0.0.1:{server.server_port}/api/items/{parent["id"]}/additions/{batch["id"]}/attachments/{key}/editor/save',data={})
     assert status.status==403
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');page.locator('#settings-dialog .dialog-head button').click()
-    page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click();expect(page.locator('.addition-batch .bundle-file').get_by_role('button',name='Save changes to archive')).to_be_visible()
+    page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click();page.locator('#preview-full').click();expect(page.locator('.addition-batch .bundle-file').get_by_role('button',name='Save changes to archive')).to_be_visible()
     assert not errors,errors
     print('PASS: real GUI opens/reveals named attachment, preserves unsaved work, saves workbook into same appended batch and search/ZIP, preserves parent PDF, no AI call, working-copy state survives reload, POST token and English controls')
    finally:browser.close()

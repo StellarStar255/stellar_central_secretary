@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory() as root:
     assert service.archive.retrieve('tar samples')
     page.reload();expect(page.locator('#messages .archive-card')).to_have_count(4)
     page.locator('#library-open').click();page.locator('#search').fill('tar samples')
-    page.locator('#items [data-id="'+item['id']+'"]').click();expect(page.locator('#detail-content')).to_contain_text('tar -czf samples.tar.gz samples/')
+    page.locator('#items [data-id="'+item['id']+'"]').click();page.locator('#preview-full').click();expect(page.locator('#detail-content')).to_contain_text('tar -czf samples.tar.gz samples/')
     page.screenshot(path='/tmp/secretary-command-archive.png')
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()
     page.locator('#input-mode').select_option('ask');page.locator('#message-input').fill('这条命令如何使用？');page.locator('#send-button').click()
