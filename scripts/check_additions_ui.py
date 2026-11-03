@@ -50,5 +50,7 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('#toast')).to_have_text('归档已删除');expect(page.locator('#append-text')).to_have_value('')
     assert not list((Path(root)/'files').iterdir()) and not errors,errors
     print('PASS: paste image+clipboard text+file into existing archive; cancel/reopen draft; one incremental model call; old title/text/summary/original intact; attachment preview; reload; second text-only batch without cloud call; parent deletion clears batches and pending append draft')
+   except Exception:
+    print({'page_errors':errors,'toast':page.locator('#toast').inner_text()},flush=True);raise
    finally:browser.close()
  finally:service.close();server.shutdown();server.server_close()
