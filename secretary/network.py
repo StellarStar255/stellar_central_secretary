@@ -1,4 +1,4 @@
-"""Resolve model-process proxy routes without changing system configuration."""
+"""Resolve model and capture-browser routes without changing system configuration."""
 import os
 import ipaddress
 import re
@@ -17,29 +17,29 @@ def is_loopback_url(url):
         return ipaddress.ip_address(host).is_loopback
     except (ValueError,TypeError):return False
 
-def proxy_config(value=None):
+def proxy_config(value=None, browser=False):
     if value is None:return {'mode':'auto','url':''}
     if not isinstance(value,dict) or value.get('mode') not in ('auto','direct','custom'):raise ValueError('无效的模型代理设置')
     mode=value['mode']
     if mode!='custom':return {'mode':mode,'url':''}
     url=value.get('url','')
-    message='请填写有效的 HTTP 代理地址，例如 http://127.0.0.1:7897；地址不能包含账号密码、路径或查询参数。'
+    message='浏览器代理请使用 http:// 或 socks5://，并填写正确端口；暂不支持账号密码。' if browser else '模型连接请填写 HTTP / Mixed 端口；SOCKS 端口请填到浏览器代理选项中。'
     if not isinstance(url,str) or len(url)>2048:raise ValueError(message)
     url=url.strip()
     try:
         parsed=urlsplit(url);port=parsed.port
-        if (parsed.scheme!='http' or not parsed.hostname or parsed.username is not None or parsed.password is not None
+        if (parsed.scheme not in (('http','socks5') if browser else ('http',)) or not parsed.hostname or parsed.username is not None or parsed.password is not None
             or parsed.path not in ('','/') or parsed.query or parsed.fragment or any(ord(c)<=32 for c in url)
             or (port is not None and not 1<=port<=65535)):raise ValueError(message)
     except ValueError:raise ValueError(message) from None
-    return {'mode':mode,'url':urlunsplit(('http',parsed.netloc,'','',''))}
+    return {'mode':mode,'url':urlunsplit((parsed.scheme,parsed.netloc,'','',''))}
 
 
 def local_proxy_alive(url):
     parsed=urlsplit(url)
     if not is_loopback_url(url): return True
     try:
-        with socket.create_connection((parsed.hostname,parsed.port or 80),timeout=.5):return True
+        with socket.create_connection((parsed.hostname,parsed.port or (1080 if parsed.scheme=='socks5' else 80)),timeout=.5):return True
     except ConnectionRefusedError:return False
     except OSError:
         # A permission/network restriction is not proof that the proxy is dead.
@@ -63,7 +63,7 @@ def http_proxy_works(url):
     parsed=urlsplit(url)
     if parsed.scheme!='http' or parsed.hostname not in ('127.0.0.1','localhost','::1'):return False
     try:
-        with socket.create_connection((parsed.hostname,parsed.port or 80),timeout=3) as sock:
+        with socket.create_connection((parsed.hostname,parsed.port or (1080 if parsed.scheme=='socks5' else 80)),timeout=3) as sock:
             sock.settimeout(4)
             sock.sendall(b'CONNECT chatgpt.com:443 HTTP/1.1\r\nHost: chatgpt.com:443\r\n\r\n')
             status=sock.recv(512).split(b'\r\n',1)[0]
@@ -115,3 +115,36 @@ def describe(env):
     if not route:return '直连'
     p=urlsplit(route)
     return f'{p.scheme}://{p.hostname}:{p.port}'
+
+
+def capture_proxy_config(value=None):
+    if value is None:return {'mode':'system','url':''}
+    if not isinstance(value,dict) or value.get('mode') not in ('system','model','direct','custom'):raise ValueError('无效的浏览器代理设置')
+    if value['mode'] in ('system','model'):return {'mode':value['mode'],'url':''}
+    return proxy_config(value,browser=True)
+
+
+def capture_proxy_route(value=None,model=None):
+    policy=capture_proxy_config(value)
+    if policy['mode']=='system':return None
+    if policy['mode']=='model':policy=proxy_config(model)
+    if policy['mode']=='direct':return 'direct://'
+    if policy['mode']=='custom':
+        if not local_proxy_alive(policy['url']):raise RuntimeError('浏览器代理端口没有连接成功，请先启动代理软件并核对端口。')
+        return policy['url']
+    env=child_env(policy=policy)
+    return next((env[key] for key in PROXY_KEYS if env.get(key)),None)
+
+
+def check_proxy_port(policy=None, browser=False, model=None):
+    if browser:route=capture_proxy_route(policy,model)
+    else:
+        value=proxy_config(policy)
+        env=child_env(policy=value)
+        route=next((env[key] for key in PROXY_KEYS if env.get(key)),None)
+    if not route or route=='direct://':return {'ok':True,'proxied':False,'message':'当前未指定代理端口；将使用所选的自动或直连方式。'}
+    parsed=urlsplit(route)
+    try:
+        with socket.create_connection((parsed.hostname,parsed.port or (1080 if parsed.scheme=='socks5' else 80)),timeout=3):pass
+    except OSError as error:raise RuntimeError('代理端口连接失败。请打开代理软件，并核对这里的端口数字。') from error
+    return {'ok':True,'proxied':True,'message':'代理端口可以连接；模型和网页是否可用还需继续测试。'}

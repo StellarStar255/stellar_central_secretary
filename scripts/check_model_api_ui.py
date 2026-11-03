@@ -31,14 +31,19 @@ with tempfile.TemporaryDirectory() as root:
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
    try:
     page=browser.new_page(viewport={'width':1280,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+    proxy_saves=[]
+    def record_proxy(request):
+     if request.url==base+'/api/settings':
+      payload=request.post_data_json;proxy_saves.append({k:payload.get(k) for k in ('backend','model_proxy','capture_proxy')})
+    page.on('request',record_proxy)
     page.goto(base)
     try:expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex',timeout=15000)
     except Exception:raise AssertionError('Startup diagnostics: '+repr(errors)+'; '+page.locator('#toast').inner_text()) from None
     page.locator('#settings-open').click();page.locator('#backend').select_option('api')
     expect(page.locator('#model-api-settings')).to_be_visible()
     page.locator('#api-base-url').fill(base_api);page.locator('#api-model').fill('synthetic-model');page.locator('#api-key').fill(key)
-    page.locator('#model-proxy-mode').select_option('custom');page.locator('#model-proxy-url').fill('http://127.0.0.1:1')
-    page.locator('#model-connection-test').click();expect(page.locator('#model-connection-result')).to_have_text('模型连接测试成功',timeout=15000)
+    page.locator('#model-proxy-mode').select_option('custom');page.locator('#model-proxy-port').fill('1')
+    page.locator('#model-connection-test').click();expect(page.locator('#model-connection-result')).to_contain_text('模型连接测试成功',timeout=15000)
     assert page.request.get(base+'/api/status').json()['settings']['model_proxy']['mode']=='auto','Connection test must not save proxy settings'
 
     page.locator('#api-test').click();expect(page.locator('#api-test-result')).to_have_text('API 连接测试成功',timeout=15000)
@@ -68,11 +73,21 @@ with tempfile.TemporaryDirectory() as root:
     with zipfile.ZipFile(io.BytesIO(service.backup())) as backup:assert all(key.encode() not in backup.read(name) for name in backup.namelist())
     page.locator('#settings-open').click();page.screenshot(path='/tmp/secretary-custom-model-api.png')
     expect(page.locator('#api-key')).to_have_value('');expect(page.locator('#api-key')).to_have_attribute('placeholder','密钥已保存，留空保持')
-    page.reload();page.locator('#settings-open').click();expect(page.locator('#api-model')).to_have_value('synthetic-model');expect(page.locator('#model-proxy-mode')).to_have_value('custom');expect(page.locator('#model-proxy-url')).to_have_value('http://127.0.0.1:1')
+    page.reload();page.locator('#settings-open').click();expect(page.locator('#api-model')).to_have_value('synthetic-model')
+    try:expect(page.locator('#model-proxy-mode')).to_have_value('custom')
+    except AssertionError:raise AssertionError(repr({'saves':proxy_saves,'settings':service.archive.settings(),'errors':errors,'toast':page.locator('#toast').inner_text()})) from None
+    expect(page.locator('#model-proxy-url')).to_have_value('http://127.0.0.1:1')
     page.locator('#backend').select_option('gemini');expect(page.locator('#model-label')).to_have_text('Gemini');expect(page.locator('#gemini-cli-help')).to_be_visible()
     page.locator('#backend').select_option('api');expect(page.locator('#gemini-cli-help')).not_to_be_visible();expect(page.locator('#model-label')).to_contain_text('API')
+    page.locator('#capture-proxy-mode').select_option('custom');page.locator('#capture-proxy-example').select_option('socks5:1080')
+    expect(page.locator('#capture-proxy-type')).to_have_value('socks5');expect(page.locator('#capture-proxy-location')).to_have_value('local');expect(page.locator('#capture-proxy-host-row')).not_to_be_visible();expect(page.locator('#capture-proxy-port')).to_have_value('1080')
+    page.locator('#capture-proxy-port').fill('1');page.locator('#capture-proxy-check').click();expect(page.locator('#proxy-port-result')).to_contain_text('端口',timeout=10000)
+    page.locator('#capture-proxy-example').select_option('socks5:1080');page.locator('#settings-save').click();expect(page.locator('#settings-dialog')).not_to_be_visible();page.reload();page.locator('#settings-open').click()
+    expect(page.locator('#capture-proxy-type')).to_have_value('socks5');expect(page.locator('#capture-proxy-port')).to_have_value('1080')
+    assert service.archive.settings()['capture_proxy']=={'mode':'custom','url':'socks5://127.0.0.1:1080'}
+    page.locator('#capture-proxy-mode').scroll_into_view_if_needed();page.screenshot(path='/tmp/secretary-browser-proxy-settings.png')
     page.locator('#model-proxy-settings').scroll_into_view_if_needed();page.screenshot(path='/tmp/secretary-model-proxy-settings.png')
-    page.locator('#ui-language').select_option('en');expect(page.locator('#model-proxy-settings h3')).to_have_text('Model connection & proxy')
+    page.locator('#ui-language').select_option('en');expect(page.locator('#model-proxy-settings h3')).to_have_text('Network & proxy')
     page.locator('#model-proxy-settings').scroll_into_view_if_needed();page.screenshot(path='/tmp/secretary-model-proxy-settings-en.png')
     assert not errors,errors
     redirect={**model_api.read(root),'base_url':f'http://127.0.0.1:{provider.server_port}/redirect'}

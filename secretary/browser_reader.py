@@ -102,7 +102,7 @@ def debug_info(endpoint):
 def save_session(profile, session):
     path = profile/'.reader-session.json'
     temporary = profile/f'.reader-session-{os.getpid()}-{threading.get_ident()}.tmp'
-    temporary.write_text(json.dumps({k:session[k] for k in ('endpoint','websocket','confirmed')}))
+    temporary.write_text(json.dumps({k:session[k] for k in ('endpoint','websocket','confirmed','proxy') if k in session}))
     if os.name != 'nt': temporary.chmod(0o600)
     temporary.replace(path)
 
@@ -112,7 +112,7 @@ def existing_session(profile):
         saved = json.loads((profile/'.reader-session.json').read_text())
         actual = debug_info(saved['endpoint'])
         if actual['websocket'] == saved['websocket']:
-            return dict(actual,confirmed=bool(saved.get('confirmed')),process=None)
+            return dict(actual,confirmed=bool(saved.get('confirmed')),process=None,proxy=saved.get('proxy'))
     except (OSError,ValueError,KeyError,TypeError):pass
     # A restarted Chrome has a new websocket nonce. Rebind only after verifying
     # the exact dedicated profile and loopback port, never an arbitrary browser.
@@ -154,7 +154,9 @@ def start_or_reuse_browser(target, profile, cancelled, timeout=20, background=Fa
 
 def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=False, proxy=None):
     current = existing_session(profile)
-    if current: return current
+    if current:
+        if current.get('proxy')!=proxy:raise RuntimeError('浏览器代理选项已改变，请先在设置中点击「关闭专用浏览器」，再重新读取；登录资料会保留。')
+        return current
     chrome = chrome_executable()
     if not chrome: raise RuntimeError('没有找到 Google Chrome，请安装 Chrome 或使用常用浏览器采集扩展。')
     port = free_loopback_port()
@@ -164,7 +166,8 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
     args = ['--user-data-dir='+str(profile), '--no-first-run',
             '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
             *(['--no-startup-window'] if background else ['--new-window', target])]
-    if proxy: args.append('--proxy-server='+proxy)
+    if proxy=='direct://':args.append('--no-proxy-server')
+    elif proxy:args.extend(['--proxy-server='+proxy,'--proxy-bypass-list=localhost;127.0.0.1;[::1]'])
     options = {}
     if background and sys.platform == 'darwin':
         command = ['/usr/bin/open', '-g', '-n', '-a', str(Path(chrome).parents[2]), '--args', *args]
@@ -184,21 +187,23 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
         if cancelled.is_set(): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
         if proc.poll() not in (None,0): raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
         try:
-            session = dict(debug_info(endpoint),confirmed=False,process=proc)
+            session = dict(debug_info(endpoint),confirmed=False,process=proc,proxy=proxy)
             if not background: session['startup_url'] = target
             save_session(profile,session)
             return session
         except (OSError,ValueError): pass
         if time.monotonic()>=rediscover_at:
             current=existing_session(profile)
-            if current:return current
+            if current:
+                if current.get('proxy')!=proxy:raise RuntimeError('浏览器代理选项已改变，请先在设置中点击「关闭专用浏览器」，再重新读取；登录资料会保留。')
+                return current
             rediscover_at=time.monotonic()+1
         if cancelled.wait(0.25): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
     raise RuntimeError('浏览器已请求打开，但未能建立本地连接。请使用常用浏览器采集扩展；程序不会关闭你的登录窗口。')
 
 
-def manual_login(target, profile, notify, cancelled, confirmed, timeout):
-    session = start_or_reuse_browser(target,profile,cancelled)
+def manual_login(target, profile, notify, cancelled, confirmed, timeout, proxy=None):
+    session = start_or_reuse_browser(target,profile,cancelled,proxy=proxy)
     if not session['confirmed']:
         notify('waiting_login','请在已打开的 Chrome 中登录并打开目标会话，再点「我已登录，开始读取」。程序会直接读取这个实例，整个过程保持窗口打开。')
         proc = session.get('process') or SimpleNamespace(poll=lambda:None)
@@ -377,10 +382,10 @@ def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagno
     raise RuntimeError(f'读取等待达到 {int(timeout)} 秒；最后识别到 {counts} 条消息。'+('页面仍显示正在生成回答。' if any(d.get('generating') for d in last_report) else '页面消息尚未满足采集条件。')+'诊断已保存，原窗口保持打开。')
 
 
-def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, background=False, close_new_tabs=False, scope='full'):
+def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, background=False, close_new_tabs=False, scope='full', proxy=None):
     if background or close_new_tabs:
         from .capture_browser import read_managed
-        return read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope=scope)
+        return read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, background, close_new_tabs, scope=scope, proxy=proxy)
     target=conversation_url(url)
     try:
         from playwright.sync_api import sync_playwright
@@ -390,7 +395,7 @@ def read(url, profile_dir, notify, cancelled, timeout=600, login_complete=None, 
     if os.name!='nt': profile.chmod(0o700)
     notify('opening_browser','正在打开或复用专用 Chrome，读取过程中窗口将保持打开。')
     confirmed=login_complete if login_complete is not None else threading.Event()
-    session=manual_login(target,profile,notify,cancelled,confirmed,timeout)
+    session=manual_login(target,profile,notify,cancelled,confirmed,timeout,proxy=proxy)
     try:
         with sync_playwright() as pw:
             result=read_from_browser(pw,session,target,notify,cancelled,min(timeout,90),diagnose=lambda report:(profile.parent/'last-capture-diagnostic.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)),scope=scope)

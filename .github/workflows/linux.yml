@@ -20,6 +20,8 @@ jobs:
       - name: Check Qt runtime dependencies
         run: |
           python -c 'from pathlib import Path; import PySide6,subprocess; subprocess.run(["ldd",str(Path(PySide6.__file__).parent/"Qt/plugins/platforms/libqxcb.so")],check=True)'
+      - name: Browser HTTP and SOCKS5 proxy routes
+        run: python scripts/check_browser_proxy.py
       - name: Verified Debian installer helper
         run: python packaging/check_linux_install.py
       - name: Native Linux source window and tray

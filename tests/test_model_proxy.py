@@ -75,3 +75,12 @@ class ModelProxyTest(unittest.TestCase):
         with patch.object(network,'local_proxy_alive',return_value=False) as alive,patch.object(ai.subprocess,'Popen',return_value=proc) as popen:
             self.assertEqual(ai.run('Local test',config),'OK')
         alive.assert_not_called();self.assertEqual(popen.call_args.kwargs['env']['NO_PROXY'],'*')
+
+    def test_connection_queue_has_a_bound_and_does_not_release_another_job(self):
+        from secretary.summary_jobs import SummaryJobs
+        jobs=SummaryJobs();lane=jobs.lanes['short'];lane.acquire()
+        try:
+            with self.assertRaisesRegex(RuntimeError,'其他任务'):
+                with jobs.session('test',short=True,wait_timeout=0):self.fail('Must not enter a busy lane')
+            self.assertTrue(lane.locked());self.assertFalse(jobs.snapshot('test')['active'])
+        finally:lane.release();jobs.close()

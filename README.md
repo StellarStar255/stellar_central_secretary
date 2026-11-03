@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.54** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.54.md)
+Version **v0.1.55** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.55.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -20,7 +20,11 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 
 Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code / Gemini CLI, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
 
-Model connections support **Automatic**, **Direct**, or **Custom HTTP proxy** in Models & settings. The selected route applies to Claude, Codex, Gemini and custom model APIs, including connection tests. Use the HTTP / Mixed port of your proxy app (for example `http://127.0.0.1:7897`); SOCKS URLs and credentials in proxy URLs are not supported. Custom proxy failures do not fall back to direct connections. Local model APIs bypass the proxy; browser capture keeps its existing route.
+In **Models & settings → Network & proxy**, choose the proxy type and enter its port number. You do not need to write a proxy URL. Start your proxy app, find its Ports / Inbound / Local proxy setting, and use the number it displays. For example, if it shows **HTTP / Mixed 7897**, choose a proxy on this computer and enter **7897**. The examples fill the form; use your actual port.
+
+Model calls use HTTP / Mixed ports for Claude, Codex, Gemini and custom APIs. The dedicated capture Chrome can follow the system proxy, use the model route, connect directly, or use a separate **HTTP or SOCKS5** proxy. For **SOCKS 1080**, choose SOCKS5 and enter **1080**. Username/password proxy URLs are not supported. Your regular browser and capture extension retain their own settings. Save changes and close an already-open dedicated browser before capturing again; its sign-in data is retained.
+
+**Check proxy port** tests the port without calling a model. **Test current model connection** then checks the selected model, showing elapsed time and the result. Local model APIs bypass external proxies. A reachable proxy port does not prove that the model account is signed in or that an external website is accessible.
 
 For Gemini, install the current [Gemini CLI](https://geminicli.com/docs/get-started/installation/) (`npm install -g @google/gemini-cli`), run `gemini` once to sign in, then select **Gemini · Gemini CLI** in Models & settings. Text and explicitly attached images are supported; a Gemini website sign-in alone does not sign in the CLI. The adapter is verified with CLI 0.66.0 using a local simulated Gemini API.
 
