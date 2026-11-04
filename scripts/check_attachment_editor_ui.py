@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as root:
     # The write endpoint requires the same local POST token as archive mutations.
     status=page.request.post(f'http://127.0.0.1:{server.server_port}/api/items/{parent["id"]}/additions/{batch["id"]}/attachments/{key}/editor/save',data={})
     assert status.status==403
-    page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');page.locator('#settings-dialog .dialog-head button').click()
+    page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');expect(page.locator('html')).to_have_attribute('lang','en');expect(page.locator('#ui-language')).to_be_enabled();page.locator('#settings-dialog .dialog-head button').click()
     page.locator('#library-open').click();page.locator('#items [data-id="'+parent['id']+'"]').click();page.locator('#preview-full').click();expect(page.locator('.addition-batch .bundle-file').get_by_role('button',name='Save changes to archive')).to_be_visible()
     assert not errors,errors
     print('PASS: real GUI opens/reveals named attachment, preserves unsaved work, saves workbook into same appended batch and search/ZIP, preserves parent PDF, no AI call, working-copy state survives reload, POST token and English controls')
