@@ -1,8 +1,9 @@
 """Verify real detail-page gestures and HTTP validation using temporary paths."""
-import os, sys, tempfile, threading
+import os, sys, tempfile, threading, subprocess
+from types import SimpleNamespace
 from pathlib import Path
 from http.server import ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from secretary.server import Service, handler
@@ -24,7 +25,8 @@ with tempfile.TemporaryDirectory() as root:
     server = ThreadingHTTPServer(('127.0.0.1', 0), handler(service))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        with patch.object(local_paths.subprocess, 'run') as run, sync_playwright() as pw:
+        run = Mock()
+        with patch.object(local_paths, 'subprocess', SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)), patch('secretary.attachment_editor.launch') as launch, sync_playwright() as pw:
             executable = os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform == 'darwin' else None)
             browser = pw.chromium.launch(headless=True, **({'executable_path': executable} if executable else {}))
             try:
@@ -37,23 +39,27 @@ with tempfile.TemporaryDirectory() as root:
                 expect(paths).to_have_count(3)
                 expect(page.locator('.archived-body')).to_have_text(text)
                 paths.nth(0).click()
-                assert run.call_count == 0, 'A single click must not open anything'
+                assert run.call_count == 0 and launch.call_count == 0, 'A single click must not open anything'
                 paths.nth(0).dblclick()
                 expect(page.locator('#toast')).to_have_text('已打开本地文件夹')
-                assert run.call_args.args[0] == ['/usr/bin/open', '-a', 'Finder', str(folder.resolve())]
+                if sys.platform == 'darwin':
+                    assert run.call_args.args[0] == ['/usr/bin/open', '-a', 'Finder', str(folder.resolve())]
+                else:
+                    assert launch.call_args.args == (folder,) and launch.call_args.kwargs == {'reveal': False}
                 paths.nth(1).focus()
                 page.keyboard.press('Enter')
                 expect(page.locator('#toast')).to_have_text('已在文件夹中定位文件')
-                assert run.call_args.args[0] == ['/usr/bin/open', '-R', str(file.resolve())]
+                assert launch.call_args.args == (file,) and launch.call_args.kwargs == {'reveal': True}
+                opens = run.call_count + launch.call_count
                 paths.nth(2).dblclick()
                 expect(page.locator('#toast')).to_contain_text('本地路径不存在')
-                assert run.call_count == 2
+                assert run.call_count + launch.call_count == opens
                 # A forged path must fail through the real authenticated HTTP route.
                 rejected = page.evaluate('''async id => {
                     try { await api('/api/items/'+id+'/open-local-path',{path:'/tmp/unrecorded'}); return false }
                     catch(error) { return error.message }
                 }''', item)
-                assert '正文' in rejected and run.call_count == 2
+                assert '正文' in rejected and run.call_count + launch.call_count == opens
                 after = service.archive.get(item)
                 for key in ('text', 'summary', 'title', 'tags', 'state', 'updated'):
                     assert after[key] == before[key], key

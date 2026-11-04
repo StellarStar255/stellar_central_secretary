@@ -837,6 +837,8 @@ def handler(service):
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
                 if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
                 if path.startswith('/api/items/'):
+                    note_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})/open',path)
+                    if note_open:return self.send(200,notes.open_image(service.archive,*note_open.groups()))
                     local_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/open-local-path',path)
                     if local_open:return self.send(200,local_paths.open_location(service.archive,local_open[1],body.get('path')))
                     editor=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/editor/(open|reveal|save)',path)

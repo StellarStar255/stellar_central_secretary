@@ -52,6 +52,8 @@ jobs:
           python scripts/check_text_archive_ui.py
           python scripts/check_summary_performance_ui.py
           python scripts/check_attachment_editor_ui.py
+          python scripts/check_local_paths_ui.py
+          python scripts/check_notes.py
           python scripts/check_bundle_ui.py
           python scripts/check_additions_ui.py
       - name: Windows native source UI

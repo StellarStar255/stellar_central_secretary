@@ -12,6 +12,22 @@ def png():
 def attachment():return {'name':'example.png','data':base64.b64encode(png()).decode()}
 
 class NotesTest(unittest.TestCase):
+ def test_open_note_image_uses_default_viewer_with_safe_image_extension(self):
+  with tempfile.TemporaryDirectory() as root:
+   archive=Archive(root);item,_=archive.add('Image note','Original body.')
+   image=attachment();image['name']='untrusted.command'
+   saved=notes.set_note(archive,item,'Saved',[image],0);key=saved['note_images'][0]['id']
+   with patch('secretary.attachment_editor.launch') as launch:
+    notes.open_image(archive,item,key)
+    target=launch.call_args.args[0]
+    self.assertEqual(target.suffix,'.png');self.assertEqual(target.read_bytes(),png())
+    self.assertEqual(archive.get(item),saved)
+    other,_=archive.add('Other','Body')
+    with self.assertRaises(KeyError):notes.open_image(archive,other,key)
+    notes.set_note(archive,item,'Removed',[],1)
+    with self.assertRaises(KeyError):notes.open_image(archive,item,key)
+    self.assertEqual(launch.call_count,1)
+
  def test_note_text_and_image_are_local_and_survive_ai_updates(self):
   with tempfile.TemporaryDirectory() as root:
    archive=Archive(root);item,_=archive.add('Fixture','Original body.')
