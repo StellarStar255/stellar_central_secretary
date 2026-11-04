@@ -662,10 +662,14 @@ class Service:
             except (ValueError, OSError): pass
         return {'item': self.archive.get(item_id), 'created': created, 'updated': enriched or contextual}
     def item_detail(self,item_id):
-        item=self.with_progress(self.archive.get(item_id))
+        # A worker updates content before clearing busy under this same lock.
+        # Capture both together so a stale body cannot look like a finished job.
+        with self.lock:
+            item=self.archive.get(item_id)
+            item['append_busy']=item_id in self.busy or item_id in self.captures
+        item=self.with_progress(item)
         item['company_data']=company_ai.restricted(item)
         item['local_paths']=local_paths.extract(item['text'])
-        with self.lock:item['append_busy']=item_id in self.busy or item_id in self.captures
         for batch in item['additions']:
             try:batch['attachments']=bundles.metadata((self.archive.root/'files'/batch['id']).read_bytes())
             except Exception:batch['attachment_error']='追加附件暂时无法读取，可下载原件后检查。'
