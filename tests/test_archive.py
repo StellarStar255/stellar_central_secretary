@@ -264,6 +264,35 @@ class ServiceTest(unittest.TestCase):
             self.service.process(item['id'])
         saved=self.service.archive.get(item['id'])
         self.assertEqual(saved['state'],'error'); self.assertEqual(saved['text'],item['text'])
+
+    def test_detail_keeps_body_and_task_state_in_one_snapshot(self):
+        item,_=self.service.archive.add('Fixture','Before worker completion')
+        self.service.busy.add(item)
+        read=threading.Event();done=threading.Event()
+        original_get=self.service.archive.get
+        main_thread=threading.get_ident()
+        def read_before_worker(*args,**kwargs):
+            value=original_get(*args,**kwargs)
+            if threading.get_ident()==main_thread:
+                read.set();done.wait(.2)
+            return value
+        def finish():
+            if not read.wait(3):return
+            with self.service.lock:
+                self.service.archive.update(item,text='After worker completion')
+                self.service.busy.discard(item)
+            done.set()
+        worker=threading.Thread(target=finish);worker.start()
+        try:
+            with patch.object(self.service.archive,'get',side_effect=read_before_worker):
+                snapshot=self.service.item_detail(item)
+            self.assertEqual(snapshot['text'],'Before worker completion')
+            self.assertTrue(snapshot['append_busy'])
+        finally:worker.join(timeout=3)
+        self.assertTrue(done.is_set())
+        current=self.service.item_detail(item)
+        self.assertEqual(current['text'],'After worker completion')
+        self.assertFalse(current['append_busy'])
     def test_capture_and_invalid_url(self):
         capture={'url':'https://chatgpt.com/c/abc','title':'已登录对话','text':'用户：如何设计知识库？\n助手：分段索引。'}
         result=self.service.ingest({'filename':'会话.knowledge.json','data':base64.b64encode(json.dumps(capture).encode()).decode()})
