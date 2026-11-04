@@ -53,7 +53,7 @@ def import_backup(archive, data):
             if len(item.get('text', '')) > 2_000_000:
                 raise ValueError('备份单条正文超过 200 万字符')
             if len(item.get('user_context',''))>20000:raise ValueError('链接说明不能超过 20000 个字符')
-            for flag in ('favorite','pinned'):
+            for flag in ('favorite','pinned','company_data'):
                 if type(item.get(flag,False)) not in (bool,int) or item.get(flag,False) not in (0,1):raise ValueError('备份中的收藏或置顶格式无效')
             for field in ('last_viewed','trashed_at'):
                 value=item.get(field,'')
@@ -137,6 +137,7 @@ def import_backup(archive, data):
                     db.execute('UPDATE items SET vision_text=?,user_context=? WHERE id=?',(item.get('vision_text','')[:60000],item.get('user_context','')[:20000],item_id))
                     db.execute('UPDATE items SET additions=?,group_links=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),json.dumps(item.get('group_links',[]),ensure_ascii=False),item_id))
                     db.execute('UPDATE items SET favorite=?,pinned=?,last_viewed=?,trashed_at=? WHERE id=?',(int(item.get('favorite',False)),int(item.get('pinned',False)),item.get('last_viewed',''),item.get('trashed_at',''),item_id))
+                    db.execute('UPDATE items SET company_data=? WHERE id=?',(int(bool(item.get('company_data',bool(item.get('url'))))),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

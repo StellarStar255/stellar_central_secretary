@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
@@ -153,6 +153,28 @@ with tempfile.TemporaryDirectory() as data:
             print('PASS: frozen archive-only skips enabled AI; manual summary uses short lane, retains original and reports stage timings')
             api_status=json.loads(request('/api/status'));assert api_status['model_api']['has_key'] and api_key not in json.dumps(api_status)
             with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as backup:assert all(api_key.encode() not in backup.read(name) for name in backup.namelist())
+            protected=json.loads(request('/api/ingest',{'url':'https://intranet.fixture.test/policy','text':'CompanyGuardFixture confidential synthetic source. '*10,'captured_at':'fixture','archive_only':True},status['token']))['item']
+            assert protected['company_data'] and len(provider_calls)==2
+            try:request('/api/items/'+protected['id'],{},status['token'])
+            except urllib.error.HTTPError as error:
+                assert error.code==409
+                policy=json.loads(error.read())['company_model']
+            else:raise AssertionError('Unconfirmed company material reached a model')
+            assert len(provider_calls)==2
+            request('/api/company-model/approve',{'fingerprint':policy['fingerprint'],'acknowledged':True},status['token'])
+            request('/api/items/'+protected['id'],{},status['token'])
+            for _ in range(60):
+                current=json.loads(request('/api/items/'+protected['id']))
+                if current['state']=='ready' and current.get('summary_progress',{}).get('stage')=='done':break
+                time.sleep(.2)
+            else:raise AssertionError('Confirmed company summary did not complete')
+            assert len(provider_calls)==3 and current['text']==protected['text']
+            request('/api/company-model/revoke',{},status['token'])
+            try:request('/api/ask',{'question':'CompanyGuardFixture'},status['token'])
+            except urllib.error.HTTPError as error:assert error.code==409
+            else:raise AssertionError('Revoked company material reached library Q&A')
+            assert len(provider_calls)==3
+            print('PASS: frozen company material blocked before confirmation; confirmed destination enables summary; revocation blocks retrieved company passages; no unapproved provider call')
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
             print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
         finally:provider.shutdown();provider.server_close()

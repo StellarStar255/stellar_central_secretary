@@ -124,8 +124,10 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
-                if name not in columns:db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
+            for name,definition in [('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
+                if name not in columns:
+                    db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
+                    if name=='company_data':db.execute("UPDATE items SET company_data=1 WHERE url!=''")
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
                 for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
@@ -386,7 +388,7 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
-        columns="id,title,kind,url,filename,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
+        columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
         result=[]

@@ -27,6 +27,55 @@ class WebReaderTest(unittest.TestCase):
         with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.1',8088))]):
             with self.assertRaises(ValueError):web_reader.validate_browser_url('http://localhost:8088/view')
 
+    def test_explicit_intranet_and_proxy_targets_use_browser_dns(self):
+        targets=('https://portal.infra.example.test/cn/experiments',
+                 'http://10.20.30.40:8080/view','http://[fd00::1234]/view',
+                 'https://198.18.0.4/view','https://vpn-only.example.test/view')
+        with patch.object(web_reader.socket,'getaddrinfo',side_effect=AssertionError('Browser resolves the submitted origin')):
+            for target in targets:
+                with self.subTest(target=target):
+                    self.assertEqual(web_reader.validate_browser_url(target),target)
+                    other=target.rsplit('/',1)[0]+'/after-login'
+                    self.assertEqual(web_reader.validate_browser_url(other,target),other)
+        with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.8',443))]):
+            with self.assertRaises(ValueError):web_reader.validate_browser_url('https://other.internal/view',URL)
+
+    def test_backend_fetch_keeps_private_network_and_redirect_restrictions(self):
+        from secretary.server import fetch_page,BrowserReadRequired
+        with patch.object(web_reader.socket,'getaddrinfo',return_value=[(2,1,6,'',('10.0.0.8',443))]),patch('urllib.request.build_opener') as opener:
+            with self.assertRaises(BrowserReadRequired):fetch_page('https://internal.example.test/docs')
+            opener.assert_not_called()
+
+    def test_backend_redirect_to_private_address_is_not_fetched(self):
+        from secretary.server import fetch_page,BrowserReadRequired
+        answers=[[(2,1,6,'',('8.8.8.8',443))],[(2,1,6,'',('10.0.0.8',443))]]
+        def redirect(opener):
+            opener.redirect_request(None,None,302,'Found',{},'http://10.0.0.8/private')
+            self.fail('Private redirect should be rejected')
+        with patch.object(web_reader.socket,'getaddrinfo',side_effect=answers),patch('urllib.request.build_opener',side_effect=redirect):
+            with self.assertRaises(BrowserReadRequired):fetch_page('https://public.example.test/docs')
+        with patch.object(web_reader.socket,'getaddrinfo',side_effect=web_reader.socket.gaierror('VPN-only DNS')):
+            with self.assertRaisesRegex(BrowserReadRequired,'后台无法解析'):fetch_page('https://vpn.example.test/docs')
+
+    def test_intranet_fallback_keeps_clear_browser_instructions(self):
+        from secretary.server import BrowserReadRequired
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root);service.archive.configure('codex',False)
+            try:
+                message='链接已保存。请连接公司网络或 VPN 后使用浏览器采集。'
+                with patch('secretary.server.fetch_page',side_effect=BrowserReadRequired(message)),patch.object(service,'start_capture') as start:
+                    item=service.ingest({'url':'https://internal.example.test/docs'})['item']
+                    self.assertEqual(item['error'],message);self.assertFalse(item['text'])
+                    start.assert_called_once_with(item['id'])
+            finally:service.close()
+
+    def test_browser_network_errors_explain_vpn_and_proxy_actions(self):
+        from playwright.sync_api import Error
+        for code,hint in (('ERR_NAME_NOT_RESOLVED','VPN'),('ERR_PROXY_CONNECTION_FAILED','代理连接失败')):
+            page=Mock(url='about:blank');page.is_closed.return_value=False;page.goto.side_effect=Error(code)
+            with self.subTest(code=code),self.assertRaisesRegex(RuntimeError,hint):
+                web_reader.open_capture_page(page,URL,threading.Event(),'zh')
+
     def test_local_ingest_uses_browser_confirmation_without_server_fetch(self):
         with tempfile.TemporaryDirectory() as root:
             service=Service(root);service.archive.configure('codex',False)
