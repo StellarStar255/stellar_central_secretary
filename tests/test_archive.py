@@ -242,6 +242,7 @@ class ServiceTest(unittest.TestCase):
         enriched=self.service.ingest({'url':item['url'],'text':'产品规划结论：先做知识归档。'})
         self.assertTrue(enriched['updated']); self.assertEqual(enriched['item']['id'],item['id'])
         self.assertEqual(len(self.service.archive.list()),1)
+        self.service.archive.set_company_mode(True)
         with self.assertRaises(company_ai.ApprovalRequired):self.service.ask('产品规划')
         info=company_ai.status(self.service.archive,self.service.model_backend())
         company_ai.approve(self.service.archive,self.service.model_backend(),{'acknowledged':True,'fingerprint':info['fingerprint']})

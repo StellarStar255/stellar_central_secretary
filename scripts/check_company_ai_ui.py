@@ -21,6 +21,20 @@ with tempfile.TemporaryDirectory() as root:
                 page=browser.new_page(viewport={'width':1280,'height':1050});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 page.goto(base);expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex',timeout=15000)
                 status=page.request.get(base+'/api/status').json()
+                assert status['settings']['company_mode'] is False
+                page.locator('#settings-open').click();expect(page.locator('#company-mode')).not_to_be_checked()
+                expect(page.locator('#company-mode-controls')).not_to_be_visible()
+                off=service.ingest({'url':'https://intranet.fixture.test/default-off','text':'DefaultOff fixture material '*20,'captured_at':'fixture'})['item']
+                future=service.summary_futures.get(off['id'])
+                if future:future.result(timeout=5)
+                assert service.archive.get(off['id'])['summary']=='Synthetic permitted summary' and model.call_count==1
+                assert page.locator('#company-model-dialog').count()==0
+                model.reset_mock()
+                page.locator('#company-mode').check();expect(page.locator('#company-mode-controls')).to_be_visible()
+                expect(page.locator('#company-model-status')).to_contain_text('尚未确认')
+                page.locator('#settings-dialog .dialog-head button').click()
+                page.reload();expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
+                assert page.request.get(base+'/api/status').json()['settings']['company_mode'] is True
                 # Direct HTTP requests cannot bypass the UI acknowledgement.
                 blocked=page.request.post(base+'/api/items/'+item['id'],data={},headers={'X-Knowledge-Token':status['token']})
                 assert blocked.status==409 and 'company_model' in blocked.json() and model.call_count==0
@@ -52,8 +66,24 @@ with tempfile.TemporaryDirectory() as root:
                 page.locator('#company-model-cancel').click();expect(page.locator('#company-model-dialog')).to_have_count(0)
                 assert model.call_count==2
                 assert service.archive.get(item['id'])['summary']=='Synthetic permitted summary'
+                page.locator('#settings-open').click();page.locator('#company-mode').uncheck()
+                expect(page.locator('#company-mode-controls')).not_to_be_visible()
+                page.locator('#settings-dialog .dialog-head button').click()
+                page.locator(f'#recent-items [data-id="{item["id"]}"]').click()
+                expect(page.locator('.company-data-policy')).to_have_count(0)
+                with page.expect_response(lambda r:r.url==base+'/api/items/'+item['id'] and r.request.method=='POST') as response:
+                    page.locator('#retry-ai').click()
+                assert response.value.ok
+                future=service.summary_futures.get(item['id'])
+                if future:future.result(timeout=5)
+                assert page.locator('#company-model-dialog').count()==0
+                expect(page.locator('#detail-content')).to_contain_text('Synthetic permitted summary')
+                assert model.call_count==3
                 page.screenshot(path='/tmp/secretary-company-model-policy.png')
                 assert not errors,errors
-                print('PASS: direct HTTP enforcement; cancel preserves source with zero model calls; once-confirmed destination enables automatic summaries; revocation blocks library Q&A; original summary preserved; no live model/network provider calls')
+                print('PASS: company mode defaults off and has no extra confirmation; toggle persists across reload; enabled mode direct HTTP enforcement; cancel preserves source with zero model calls; once-confirmed destination enables automatic summaries; revocation blocks library Q&A; original summary preserved; no live model/network provider calls')
+            except Exception:
+                print({'page_errors':errors,'company_mode':service.archive.settings()['company_mode'],'model_calls':model.call_count,'mode_handler':page.locator('#company-mode').evaluate('(e)=>typeof e.onchange'),'toast':page.locator('#toast').inner_text()},flush=True)
+                raise
             finally:browser.close()
     finally:service.close();server.shutdown();server.server_close()
