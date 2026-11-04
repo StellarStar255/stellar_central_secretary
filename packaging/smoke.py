@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
@@ -95,11 +95,13 @@ with tempfile.TemporaryDirectory() as data:
         request('/api/items/'+annotated['id']+'/delete',{'confirmed':True,'expected_updated':annotated['updated']},status['token'])
         print('PASS: frozen unavailable link retains annotation, descriptive title and search index')
         grouped=json.loads(request('/api/ingest',{'text':'Related sources','attachments':[],'links':[f'http://127.0.0.1:{port}/first',f'http://127.0.0.1:{port}/second']},status['token']))['item']
-        for _ in range(30):
+        group_deadline=time.monotonic()+30
+        while time.monotonic()<group_deadline:
             grouped=json.loads(request('/api/items/'+grouped['id']))
             if not grouped['append_busy']:break
             time.sleep(.1)
-        assert len(grouped['group_links'])==2 and all(link['state']=='unread' for link in grouped['group_links'])
+        assert not grouped['append_busy'], 'Grouped-link reading did not finish within 30 seconds'
+        assert len(grouped['group_links'])==2 and all(link['state']=='unread' for link in grouped['group_links']), [(link['state'],link['warning']) for link in grouped['group_links']]
         request('/api/items/'+grouped['id']+'/delete',{'confirmed':True,'expected_updated':grouped['updated']},status['token'])
         print('PASS: frozen grouped links retain both unavailable sources in one archive')
         reparsed = json.loads(request('/api/items/'+pdf['id']+'/reextract', {}, status['token']))
