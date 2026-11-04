@@ -37,7 +37,7 @@ class LocalPathsTest(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, '正文'): local_paths.open_location(service.archive, item, invalid)
                     with self.assertRaisesRegex(ValueError, '不存在'): local_paths.open_location(service.archive, item, str(missing))
                     self.assertEqual(run.call_count, count)
-                with patch.object(local_paths.subprocess, 'run', side_effect=subprocess.TimeoutExpired('open', 15)):
+                with patch.object(local_paths.sys, 'platform', 'darwin'), patch.object(local_paths.subprocess, 'run', side_effect=subprocess.TimeoutExpired('open', 15)):
                     with self.assertRaisesRegex(ValueError, '无法打开'): local_paths.open_location(service.archive, item, str(folder))
                 self.assertEqual(service.archive.get(item), before)
                 service.archive.update(item, text='Path removed')
