@@ -195,6 +195,14 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
         if time.monotonic()>=rediscover_at:
             current=existing_session(profile)
             if current:
+                # Discovery can find the process we just launched before its
+                # proxy metadata has been saved. The dedicated profile and
+                # newly allocated endpoint identify this startup attempt.
+                if current.get('endpoint')==endpoint and proc.poll() is None:
+                    session=dict(current,confirmed=False,process=proc,proxy=proxy)
+                    if not background:session['startup_url']=target
+                    save_session(profile,session)
+                    return session
                 if current.get('proxy')!=proxy:raise RuntimeError('浏览器代理选项已改变，请先在设置中点击「关闭专用浏览器」，再重新读取；登录资料会保留。')
                 return current
             rediscover_at=time.monotonic()+1

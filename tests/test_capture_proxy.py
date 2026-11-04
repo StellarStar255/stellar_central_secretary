@@ -46,6 +46,21 @@ class CaptureProxyTests(unittest.TestCase):
     browser_reader.start_or_reuse_browser('about:blank',Path(folder),threading.Event(),proxy='direct://')
     self.assertIn('--no-proxy-server',launch.call_args.args[0])
 
+ def test_startup_discovery_of_own_endpoint_keeps_the_requested_proxy(self):
+  for port in (1234,4321):
+   with self.subTest(discovered_port=port),tempfile.TemporaryDirectory() as folder:
+    profile=Path(folder);proc=Mock(poll=lambda:None)
+    current={'endpoint':f'http://127.0.0.1:{port}','websocket':f'ws://127.0.0.1:{port}/devtools/browser/fixture','confirmed':False,'process':None}
+    route='socks5://127.0.0.1:1080'
+    with patch.object(browser_reader,'existing_session',side_effect=[None,current]),patch.object(browser_reader,'chrome_executable',return_value='/fixture/chrome'),patch.object(browser_reader,'free_loopback_port',return_value=1234),patch.object(browser_reader,'debug_info',side_effect=OSError('still starting')),patch.object(browser_reader.time,'monotonic',side_effect=[0,0,2,2]),patch.object(browser_reader.subprocess,'Popen',return_value=proc):
+     if port!=1234:
+      with self.assertRaisesRegex(RuntimeError,'关闭专用浏览器'):browser_reader.start_or_reuse_browser('about:blank',profile,threading.Event(),proxy=route)
+      continue
+     session=browser_reader.start_or_reuse_browser('about:blank',profile,threading.Event(),proxy=route)
+    self.assertEqual(session['proxy'],route);self.assertIs(session['process'],proc)
+    import json
+    self.assertEqual(json.loads((profile/'.reader-session.json').read_text())['proxy'],route)
+
  def test_port_check_does_not_call_a_model_and_reports_socket_failures(self):
   with patch.object(network,'local_proxy_alive',return_value=True),patch.object(network.socket,'create_connection') as connect:
    self.assertTrue(network.check_proxy_port({'mode':'custom','url':'socks5://127.0.0.1:1080'},browser=True)['proxied'])
