@@ -896,5 +896,9 @@
   "生成摘要": "Generate summary",
   "确认公司允许的服务和当前账户后，后续公司资料可按自动总结设置处理。在本应用中更换模型后端或 API 配置后需要重新确认。CLI 外部账户或服务配置变更后，请主动撤销并重新确认。此确认不代表公司已正式授权。": "After you confirm a company-permitted service and account, future company material follows your automatic summary setting. Backend or API configuration changes in this app require confirmation again. Revoke and confirm again after changing external CLI accounts or service configuration. This acknowledgement is not formal company authorization.",
   "撤销会阻止后续公司资料调用；已发出的模型请求无法撤回，正在处理的任务可在任务列表中停止。": "Revoking blocks future company-material calls. Sent model requests cannot be recalled; stop active tasks in the task list.",
-  "请先完成模型 API 配置": "Complete the model API configuration first"
+  "请先完成模型 API 配置": "Complete the model API configuration first",
+  "公司模式": "Company mode",
+  "启用公司模式": "Enable company mode",
+  "公司模式选项无效": "Invalid company mode option",
+  "默认关闭。关闭时按当前模型和自动总结设置处理，不弹出额外确认；开启后，公司资料首次使用模型服务时需要确认。": "Off by default. When off, material uses the current model and automatic summary settings without extra confirmation. When on, company material requires first-use confirmation of the model service."
 }

@@ -45,9 +45,10 @@ def status(archive,config):
     info=descriptor(config)
     with archive.db() as db:
         row=db.execute('SELECT value FROM settings WHERE key=?',(KEY,)).fetchone()
-    return dict(info,approved=bool(row and row[0]==info['fingerprint']))
+    return dict(info,enabled=archive.settings()['company_mode'],approved=bool(row and row[0]==info['fingerprint']))
 
 def require(archive,config,item_ids):
+    if not archive.settings()['company_mode']:return config
     if any(restricted(archive.get(item_id)) for item_id in set(item_ids or [])):
         info=status(archive,config)
         if not info['approved']:raise ApprovalRequired(info)
@@ -58,7 +59,7 @@ def approve(archive,config,body):
     if body.get('acknowledged') is not True or body.get('fingerprint')!=info['fingerprint']:
         raise ValueError('模型配置已变化，请重新核对服务与账户后确认。')
     with archive.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',(KEY,info['fingerprint']))
-    return {'ok':True,'company_model':dict(info,approved=True)}
+    return {'ok':True,'company_model':dict(info,enabled=archive.settings()['company_mode'],approved=True)}
 
 def revoke(archive):
     with archive.db() as db:db.execute('DELETE FROM settings WHERE key=?',(KEY,))

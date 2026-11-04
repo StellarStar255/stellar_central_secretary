@@ -13,6 +13,7 @@ class CompanyAITest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.service=Service(self.temp.name)
         self.service.archive.configure('codex',True,capture_close_tabs=False)
+        self.service.archive.set_company_mode(True)
 
     def tearDown(self):
         self.service.close();self.service.quick_pool.shutdown(wait=True);self.service.pool.shutdown(wait=True);self.temp.cleanup()
@@ -27,6 +28,26 @@ class CompanyAITest(unittest.TestCase):
     def wait(self,item):
         future=self.service.summary_futures.get(item)
         if future:future.result(timeout=5)
+
+    def test_company_mode_is_off_by_default_and_only_enabled_mode_requires_confirmation(self):
+        with tempfile.TemporaryDirectory() as root:
+            other=Service(root)
+            try:self.assertFalse(other.archive.settings()['company_mode'])
+            finally:other.close()
+        self.service.archive.set_company_mode(False)
+        item=self.item()
+        with patch('secretary.ai.summary_fields',return_value={'summary':'Default mode summary','state':'ready'}) as model:
+            self.service.queue(item);self.wait(item)
+            self.assertEqual(model.call_count,1)
+        self.assertEqual(self.service.archive.get(item)['summary'],'Default mode summary')
+        self.service.archive.set_company_mode(True)
+        with self.assertRaises(company_ai.ApprovalRequired):self.service.queue(item,force=True)
+        self.approve();self.service.archive.set_company_mode(False);self.service.archive.set_company_mode(True)
+        self.assertFalse(company_ai.status(self.service.archive,self.service.model_backend())['approved'])
+        from secretary.core import Archive
+        self.assertTrue(Archive(self.temp.name,recover=False).settings()['company_mode'])
+        for invalid in (None,1,'true'):
+            with self.assertRaises(ValueError):self.service.archive.set_company_mode(invalid)
 
     def test_unconfirmed_content_never_reaches_auto_manual_or_question_models(self):
         item=self.item()

@@ -155,7 +155,7 @@ class Archive:
         try:content_scale=int(values.get('content_font_scale','100'))
         except (TypeError,ValueError):content_scale=100
         if not 70<=content_scale<=200:content_scale=100
-        return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true',
+        return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true','company_mode':values.get('company_mode','false')=='true',
                 'model_proxy':{'mode':values.get('model_proxy_mode','auto'),'url':values.get('model_proxy_url','')},
                 'capture_proxy':{'mode':values.get('capture_proxy_mode','system'),'url':values.get('capture_proxy_url','')},
                 'capture_background': values.get('capture_background', 'true') == 'true',
@@ -178,6 +178,14 @@ class Archive:
                     if not isinstance(value,bool): raise ValueError('浏览器选项格式无效')
                     pairs.append((key,str(value).lower()))
             db.executemany('INSERT OR REPLACE INTO settings VALUES (?,?)', pairs)
+    def set_company_mode(self,enabled):
+        if type(enabled) is not bool:raise ValueError('公司模式选项无效')
+        with self.lock,self.db() as db:
+            old=db.execute("SELECT value FROM settings WHERE key='company_mode'").fetchone()
+            previous=bool(old and old[0]=='true')
+            db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('company_mode','true' if enabled else 'false'))
+            if previous!=enabled:db.execute("DELETE FROM settings WHERE key='company_model_approval'")
+
     def set_language(self,language):
         if language not in ('zh','en'):raise ValueError('Unsupported display language')
         with self.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('ui_language',language))

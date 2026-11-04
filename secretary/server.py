@@ -163,7 +163,7 @@ class Service:
 
     def company_model_status(self):
         try:return company_ai.status(self.archive,self.model_backend())
-        except ValueError:return {'approved':False,'fingerprint':'','backend':self.archive.settings()['backend'],'destination':'请先完成模型 API 配置','model':''}
+        except ValueError:return {'enabled':self.archive.settings()['company_mode'],'approved':False,'fingerprint':'','backend':self.archive.settings()['backend'],'destination':'请先完成模型 API 配置','model':''}
 
     def desktop_status(self):
         with self.lock:
@@ -310,6 +310,10 @@ class Service:
         from .task_status import explain
         result=dict(item,summary_progress=value) if value else dict(item)
         if item.get('error') and item['state'] in ('error','needs_content'):result['error_hint']=explain(item['error'])
+        if not self.archive.settings()['company_mode']:
+            if result.get('error')==company_ai.PENDING:result=dict(result,error='')
+            if any(batch.get('error')==company_ai.PENDING for batch in result.get('additions',[])):
+                result=dict(result,additions=[dict(batch,error='') if batch.get('error')==company_ai.PENDING else batch for batch in result['additions']])
         return result
 
     def process_addition(self,item_id,batch_id):
@@ -872,6 +876,14 @@ def handler(service):
                     service.archive.set_font_size(body.get('ui_font_size'));return self.send(200,{'ok':True,'ui_font_size':body['ui_font_size']})
                 if path=='/api/model-api/test':return self.send(200,service.test_model_api(body))
                 if path=='/api/model-connection/test':return self.send(200,service.test_model_connection(body))
+                if path=='/api/company-mode':
+                    service.archive.set_company_mode(body.get('enabled'))
+                    if body.get('enabled') is False:
+                        for item in service.archive.list():
+                            if item['error']==company_ai.PENDING:
+                                service.archive.update(item['id'],error='')
+                                service.queue(item['id'])
+                    return self.send(200,{'ok':True,'company_model':service.company_model_status()})
                 if path=='/api/company-model/approve':return self.send(200,company_ai.approve(service.archive,service.model_backend(),body))
                 if path=='/api/company-model/revoke':return self.send(200,company_ai.revoke(service.archive))
                 if path=='/api/settings':return self.send(200,service.save_settings(body))

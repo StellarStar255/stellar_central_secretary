@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as data:
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or ''})
-        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test') else 3) as response:
+        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test','/api/ask') else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -44,6 +44,7 @@ with tempfile.TemporaryDirectory() as data:
                 break
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
+        assert status['settings']['company_mode'] is False
         for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
             assert request(path), path
         assert b'tutorial-open' in request('/')
@@ -153,6 +154,7 @@ with tempfile.TemporaryDirectory() as data:
             print('PASS: frozen archive-only skips enabled AI; manual summary uses short lane, retains original and reports stage timings')
             api_status=json.loads(request('/api/status'));assert api_status['model_api']['has_key'] and api_key not in json.dumps(api_status)
             with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as backup:assert all(api_key.encode() not in backup.read(name) for name in backup.namelist())
+            request('/api/company-mode',{'enabled':True},status['token'])
             protected=json.loads(request('/api/ingest',{'url':'https://intranet.fixture.test/policy','text':'CompanyGuardFixture confidential synthetic source. '*10,'captured_at':'fixture','archive_only':True},status['token']))['item']
             assert protected['company_data'] and len(provider_calls)==2
             try:request('/api/items/'+protected['id'],{},status['token'])
@@ -174,7 +176,10 @@ with tempfile.TemporaryDirectory() as data:
             except urllib.error.HTTPError as error:assert error.code==409
             else:raise AssertionError('Revoked company material reached library Q&A')
             assert len(provider_calls)==3
-            print('PASS: frozen company material blocked before confirmation; confirmed destination enables summary; revocation blocks retrieved company passages; no unapproved provider call')
+            request('/api/company-mode',{'enabled':False},status['token'])
+            request('/api/ask',{'question':'CompanyGuardFixture'},status['token'])
+            assert len(provider_calls)==4
+            print('PASS: company mode defaults off; off mode has no extra approval; frozen company material blocked before confirmation; confirmed destination enables summary; revocation blocks retrieved company passages; no unapproved provider call')
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
             print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
         finally:provider.shutdown();provider.server_close()
