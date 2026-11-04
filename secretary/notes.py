@@ -1,5 +1,5 @@
 """User-owned quick notes and local image attachments; never sent to AI."""
-import base64,io,re,uuid
+import base64,io,re,uuid,subprocess
 from pathlib import Path
 from PIL import Image
 
@@ -61,5 +61,23 @@ def note_image(archive,item_id,image_id):
     if not re.fullmatch('[a-f0-9]{32}',image_id):raise KeyError('速记图片不存在')
     image=next((image for image in item['note_images'] if image['id']==image_id),None)
     target=archive.root/'files'/image_id
-    if image is None or not target.is_file():raise KeyError('速记图片不存在')
+    if image is None or not target.is_file() or target.is_symlink():raise KeyError('速记图片不存在')
     return image,target
+
+
+def open_image(archive,item_id,image_id):
+    from . import attachment_editor
+    with archive.lock:
+        image,source=note_image(archive,item_id,image_id)
+        data=source.read_bytes()
+        media=image_bytes(data)
+        extension={'image/png':'.png','image/jpeg':'.jpg','image/gif':'.gif','image/webp':'.webp'}[media]
+        folder=attachment_editor.directory(archive,item_id,image_id,'')
+        folder.mkdir(mode=0o700,parents=True,exist_ok=True)
+        target=folder/('note-image'+extension)
+        if target.is_symlink():raise ValueError('速记图片路径无效。')
+        attachment_editor.atomic(target,data)
+    try:attachment_editor.launch(target)
+    except (OSError,subprocess.SubprocessError) as error:
+        raise ValueError('无法打开速记图片，请检查系统默认看图程序。') from error
+    return {'ok':True}

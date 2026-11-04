@@ -861,5 +861,7 @@
   "本地路径无效。": "Invalid local path.",
   "此路径不适用于当前电脑。": "This path is not valid on this computer.",
   "本地路径不存在，可能已移动或属于另一台电脑。": "The local path does not exist. It may have moved or belong to another computer.",
-  "无法打开本地路径，请检查访问权限或系统文件管理器。": "Cannot open the local path. Check access permissions or your system file manager."
+  "无法打开本地路径，请检查访问权限或系统文件管理器。": "Cannot open the local path. Check access permissions or your system file manager.",
+  "无法打开速记图片，请检查系统默认看图程序。": "Cannot open the note image. Check your default image viewer.",
+  "速记图片路径无效。": "Invalid note image path."
 }

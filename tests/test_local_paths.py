@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -49,10 +50,11 @@ class LocalPathsTest(unittest.TestCase):
             service = Service(root)
             try:
                 item, _ = service.archive.add('Paths', '~/\nC:\\Users\\someone\\Project')
-                with patch.object(local_paths.subprocess, 'run') as run:
+                with patch.object(local_paths.sys, 'platform', 'darwin'), patch.object(local_paths.subprocess, 'run') as run:
                     local_paths.open_location(service.archive, item, '~/')
                     self.assertEqual(run.call_args.args[0][-1], str(Path.home().resolve()))
-                    with self.assertRaisesRegex(ValueError, '当前电脑'):
-                        local_paths.open_location(service.archive, item, 'C:\\Users\\someone\\Project')
+                    if os.name != 'nt':
+                        with self.assertRaisesRegex(ValueError, '当前电脑'):
+                            local_paths.open_location(service.archive, item, 'C:\\Users\\someone\\Project')
             finally:
                 service.close()
