@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 from http.server import ThreadingHTTPServer
 from secretary.core import Archive, extract
 from secretary.server import Service, handler
-from secretary import browser_reader
+from secretary import browser_reader,company_ai
 from secretary.diagnose_capture import persist_capture
 
 
@@ -242,6 +242,9 @@ class ServiceTest(unittest.TestCase):
         enriched=self.service.ingest({'url':item['url'],'text':'产品规划结论：先做知识归档。'})
         self.assertTrue(enriched['updated']); self.assertEqual(enriched['item']['id'],item['id'])
         self.assertEqual(len(self.service.archive.list()),1)
+        with self.assertRaises(company_ai.ApprovalRequired):self.service.ask('产品规划')
+        info=company_ai.status(self.service.archive,self.service.model_backend())
+        company_ai.approve(self.service.archive,self.service.model_backend(),{'acknowledged':True,'fingerprint':info['fingerprint']})
         with patch('secretary.ai.run', return_value='先做知识归档。[1]'):
             result = self.service.ask('产品规划')
         self.assertEqual(result['sources'][0]['item_id'],item['id'])
@@ -266,6 +269,8 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(result['item']['text'],capture['text'])
         with self.assertRaises(ValueError): self.service.ingest({'url':'javascript:alert(1)'})
     def test_login_capture_indexes_and_summarizes(self):
+        info=company_ai.status(self.service.archive,self.service.model_backend())
+        company_ai.approve(self.service.archive,self.service.model_backend(),{'acknowledged':True,'fingerprint':info['fingerprint']})
         item_id, _ = self.service.archive.add('会话', url='https://chatgpt.com/c/example')
         result = {'title':'知识管理讨论', 'text':'用户：怎么归档？\nChatGPT：使用分段索引、来源链接和摘要。'}
         with patch('secretary.capture_worker.run', return_value=result), patch('secretary.ai.summarize', return_value={'title':'知识管理讨论','summary':'使用分段索引并保存来源。','category':'知识管理','tags':['归档']}):
@@ -352,7 +357,7 @@ class ServiceTest(unittest.TestCase):
         with patch.object(self.service, 'start_capture') as capture:
             status, body=request('/api/items/'+item_id+'/capture',{},token)
             self.assertEqual(status,200);self.assertTrue(json.loads(body)['capture_started'])
-            capture.assert_called_once_with(item_id,force_summary=True)
+            capture.assert_called_once_with(item_id,force_summary=False)
         with patch.object(self.service, 'confirm_login', return_value=self.service.archive.get(item_id)) as confirm:
             status, body=request('/api/items/'+item_id+'/confirm-login',{},token)
             self.assertEqual(status,200);self.assertTrue(json.loads(body)['login_confirmed'])

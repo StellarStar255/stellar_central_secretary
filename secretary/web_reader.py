@@ -72,24 +72,31 @@ def is_loopback_url(url):
     except ValueError:return False
 
 
-def validate_browser_url(url,target=None):
-    """Local reading requires an explicit loopback target and its exact origin.
+def same_origin(left,right):
+    origin=lambda value:(value.scheme,value.hostname,value.port or (443 if value.scheme=='https' else 80))
+    return origin(urlsplit(left))==origin(urlsplit(right))
 
-    Server-side fetching stays public-only. Public pages cannot opt local frames
-    or redirects into this exception, and no other local ports are scanned.
+
+def validate_browser_url(url,target=None):
+    """Allow the submitted browser origin, including intranet and proxy DNS.
+
+    The browser resolves its own target using its VPN, proxy and sign-in state.
+    Unrelated origins still pass the public-address check; server fetches retain
+    their separate public-only policy.
     """
     capture_url(url)
     target=target or url
-    if not is_loopback_url(target):return validate_public_url(url)
     capture_url(target)
-    origin=lambda value:(value.scheme,value.hostname,value.port or (443 if value.scheme=='https' else 80))
-    if not is_loopback_url(url) or origin(urlsplit(url))!=origin(urlsplit(target)):
+    if same_origin(url,target):
+        if is_loopback_url(target):
+            parsed=urlsplit(url)
+            answers=socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
+            if not answers or any(not ipaddress.ip_address(answer[4][0]).is_loopback for answer in answers):
+                raise ValueError('本地网页地址必须指向本机回环地址')
+        return url
+    if is_loopback_url(target):
         raise ValueError('本地网页读取仅限你提交的原始地址，请返回原页面后重试')
-    parsed=urlsplit(url)
-    answers=socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
-    if not answers or any(not ipaddress.ip_address(answer[4][0]).is_loopback for answer in answers):
-        raise ValueError('本地网页地址必须指向本机回环地址')
-    return url
+    return validate_public_url(url)
 
 
 def same_page(actual,target):
@@ -215,6 +222,11 @@ def open_capture_page(page,target,cancelled,language='zh'):
                 raise RuntimeError('Browser navigation was interrupted. Check the local service and port forwarding, or capture the working page with the browser extension.' if english else '浏览器打开网页被中断。请检查本地服务与端口转发，或在能正常显示内容的常用浏览器中使用采集扩展。')
             if error and 'ERR_CONNECTION_REFUSED' in str(error):
                 raise RuntimeError('Cannot connect to the webpage service. Start the service and port forwarding on this computer, then retry.' if english else '无法连接网页服务。请在本机启动对应服务与端口转发，再重新读取。')
+            detail=str(error or '')
+            if 'ERR_NAME_NOT_RESOLVED' in detail or 'ERR_NAME_RESOLUTION_FAILED' in detail:
+                raise RuntimeError('The browser cannot resolve this address. Connect to your company network or VPN, or capture the working tab with the browser extension.' if english else '浏览器无法解析此地址。请连接公司网络或 VPN 后重试，或在能正常打开该页的常用浏览器中使用采集扩展。')
+            if any(code in detail for code in ('ERR_PROXY_CONNECTION_FAILED','ERR_TUNNEL_CONNECTION_FAILED','ERR_NO_SUPPORTED_PROXIES')):
+                raise RuntimeError('The browser proxy connection failed. Check the browser proxy settings, or capture the working tab with the browser extension.' if english else '浏览器代理连接失败。请检查浏览器代理设置，或在能正常打开该页的常用浏览器中使用采集扩展。')
             raise error
     finally:
         page.remove_listener('response',response_seen);page.remove_listener('download',download_seen)
@@ -260,7 +272,7 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
     if os.name!='nt':profile.chmod(0o700)
     notify('opening_browser','正在打开浏览器以读取网页')
     marker='about:blank#stellar-web-capture-'+uuid.uuid4().hex
-    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=proxy if proxy is not None else (None if is_loopback_url(target) else browser_proxy()))
+    session=reader.start_or_reuse_browser(marker,profile,cancelled,background=background,proxy=proxy)
     confirmed=login_complete if login_complete is not None else threading.Event()
     page=None;completed=False
     with sync_playwright() as pw:
@@ -276,17 +288,15 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
                 confirmed.clear();page.bring_to_front()
                 notify('waiting_login','请在浏览器完成登录，打开并展开要保存的内容，再点击「页面已打开，开始读取」')
                 reader.wait_for_manual_login(session.get('process') or SimpleNamespace(poll=lambda:None),confirmed,cancelled,timeout)
-                confirmed_target=target
-                if is_loopback_url(target):
-                    # Local proxy viewers commonly redirect to an index or
-                    # selected-conversation path. Accept that displayed page
-                    # only after confirmation, within the submitted origin.
-                    # Waiting for the user's event does not pump Playwright's
-                    # cached URL updates. Ask the actual document after the
-                    # confirmation so a completed script redirect is not stale.
-                    confirmed_target=page.evaluate('location.href')
-                    validate_browser_url(confirmed_target,target)
-                elif not same_page(page.url,target):open_capture_page(page,target,cancelled,language)
+                # Read the actual displayed document after the user's event;
+                # cached page.url may lag behind a completed login redirect.
+                displayed=page.evaluate('location.href')
+                if same_origin(displayed,target):
+                    validate_browser_url(displayed,target)
+                    confirmed_target=displayed
+                else:
+                    confirmed_target=target
+                    open_capture_page(page,target,cancelled,language)
                 notify('reading','正在采集网页中已加载的正文')
                 try:result=capture_loaded_page(page,confirmed_target,cancelled,language)
                 except RuntimeError as exc:

@@ -75,3 +75,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .local-path{cursor:pointer;text-decoration:underline dotted;text-underline-offset:4px}.local-path:hover,.local-path:focus-visible{color:var(--brand-color);text-decoration-style:solid}.local-path:focus-visible{outline:2px solid currentColor;outline-offset:3px}
 
 .note-image-open{display:block;padding:0;border:0;background:none;border-radius:6px;cursor:zoom-in}.note-image-open:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+.company-data-policy{margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:8px}.company-data-policy p{color:var(--muted)}#company-model-dialog{width:min(620px,94vw)}#company-model-dialog .check{margin:18px 0;line-height:1.7}
