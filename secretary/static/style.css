@@ -71,3 +71,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .library-flags{display:flex;gap:8px;padding:0 12px 12px 44px}.library-flags button{font-size:12px;padding:4px 8px}.library-flags [aria-pressed=true]{color:var(--accent,#d99b66);border-color:currentColor}#trash-dialog{width:min(760px,90vw)}.trash-row{display:flex;align-items:center;gap:12px;border-bottom:1px solid #444;padding:16px 0}.trash-row strong{flex:1;overflow-wrap:anywhere}.trash-row small{color:#999}#toast:has(button){pointer-events:auto}#toast button{margin-left:12px}.preview-actions{flex-wrap:wrap}
 
 .image-open{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;padding:0;cursor:zoom-in;border-radius:6px}.image-open:disabled{cursor:wait}.image-open:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+
+.local-path{cursor:pointer;text-decoration:underline dotted;text-underline-offset:4px}.local-path:hover,.local-path:focus-visible{color:var(--brand-color);text-decoration-style:solid}.local-path:focus-visible{outline:2px solid currentColor;outline-offset:3px}
