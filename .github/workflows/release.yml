@@ -45,6 +45,7 @@ jobs:
           python -m playwright install chromium
       - name: Text and command archive UI
         if: runner.os == 'Windows'
+        shell: bash
         run: |
           python scripts/check_browser_proxy.py
           python scripts/check_model_api_ui.py
