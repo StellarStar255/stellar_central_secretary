@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as root:
     page.screenshot(path='/tmp/secretary-append-materials.png')
     page.reload();page.locator('#recent-items [data-id="'+item_id+'"]').click();expect(page.locator('.addition-batch')).to_have_count(1)
     page.locator('#append-material').click();page.locator('#append-text').fill('Second batch, text only');page.locator('#append-summarize').uncheck();page.locator('#append-save').click()
-    expect(page.locator('.addition-batch')).to_have_count(2);assert model.call_count==1
+    expect(page.locator('.addition-batch')).to_have_count(2);expect(page.locator('#append-save')).to_be_enabled();assert model.call_count==1
     assert service.archive.list(q='Second batch')[0]['id']==item_id and not errors,errors
     page.locator('#append-material').click();page.locator('#append-text').fill('Private pending supplementary draft')
     page.locator('#append-dialog .dialog-head button').click();page.locator('#detail-dialog .dialog-head button').click()
