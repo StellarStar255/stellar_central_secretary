@@ -60,6 +60,7 @@ jobs:
           python scripts/check_bundle_ui.py
           python scripts/check_additions_ui.py
           python scripts/check_attachment_overview_ui.py
+          python scripts/check_extension_install_ui.py
       - name: Windows native source UI
         if: runner.os == 'Windows'
         run: python packaging/smoke_windows_desktop.py --source

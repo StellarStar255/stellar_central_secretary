@@ -319,7 +319,7 @@ document.addEventListener('click',event=>{
  const button=event.target.closest?.('[data-confirm-login],[data-capture],[data-cancel-capture],[data-summarize],[data-extension-help]');
  if(!button||button.disabled)return;
  event.preventDefault();
- if(button.hasAttribute('data-extension-help')){$('#extension-dialog').showModal();return}
+ if(button.hasAttribute('data-extension-help')){void StellarExtensionUI.open({api,toast});return}
  if(button.dataset.summarize)void performCaptureAction(button.dataset.summarize,'summary');
  else if(button.dataset.confirmLogin)void performCaptureAction(button.dataset.confirmLogin,'confirm');
  else if(button.dataset.cancelCapture)void performCaptureAction(button.dataset.cancelCapture,'cancel');

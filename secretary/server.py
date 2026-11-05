@@ -24,7 +24,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_delete
+from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -830,6 +830,7 @@ def handler(service):
                 if image_match:
                     image,source=notes.note_image(service.archive,*image_match.groups())
                     return self.send(200,source.read_bytes(),image['media'])
+                if path=='/api/browser-extension/download':return self.send(200,extension_install.download(),'application/zip',{'Content-Disposition':'attachment; filename="Stellar-Capture-Extension.zip"'})
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/trash':return self.send(200,{'items':service.archive.trash_items()})
                 if path=='/api/tasks':return self.send(200,service.task_status())
@@ -871,7 +872,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/image-viewer.js':'image-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/image-viewer.js':'image-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -938,6 +939,8 @@ def handler(service):
                     return self.send(200,{'ok':True,'company_model':service.company_model_status()})
                 if path=='/api/company-model/approve':return self.send(200,company_ai.approve(service.archive,service.model_backend(),body))
                 if path=='/api/company-model/revoke':return self.send(200,company_ai.revoke(service.archive))
+                if path=='/api/browser-extension/prepare':return self.send(200,extension_install.prepare(service.archive.root))
+                if path=='/api/browser-extension/open':return self.send(200,extension_install.open_folder(service.archive.root))
                 if path=='/api/settings':return self.send(200,service.save_settings(body))
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))

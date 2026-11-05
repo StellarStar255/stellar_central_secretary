@@ -45,8 +45,14 @@ with tempfile.TemporaryDirectory() as data:
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
         assert status['settings']['company_mode'] is False
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/image-viewer.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
             assert request(path), path
+        extension=json.loads(request('/api/browser-extension/prepare',{},status['token']))
+        extension_path=Path(extension['path'])
+        assert extension_path.parent.resolve()==Path(data).resolve() and (extension_path/'manifest.json').is_file()
+        with zipfile.ZipFile(io.BytesIO(request('/api/browser-extension/download'))) as extension_zip:
+            assert extension_zip.read('Stellar-Capture-Extension/manifest.json')==(extension_path/'manifest.json').read_bytes()
+        print('PASS: frozen bundled extension exported to stable folder and downloadable as loadable ZIP')
         assert b'tutorial-open' in request('/')
         assert b'ui-font-size' in request('/')
         request('/api/appearance',{'ui_font_size':18},status['token'])
