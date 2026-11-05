@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as root:
     response=page.request.get(f'http://127.0.0.1:{server.server_port}/api/items/{item}/note-images/'+saved['note_images'][0]['id']);assert response.ok and response.body()==stream.getvalue()
     assert page.locator('#note-images a').count()==0
     page.locator('[data-note-open]').click();expect(page.locator('#image-viewer')).to_be_visible()
-    page.wait_for_function("document.querySelector('#image-viewer img').naturalWidth===12")
+    page.wait_for_function("()=>document.querySelector('#image-viewer img').naturalWidth===12")
     assert len(browser.contexts[0].pages)==1 and launch.call_count==0
     page.locator('[data-viewer="in"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('125%')
     page.keyboard.press('Escape');expect(page.locator('#image-viewer')).not_to_be_visible();expect(page.locator('#detail-dialog')).to_be_visible()
@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as root:
     page.screenshot(path='/tmp/secretary-image-viewer.png');page.keyboard.press('Escape');assert launch.call_count==0
     service.archive.update(item,summary='AI-generated summary',tags=['AI tag']);page.evaluate('refresh()');expect(page.locator('#note-text')).to_have_value(saved['note'])
     page.reload();page.locator('#library-open').click();page.locator('#search').fill('PersonalMemoUnique');expect(page.locator('#items .library-row')).to_have_count(1);page.locator('#items [data-id="'+item+'"]').click();page.locator('#preview-full').click();expect(page.locator('#note-images img')).to_have_count(2)
-    page.wait_for_function("document.querySelector('#note-images img')?.naturalWidth>0");page.screenshot(path='/tmp/secretary-quick-notes-zh.png');page.locator('[data-note-remove]').first.click();expect(page.locator('#note-images img')).to_have_count(1);expect(page.locator('#note-status')).to_have_text('已保存');page.locator('[data-note-remove]').click();expect(page.locator('#note-images img')).to_have_count(0);expect(page.locator('#note-status')).to_have_text('已保存');assert not service.archive.get(item)['note_images']
+    page.wait_for_function("()=>document.querySelector('#note-images img')?.naturalWidth>0");page.screenshot(path='/tmp/secretary-quick-notes-zh.png');page.locator('[data-note-remove]').first.click();expect(page.locator('#note-images img')).to_have_count(1);expect(page.locator('#note-status')).to_have_text('已保存');page.locator('[data-note-remove]').click();expect(page.locator('#note-images img')).to_have_count(0);expect(page.locator('#note-status')).to_have_text('已保存');assert not service.archive.get(item)['note_images']
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');expect(page.locator('html')).to_have_attribute('lang','en');page.locator('#settings-dialog .dialog-head button').click();page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click();page.locator('#preview-full').click()
     expect(page.locator('.quick-note h3')).to_have_text('My quick notes');expect(page.locator('#note-status')).to_have_text('Saved');expect(page.locator('#note-save')).to_have_text('Save notes');assert not errors,errors;queue.assert_not_called()
     assert service.archive.get(item)['text']=='Original body.'
