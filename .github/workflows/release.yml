@@ -101,6 +101,15 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" packaging\windows_installer.iss
           if ($LASTEXITCODE) { throw "Installer build failed" }
+      - name: Windows installed automatic update
+        if: runner.os == 'Windows'
+        run: python packaging/smoke_windows_update.py
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Windows'
+        with:
+          name: windows-update-logs
+          path: test-results/windows-update/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}

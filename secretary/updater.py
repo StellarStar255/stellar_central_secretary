@@ -49,7 +49,13 @@ def supported():
 
 def status():
     with _lock:
-        return {**_state, "supported": supported()}
+        value = {**_state, "supported": supported()}
+    if WINDOWS and value['phase'] in ('idle','error') and not value['error']:
+        from .windows_update import last_result
+        result = last_result()
+        if result.get('phase') == 'error':
+            value['error'] = '上次 Windows 更新未完成：'+str(result.get('error',''))
+    return value
 
 
 def _set(**kw):
@@ -224,24 +230,9 @@ open "$APP"
     return True
 
 
-def _windows_install(setup, work):
-    exe = Path(sys.executable)
-    ps = work / "install.ps1"
-    def quote(value):
-        return str(value).replace("'", "''")
-    ps.write_text(f"""# Installed by the updater: wait for the app to quit, run the installer silently, relaunch.
-Start-Transcript -Append -Path '{quote(paths.DATA_DIR / 'update.log')}' | Out-Null
-Wait-Process -Id {os.getpid()} -Timeout 60 -ErrorAction SilentlyContinue
-if (Get-Process -Id {os.getpid()} -ErrorAction SilentlyContinue) {{ exit 1 }}
-$installer = Start-Process -Wait -PassThru -FilePath '{quote(setup)}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS'
-if ($installer.ExitCode -ne 0) {{ throw 'Installer failed' }}
-Start-Process -FilePath '{quote(exe)}'
-""", encoding="utf-8-sig")
-    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                      "-File", str(ps)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True,
-                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-    return True
+def _windows_install(setup, work, expected_sha):
+    from .windows_update import install
+    return install(setup, work, expected_sha)
 
 
 def start(on_ready_to_quit):
@@ -277,7 +268,7 @@ def start(on_ready_to_quit):
                 raise RuntimeError("这个版本没有提供校验文件，为了安全不自动安装，请到 Release 页面手动下载")
             _set(phase="installing")
             if MAC:ready=_mac_install(dest,work)
-            elif WINDOWS:ready=_windows_install(dest,work)
+            elif WINDOWS:ready=_windows_install(dest,work,expected)
             else:
                 from .linux_update import install,ManualInstall
                 try:ready=install(dest,work,expected,st['latest'])
