@@ -910,5 +910,6 @@
   "适应窗口": "Fit to window",
   "正在加载图片…": "Loading image…",
   "图片加载失败，请关闭后重试。": "Image failed to load. Close and try again.",
-  "图片": "Image"
+  "图片": "Image",
+  "双击修改标题，或按 Enter": "Double-click to edit the title, or press Enter"
 }

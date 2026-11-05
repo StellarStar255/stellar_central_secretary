@@ -89,3 +89,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .image-viewer-status{position:absolute;bottom:20px;background:#222b;padding:8px;pointer-events:none}.image-viewer-status:empty{display:none}
 #attachments img,#append-files img{cursor:zoom-in}
 @media(max-width:600px){#image-viewer{width:100vw;height:100dvh;border-radius:0}#image-viewer header{gap:4px;padding:6px}#image-viewer header button{min-width:30px;padding:4px}}
+
+#preview-title{cursor:text;border-radius:4px}#preview-title:focus-visible{outline:2px solid var(--green);outline-offset:4px}#preview-title-editor{margin:16px 0}#preview-title-input{box-sizing:border-box;width:100%;font-size:1.2rem;padding:8px}#preview-title-editor label{display:block;margin-bottom:8px}#preview-title-error:empty{display:none}
