@@ -7,6 +7,7 @@
  async function saveTitle(event){
   event.preventDefault();const draft=editing;if(!draft||draft.saving)return;
   const title=$('#preview-title-input').value.trim();if(!title){$('#preview-title-error').textContent=t('标题不能为空');$('#preview-title-input').focus();return}
+  if(cached&&title===cached.title){endEdit();return}
   draft.saving=true;for(const control of $('#preview-title-editor').querySelectorAll('input,button'))control.disabled=true;
   try{
    const result=await api('/api/items/'+draft.id+'/title',{title});

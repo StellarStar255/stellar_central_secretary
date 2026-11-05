@@ -25,7 +25,7 @@ def run(address,service=None,server=None,open_browser=True):
     icons=Path(__file__).parent/'static'/'icons';app.setWindowIcon(QIcon(str(icons/('app.png' if linux else 'app.ico'))))
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     state={'value':{},'desktop':{},'errors':0,'exit':False};stopped=threading.Event();owner=uuid.uuid4().hex
-    mode={'value':'desktop','handled':None,'started':False,'browser_opens':0,'panel':None}
+    mode={'value':'desktop','handled':None,'started':False,'browser_opens':0,'panel':None,'video_id':None,'video':None}
     worker=None
     if server is not None:
         if service is not None:
@@ -136,10 +136,26 @@ def run(address,service=None,server=None,open_browser=True):
         window.setWindowTitle(tr('Stellar Secretary · 知识秘书')+' — '+label['title'])
         metadata={'enabled':True,'supports_window':True,'platform':'linux' if linux else 'windows','dock':linux and window.isVisible(),'tray':bool(tray.isVisible() and tray.isSystemTrayAvailable()),'state':label['icon'],'mode':mode['value'],'language':language(),'window_visible':window.isVisible(),'window_minimized':window.isMinimized(),'window_loaded':loaded['value'],'window_id':int(window.winId()),'browser_opens':mode['browser_opens']}
         state['desktop']=metadata
+        metadata['video_player']=True
+        if mode['video'] is not None:metadata['video_status']=mode['video'].status()
         if service is not None:service.desktop=metadata
     def tick():
         if state['exit'] or worker is not None and not worker.is_alive():window.exiting=True;app.quit();return
         value=state['value']
+        video_request=value.get('video_request',{})
+        if video_request.get('id') and video_request['id']!=mode['video_id']:
+            mode['video_id']=video_request['id']
+            import re
+            if re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:additions/[a-f0-9]{32}/)?attachments/[a-f0-9]{32})?/preview',video_request.get('url','')):
+                if mode['video'] is None:
+                    from .desktop_video import VideoWindow
+                    def open_external(path):
+                        def launch():
+                            try:post(path+'/editor/open',{})
+                            except Exception as error:print('Video external open failed:',error,flush=True)
+                        threading.Thread(target=launch,daemon=True).start()
+                    mode['video']=VideoWindow(window,tr,open_external)
+                mode['video'].open_video(address+video_request['url'],video_request.get('name',tr('视频播放器')))
         if value and not mode['started']:
             mode['started']=True
             if open_browser:request_mode(value['settings'].get('interface_mode','desktop'))
@@ -162,6 +178,7 @@ def run(address,service=None,server=None,open_browser=True):
     try:app.exec()
     finally:
         print('Desktop shutdown: disposing window',flush=True)
+        if mode['video'] is not None:mode['video'].close()
         stopped.set();timer.stop();tray.hide();window.exiting=True;window.close();window.deleteLater()
         QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
         print('Desktop shutdown: disposing browser profile',flush=True)

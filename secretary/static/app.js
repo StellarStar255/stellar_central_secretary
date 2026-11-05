@@ -235,6 +235,16 @@ $('#kind-filter').onchange=$('#category-filter').onchange=()=>renderLibrary().ca
 $('#new-chat').onclick=newChat;
 $('#sidebar-toggle').onclick=()=>{if(window.innerWidth<=700)document.body.classList.toggle('mobile-sidebar');else{document.body.classList.toggle('sidebar-hidden');$('#workspace').classList.toggle('sidebar-hidden')}};
 $('#chat-scroll').onclick=()=>document.body.classList.remove('mobile-sidebar');
+// Save title drafts on a blank-area click; form buttons retain their explicit actions.
+document.addEventListener('compositionstart',event=>{if(event.target.matches('#rename-title,#preview-title-input'))event.target.dataset.composing='true'});
+document.addEventListener('compositionend',event=>{if(event.target.matches('#rename-title,#preview-title-input'))delete event.target.dataset.composing});
+document.addEventListener('pointerdown',event=>{
+ if(event.button!==0||event.target.closest('button,a,input,textarea,select,summary,label,[contenteditable]'))return;
+ for(const selector of ['#title-editor','#preview-title-editor']){
+  const form=$(selector),input=form?.querySelector('input');
+  if(form&&!form.hidden&&form.closest('dialog')?.open&&!form.contains(event.target)&&input&&!input.disabled&&!input.dataset.composing)form.requestSubmit();
+ }
+},true);
 // The backdrop targets the dialog itself; its padding and scrollbar do too.
 document.querySelectorAll('dialog').forEach(dialog=>{
  let startedOutside=false;
@@ -435,7 +445,14 @@ async function detail(id,recordView=false){const item=await api('/api/items/'+id
  $('#edit-title').onclick=()=>{$('#rename-title').value=item.title;$('#title-editor').hidden=false;$('#edit-title').hidden=true;$('#edit-content').disabled=true;$('#rename-title').focus();$('#rename-title').select()};
  $('#cancel-title').onclick=cancelTitle;
  $('#rename-title').onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelTitle()}};
- $('#title-editor').onsubmit=event=>{event.preventDefault();const title=$('#rename-title').value.trim();if(!title){toast(t('标题不能为空'));return}busy($('#save-title'),async()=>{await api('/api/items/'+id+'/title',{title});await detail(id);await refresh();toast(t('标题已保存'))})};
+ const titleForm=$('#title-editor'),titleInput=$('#rename-title');let titleSaving=false;
+ titleForm.onsubmit=async event=>{
+  event.preventDefault();if(titleSaving)return;const title=titleInput.value.trim();if(!title){toast(t('标题不能为空'));return}
+  if(title===item.title){cancelTitle();return}
+  titleSaving=true;for(const control of titleForm.querySelectorAll('input,button'))control.disabled=true;
+  try{await api('/api/items/'+id+'/title',{title});if(titleForm.isConnected&&selectedId===id&&$('#detail-dialog').open)await detail(id);await refresh();toast(t('标题已保存'))}
+  catch(error){toast(error.message)}finally{titleSaving=false;for(const control of titleForm.querySelectorAll('input,button'))control.disabled=false}
+ };
  if($('#open-pdf-default'))$('#open-pdf-default').onclick=()=>busy($('#open-pdf-default'),async()=>{await api('/api/items/'+id+'/open-file',{});toast(t('已交给系统默认 PDF 程序打开'))});
  if($('#full-pdf-summary'))$('#full-pdf-summary').onclick=()=>busy($('#full-pdf-summary'),async()=>{await api('/api/items/'+id,{full_pdf:true});toast(t('已加入全文整理队列，长文件可能需要较长时间'));await refresh()});
  if($('#reparse-file'))$('#reparse-file').onclick=()=>busy($('#reparse-file'),async()=>{const data=await api('/api/items/'+id+'/reextract',{});await detail(id);await refresh();toast(data.parsed?t('原文件已重新解析，将按当前设置生成摘要'):t('未取得正文，请查看详情中的原因'))});
@@ -552,7 +569,7 @@ $('#backup-input').onchange=async()=>{
 
 async function pollArchiveUpdates(){try{if(!document.hidden)await refresh()}catch{}finally{setTimeout(pollArchiveUpdates,!document.hidden&&activeWork?1000:10000)}}
 
-globalThis.StellarBundles?.bind({api,toast,onSaved:async id=>{await refresh();if(selectedId===id&&$('#detail-dialog').open)await detail(id)}});
+globalThis.StellarBundles?.bind({api,toast,nativeVideo:()=>latestStatus?.desktop?.video_player===true,onSaved:async id=>{await refresh();if(selectedId===id&&$('#detail-dialog').open)await detail(id)}});
 
 globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});
 
