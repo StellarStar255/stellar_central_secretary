@@ -56,6 +56,7 @@ jobs:
           python scripts/check_local_paths_ui.py
           python scripts/check_notes.py
           python scripts/check_web_capture.py
+          python scripts/check_rich_documents.py
           python scripts/check_company_ai_ui.py
           python scripts/check_bundle_ui.py
           python scripts/check_additions_ui.py
