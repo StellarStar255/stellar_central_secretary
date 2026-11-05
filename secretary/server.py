@@ -83,7 +83,7 @@ class Service:
         self.capture_futures = {};self.capture_records={}
         self.stopping = False
         self.login_confirmations = {}
-        self.busy = set();self.summary_futures={}; self.lock = threading.Lock()
+        self.busy = set();self.trash_cancellations=set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
@@ -144,10 +144,30 @@ class Service:
             finally:temporary.unlink(missing_ok=True)
         return {'ok':True,'history':self.chat_history(),'warning':warning}
 
-    def trash_item(self,item_id,expected_updated):
-        with self.lock:
-            if item_id in self.busy or item_id in self.captures:raise ValueError('这份资料正在处理，请先停止任务后再移到回收站。')
-            return self.archive.trash_item(item_id,expected_updated)
+    def trash_item(self,item_id,expected_updated=None):
+        event=None
+        with self.lock,self.archive.lock:
+            item=self.archive.get(item_id,include_trashed=True)
+            if item['trashed_at']:return {'ok':True}
+            active=item_id in self.busy or item_id in self.captures
+            if active:self.trash_cancellations.add(item_id)
+            event=self.summary_jobs.cancel(item_id) if item_id in self.busy else None
+            stop=self.captures.get(item_id)
+            if stop:stop.set()
+            # Reversible deletion keeps the latest row, including any result
+            # committed while the confirmation dialog was open.
+            if active:self.archive.update(item_id,state='ready' if item['summary'] else 'saved',error='移入回收站时已自动取消后台任务，原文和已有摘要保留。')
+            result=self.archive.trash_item(item_id,self.archive.get(item_id)['updated'])
+            future=self.summary_futures.get(item_id)
+            if future and future.cancel():
+                self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+            future=self.capture_futures.get(item_id)
+            if future and future.cancel():
+                self.captures.pop(item_id,None);self.capture_futures.pop(item_id,None);self.login_confirmations.pop(item_id,None)
+                if item_id in self.capture_records:self.capture_records[item_id].update(ended=time.monotonic(),stage='stopped')
+            if item_id not in self.busy and item_id not in self.captures:self.trash_cancellations.discard(item_id)
+        if event:ai.cancel_job(event)
+        return result
     def switch_interface(self,mode,panel=None):
         if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口')
         if panel not in (None,'settings','updates'):raise ValueError('无效的界面入口')
@@ -262,10 +282,13 @@ class Service:
         delegated=False;approval_waiting=False
         try:
             self.summary_jobs.stage(item_id,'reading_sources')
-            item=self.archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
-            previous=batch.get('links',[]) if batch else item['group_links']
-            if batch:additions.update(self.archive,item_id,batch_id,state='processing',error='正在读取本组链接…')
-            else:self.archive.update(item_id,state='processing',error='正在读取本组链接…')
+            with self.lock:
+                if item_id in self.trash_cancellations:return
+                self.summary_jobs.check(item_id)
+                item=self.archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
+                previous=batch.get('links',[]) if batch else item['group_links']
+                if batch:additions.update(self.archive,item_id,batch_id,state='processing',error='正在读取本组链接…')
+                else:self.archive.update(item_id,state='processing',error='正在读取本组链接…')
             values=links.read(previous,lambda url:('', '本地网页请手动打开后将正文追加到本档案。') if web_reader.is_loopback_url(url) else fetch_page(url),lambda:self.stopping or self.summary_jobs.cancelled(item_id))
             self.summary_jobs.check(item_id)
             if any('公司网络或 VPN' in value['warning'] or company_ai.internal_url(value['url']) for value in values):company_ai.mark(self.archive,item_id)
@@ -293,7 +316,7 @@ class Service:
         finally:
             if not delegated:
                 if self.summary_jobs.snapshot(item_id) and self.summary_jobs.snapshot(item_id)['active']:self.summary_jobs.finish(item_id,'saved')
-                with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+                with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
 
     def retry_addition(self,item_id,batch_id):
         self.model_backend(item_ids=[item_id])
@@ -318,13 +341,19 @@ class Service:
         return result
 
     def process_addition(self,item_id,batch_id):
-        batch=additions.find(self.archive.get(item_id),batch_id)
+        try:batch=additions.find(self.archive.get(item_id),batch_id)
+        except KeyError:
+            with self.lock:self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
+            return
         if batch and any(value['state']=='pending' for value in batch.get('links',[])):return self.process_group_links(item_id,batch_id,True)
         try:
             with self.summary_jobs.session(item_id,len(batch.get("text", "")) if batch else 0):
                 if self.stopping:return
-                item=self.archive.get(item_id);batch=additions.find(item,batch_id)
-                additions.update(self.archive,item_id,batch_id,state='processing',error='')
+                with self.lock:
+                    if item_id in self.trash_cancellations:return
+                    self.summary_jobs.check(item_id)
+                    item=self.archive.get(item_id);batch=additions.find(item,batch_id)
+                    additions.update(self.archive,item_id,batch_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id).read_bytes(),batch['text'],batch.get('links',[]))
                 new_source=source;context_limit=1000 if not images and len(source)<=4000 else 8000
                 source='本次仅总结新追加资料，不重述旧摘要；旧摘要仅供理解背景。\n旧摘要：\n'+item['summary'][:context_limit]+'\n\n本次新增：\n'+source
@@ -335,7 +364,7 @@ class Service:
         except Exception as error:
             self.summary_failed(item_id,error,batch_id)
         finally:
-            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
     def queue(self, item_id, force=False, full_pdf=False):
         item = self.archive.get(item_id)
         if self.stopping:return
@@ -347,19 +376,28 @@ class Service:
                 self.archive.update(item_id,state='ready' if item['summary'] else 'saved',error=company_ai.PENDING)
                 return
         with self.lock:
-            if item_id in self.busy: return
+            if item_id in self.busy or item_id in self.captures or item_id in self.trash_cancellations:return
+            try:item=self.archive.get(item_id)
+            except KeyError:return
             self.busy.add(item_id)
             short=self.short_summary(item,full_pdf)
             self.summary_jobs.enqueue(item_id,len(item["text"]),short)
             self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf)
     def process(self, item_id, full_pdf=False):
-        if any(value['state']=='pending' for value in self.archive.get(item_id)['group_links']):return self.process_group_links(item_id,None,True)
+        try:item=self.archive.get(item_id)
+        except KeyError:
+            with self.lock:self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
+            return
+        if any(value['state']=='pending' for value in item['group_links']):return self.process_group_links(item_id,None,True)
         try:
             item=self.archive.get(item_id)
             with self.summary_jobs.session(item_id,len(item["text"]),self.short_summary(item,full_pdf)):
                 if self.stopping:return
-                item = self.archive.get(item_id)
-                self.archive.update(item_id, state='processing', error='')
+                with self.lock:
+                    if item_id in self.trash_cancellations:return
+                    self.summary_jobs.check(item_id)
+                    item = self.archive.get(item_id)
+                    self.archive.update(item_id, state='processing', error='')
                 if bundles.is_bundle(item['filename']):
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
@@ -369,16 +407,18 @@ class Service:
                     self.archive.update(item_id, **fields);self.summary_jobs.commit(item_id)
         except Exception as exc:self.summary_failed(item_id,exc)
         finally:
-            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
     def summary_failed(self,item_id,error,batch_id=None):
-        stopped=self.summary_jobs.cancelled(item_id)
-        message='已停止整理，可重新整理；原文和已有摘要保持不变。' if stopped else str(error)[:1600]
-        if batch_id:
-            batch=additions.find(self.archive.get(item_id),batch_id)
-            additions.update(self.archive,item_id,batch_id,state=('ready' if batch and batch['summary'] else 'saved') if stopped else 'error',error=message)
-        else:
-            item=self.archive.get(item_id)
-            self.archive.update(item_id,state=('ready' if item['summary'] else 'saved') if stopped else 'error',error=message)
+        with self.archive.lock:
+            if item_id in self.trash_cancellations:return
+            try:item=self.archive.get(item_id)
+            except KeyError:return
+            stopped=self.summary_jobs.cancelled(item_id)
+            message='已停止整理，可重新整理；原文和已有摘要保持不变。' if stopped else str(error)[:1600]
+            if batch_id:
+                batch=additions.find(item,batch_id)
+                additions.update(self.archive,item_id,batch_id,state=('ready' if batch and batch['summary'] else 'saved') if stopped else 'error',error=message)
+            else:self.archive.update(item_id,state=('ready' if item['summary'] else 'saved') if stopped else 'error',error=message)
     def cancel_summary(self,item_id):
         with self.lock:
             self.archive.get(item_id)
@@ -388,7 +428,7 @@ class Service:
             if future and future.cancel():
                 target=self.summary_jobs.snapshot(item_id)
                 self.summary_failed(item_id,ai.ModelCancelledError(),target.get('batch_id'))
-                self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+                self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
         ai.cancel_job(event)
         return {'stopped':True}
     def retry_task(self,item_id):
@@ -423,6 +463,8 @@ class Service:
         try: browser_reader.conversation_url(item['url'])
         except ValueError: web_reader.validate_browser_url(item['url'])
         with self.lock:
+            if item_id in self.trash_cancellations:return
+            item=self.archive.get(item_id)
             company_ai.mark(self.archive,item_id)
             if self.stopping:raise ValueError('程序正在退出，请稍后重新启动。')
             if item_id in self.captures or item_id in self.busy: return
@@ -440,7 +482,8 @@ class Service:
             if stop.is_set():raise browser_reader.CaptureCancelled('已停止读取，已有资料保持不变。')
             item = self.archive.get(item_id)
             def notify(state, message):
-                if not stop.is_set():self.archive.update(item_id, state=state, error=message)
+                with self.lock:
+                    if not stop.is_set() and item_id not in self.trash_cancellations:self.archive.update(item_id, state=state, error=message)
             notify('opening_browser','正在打开专用浏览器；登录有效时会自动读取。')
             settings = self.archive.settings()
             try: browser_reader.conversation_url(item['url'])
@@ -455,32 +498,38 @@ class Service:
             if stop.is_set(): raise browser_reader.CaptureCancelled('已停止读取。')
             if len(result['text']) > 2_000_000: raise ValueError('会话正文超过 200 万字符，请按片段导入。')
             partial = result.get('partial',False)
-            if partial and item['text'] and not item['text'].startswith(browser_reader.PARTIAL_PREFIX):
-                # Keep an existing full archive and give the bounded view its own record.
-                digest=hashlib.sha256(result['text'].encode()).hexdigest()[:20]
-                url=item['url'].split('#')[0]+'#stellar-slice-'+digest
-                summary_id,_=self.archive.add(result['title']+'（部分对话）',result['text'],url=url)
-                self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='最近片段已另存为一份「部分对话」资料，可在最近归档中查看；已有正文保持不变。')
-            else:
-                self.archive.replace_capture(item_id,result['title'],result['text'],partial=partial)
-            if partial:
-                tags=self.archive.get(summary_id)['tags']
-                if '部分对话' not in tags:self.archive.update(summary_id,tags=tags+['部分对话'])
-            if self.archive.get(item_id)['state']=='reading':
-                self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='')
-            company_ai.mark(self.archive,summary_id)
-            completed = True
+            with self.lock:
+                if stop.is_set() or item_id in self.trash_cancellations:raise browser_reader.CaptureCancelled('已停止读取。')
+                self.archive.get(item_id)
+                if partial and item['text'] and not item['text'].startswith(browser_reader.PARTIAL_PREFIX):
+                    # Keep an existing full archive and give the bounded view its own record.
+                    digest=hashlib.sha256(result['text'].encode()).hexdigest()[:20]
+                    url=item['url'].split('#')[0]+'#stellar-slice-'+digest
+                    summary_id,_=self.archive.add(result['title']+'（部分对话）',result['text'],url=url)
+                    self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='最近片段已另存为一份「部分对话」资料，可在最近归档中查看；已有正文保持不变。')
+                else:
+                    self.archive.replace_capture(item_id,result['title'],result['text'],partial=partial)
+                if partial:
+                    tags=self.archive.get(summary_id)['tags']
+                    if '部分对话' not in tags:self.archive.update(summary_id,tags=tags+['部分对话'])
+                if self.archive.get(item_id)['state']=='reading':
+                    self.archive.update(item_id,state='ready' if item['summary'] else 'pending',error='')
+                company_ai.mark(self.archive,summary_id)
+                completed = True
         except Exception as exc:
-            # A failed refresh must not destroy a previously archived summary or text.
-            item = self.archive.get(item_id)
-            self.archive.update(item_id, state='ready' if item['summary'] else ('error' if item['text'] else 'needs_content'), error=str(exc)[:1600])
+            completed=False
+            with self.archive.lock:
+                if item_id not in self.trash_cancellations:
+                    try:item=self.archive.get(item_id)
+                    except KeyError:pass
+                    else:self.archive.update(item_id, state='ready' if item['summary'] else ('error' if item['text'] else 'needs_content'), error=str(exc)[:1600])
         finally:
             with self.lock:
                 self.capture_records.setdefault(item_id,{'started':time.monotonic(),'force_summary':force_summary}).update(ended=time.monotonic(),stage='stopped' if stop.is_set() else 'done' if completed else 'error')
                 self.captures.pop(item_id, None)
                 self.login_confirmations.pop(item_id, None)
-                self.capture_futures.pop(item_id,None)
-        if completed: self.queue(summary_id, force=force_summary)
+                self.capture_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
+        if completed and not stop.is_set():self.queue(summary_id, force=force_summary)
         if self.archive.settings()['capture_close_tabs']:
             try:self.close_capture_browsers(only_empty=True)
             except Exception:pass
@@ -576,7 +625,7 @@ class Service:
                 with self.summary_jobs.lock:self.summary_jobs.jobs.pop(item_id,None)
             return result
         finally:
-            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
 
     def delete_attachment(self,item_id,batch_id,key,body):
         with self.lock:
@@ -587,7 +636,7 @@ class Service:
             with self.summary_jobs.lock:self.summary_jobs.jobs.pop(item_id,None)
             return result
         finally:
-            with self.lock:self.busy.discard(item_id)
+            with self.lock:self.busy.discard(item_id);self.trash_cancellations.discard(item_id)
 
     def reextract(self, item_id):
         item=self.archive.get(item_id)
@@ -609,7 +658,7 @@ class Service:
             self.archive.update(item_id,state='ready' if item['text'] else 'needs_content',error='重新解析失败，原文件与已有正文已保留：'+str(exc)[:500])
             raise
         finally:
-            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
         if parsed:self.queue(item_id)
         return {'ok':True,'parsed':parsed,'item':self.archive.get(item_id)}
 
@@ -715,7 +764,8 @@ class Service:
         if not bundles.is_bundle(item['filename']):raise ValueError('这份资料不是组合资料')
         self.model_backend(item_ids=[item_id])
         with self.lock:
-            if item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后重试')
+            if item_id in self.busy or item_id in self.captures or item_id in self.trash_cancellations:raise ValueError('资料正在处理，请稍后重试')
+            item=self.archive.get(item_id)
             self.busy.add(item_id);self.questions+=1
         try:
             with self.summary_jobs.session(item_id,len(item["text"]),short=True):
@@ -729,7 +779,7 @@ class Service:
         except Exception as error:
             self.summary_failed(item_id,error);raise
         finally:
-            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.questions-=1
+            with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id);self.questions-=1
 
     def ask(self, question,item_ids=None):
         if not question.strip(): raise ValueError('请输入问题')

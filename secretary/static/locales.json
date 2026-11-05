@@ -946,5 +946,7 @@
   "浏览器扩展安装目录无效。": "Invalid browser extension installation directory.",
   "浏览器扩展文件无效。": "Invalid browser extension files.",
   "浏览器扩展文件过大。": "Browser extension files are too large.",
-  "浏览器扩展清单无效。": "Invalid browser extension manifest."
+  "浏览器扩展清单无效。": "Invalid browser extension manifest.",
+  "相关后台任务会自动取消，无需先停止总结或刷新页面。": "Related background tasks are canceled automatically. You do not need to stop summarizing or refresh first.",
+  "移入回收站时已自动取消后台任务，原文和已有摘要保留。": "Background tasks were canceled when this item moved to the recycle bin. Source text and existing summaries were kept."
 }
