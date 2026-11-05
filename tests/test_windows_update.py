@@ -65,7 +65,7 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
             with patch.object(paths,'DATA_DIR',root), patch.object(windows_update.sys,'executable',str(root/'安装目录'/'Stellar Secretary.exe')), \
                  patch.object(windows_update.sys,'argv',['app','--port','9988','--desktop','--no-browser']), \
                  patch.object(windows_update.ctypes,'windll',Mock(kernel32=kernel),create=True), \
-                 patch.dict(os.environ,{'SystemRoot':str(root/'Windows')}), \
+                 patch.dict(os.environ,{'SystemRoot':str(root/'Windows'),'PSMODULEPATH':'incompatible-powershell-7-modules'}), \
                  patch.object(windows_update.subprocess,'CREATE_NO_WINDOW',0x08000000,create=True), \
                  patch.object(windows_update.subprocess,'CREATE_NEW_PROCESS_GROUP',512,create=True), \
                  patch.object(windows_update.subprocess,'Popen',side_effect=spawn) as popen:
@@ -75,6 +75,7 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
             self.assertIn('--port 9988',config['arguments']);self.assertIn('--data-dir',config['arguments'])
             self.assertNotIn('--desktop',config['arguments']);self.assertIn('--no-browser',config['arguments'])
             self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'],'1')
+            self.assertFalse(any(key.upper()=='PSMODULEPATH' for key in popen.call_args.kwargs['env']))
             self.assertEqual(popen.call_args.kwargs['cwd'],str(work))
             self.assertTrue((work/'proceed').is_file())
             self.assertEqual(kernel.SetDllDirectoryW.call_count,2)
