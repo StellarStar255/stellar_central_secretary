@@ -104,6 +104,15 @@ def main():
                 reopened=subprocess.Popen(command+common,env=env);assert reopened.wait(timeout=20)==0
                 wait(lambda:not request('/api/status')['desktop']['window_minimized'])
                 assert request('/api/status')['desktop']['window_id']==window and request('/api/items')[0]['id']==item
+                clip=(Path(__file__).resolve().parent.parent/'tests/fixtures/video.mp4').read_bytes()
+                video_id,_=archive.add('Synthetic H.264 native player',filename='clip.mp4',data=clip)
+                assert request('/api/items/'+video_id+'/video-player',{})['native']
+                video_state=wait(lambda:(lambda value:value if value.get('visible') and value.get('duration',0)>0 and value.get('position',0)>100 else None)(request('/api/status')['desktop'].get('video_status',{})))
+                assert not video_state['error'],video_state
+                subprocess.run(['wmctrl','-ic',hex(video_state['window_id'])],check=True)
+                wait(lambda:not request('/api/status')['desktop'].get('video_status',{}).get('visible',True))
+                assert not request('/api/status')['desktop']['video_status']['playing']
+                print('PASS: native in-app H.264 video decodes and plays; closing player stops playback')
                 png=rpc('Page.captureScreenshot',{'format':'png'})['data'];(folder/('linux-desktop-source.png' if args.source else 'linux-desktop-frozen.png')).write_bytes(base64.b64decode(png))
                 tray_action(6);assert proc.wait(timeout=20)==0
                 channel.close();channel=None

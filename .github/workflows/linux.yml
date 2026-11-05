@@ -37,6 +37,7 @@ jobs:
           python scripts/check_additions_ui.py
           python scripts/check_attachment_overview_ui.py
           python scripts/check_extension_install_ui.py
+          python scripts/check_video_title_ui.py
       - name: Verified Debian installer helper
         run: python packaging/check_linux_install.py
       - name: Native Linux source window and tray
