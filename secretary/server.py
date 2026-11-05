@@ -24,7 +24,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails
+from . import __version__, local_paths, company_ai, thumbnails, attachment_delete
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -578,6 +578,17 @@ class Service:
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None)
 
+    def delete_attachment(self,item_id,batch_id,key,body):
+        with self.lock:
+            if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请等待完成后再删除附件。')
+            self.busy.add(item_id)
+        try:
+            result=attachment_delete.remove(self.archive,item_id,batch_id or '',key or '',body)
+            with self.summary_jobs.lock:self.summary_jobs.jobs.pop(item_id,None)
+            return result
+        finally:
+            with self.lock:self.busy.discard(item_id)
+
     def reextract(self, item_id):
         item=self.archive.get(item_id)
         if not item['filename']:raise ValueError('这条资料没有可重新解析的原文件')
@@ -792,6 +803,7 @@ def handler(service):
                     item_id,batch_id,key=thumbnail_match.groups()
                     item=service.archive.get(item_id)
                     if batch_id and additions.find(item,batch_id) is None:raise KeyError('追加资料不存在')
+                    if not key and (not item['filename'] or bundles.is_bundle(item['filename'])):raise KeyError('附件不存在')
                     data=(service.archive.root/'files'/(batch_id or item_id)).read_bytes()
                     if key:
                         if not batch_id and not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
@@ -837,7 +849,7 @@ def handler(service):
                 if preview_match:
                     from .rich_text import searchable_text
                     item=service.material_attachments(service.archive.get(preview_match[1]));text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments']})
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments']})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
@@ -939,6 +951,8 @@ def handler(service):
                         service.archive.get(company_mark[1]);company_ai.mark(service.archive,company_mark[1]);return self.send(200,{'ok':True})
                     local_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/open-local-path',path)
                     if local_open:return self.send(200,local_paths.open_location(service.archive,local_open[1],body.get('path')))
+                    attachment_remove=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/delete-attachment',path)
+                    if attachment_remove:return self.send(200,service.delete_attachment(*attachment_remove.groups(),body))
                     editor=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/editor/(open|reveal|save)',path)
                     if editor:return self.send(200,service.edit_file(editor[1],editor[4],editor[2],editor[3]))
                     group_read=re.fullmatch(r'/api/items/([a-f0-9]{32})/(?:group-links|additions/([a-f0-9]{32})/links)',path)

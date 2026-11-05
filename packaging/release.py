@@ -52,6 +52,7 @@ class Release:
         require(all(any(platform in name for name in names) for platform in ('macos','windows','linux','release')),'Missing successful platform/release job')
         return ci
     def build(self):
+        for name in ('signed-mac.json','expected.json'):(self.state/name).unlink(missing_ok=True)
         run(sys.executable,'-m','PyInstaller','packaging/stellar-secretary.spec','--noconfirm','--distpath',self.app.parent,'--workpath',ROOT/'build'/('release-'+self.tag),env={**os.environ,'PYINSTALLER_CONFIG_DIR':str(ROOT/'build/pyinstaller-cache')})
     def smoke(self):
         run(sys.executable,'packaging/smoke.py',env={**os.environ,'SECRETARY_SMOKE_BINARY':str(self.app/'Contents/MacOS/Stellar Secretary')})
@@ -74,7 +75,7 @@ class Release:
                 files=[Path('Contents/MacOS/Stellar Secretary')]+[p.relative_to(self.app) for p in (self.app/'Contents/Resources/secretary/static').rglob('*') if p.is_file()]
                 for name in files:require(digest(app/name)==digest(self.app/name),'DMG differs from tested app: '+str(name))
             finally:run('hdiutil','detach',mount,stdout=subprocess.DEVNULL)
-        self.save('signed-mac.json',{'name':self.dmg.name,'size':self.dmg.stat().st_size,'digest':digest(self.dmg),'team_id':args.team_id})
+        self.save('signed-mac.json',{'name':self.dmg.name,'size':self.dmg.stat().st_size,'digest':digest(self.dmg),'team_id':args.team_id,'app_digest':digest(self.app/'Contents/MacOS/Stellar Secretary')})
         print('PASS: notarized DMG, expected signature, version, executable and all UI assets')
     def prepare(self):
         self.require_ci();release=self.view();require(release['isDraft'],'Only prepare an unpublished draft')
@@ -84,7 +85,7 @@ class Release:
         require(set(entries)==names and set(assets)==names|{'SHA256SUMS.txt'},'Unexpected CI installer set')
         require(digest(manifest)==assets['SHA256SUMS.txt']['digest'],'CI manifest digest mismatch')
         for name,sha in entries.items():require(assets[name]['state']=='uploaded' and assets[name]['digest']=='sha256:'+sha,'CI asset digest mismatch: '+name)
-        mac=self.load('signed-mac.json');require(mac['name']==self.dmg.name and mac['digest']==digest(self.dmg) and mac['size']==self.dmg.stat().st_size,'Signed Mac package changed')
+        mac=self.load('signed-mac.json');require(mac['app_digest']==digest(self.app/'Contents/MacOS/Stellar Secretary'),'Built app changed after verification');require(mac['name']==self.dmg.name and mac['digest']==digest(self.dmg) and mac['size']==self.dmg.stat().st_size,'Signed Mac package changed')
         entries[mac['name']]=mac['digest'].split(':')[1]
         manifest.write_text(''.join(sha+'  '+name+'\n' for name,sha in sorted(entries.items())))
         expected={name:{key:a[key] for key in ('size','digest')} for name,a in assets.items()}
@@ -104,7 +105,7 @@ class Release:
         self.save('published.json',release);print('PASS: published '+release['url'])
     def install(self,args):
         # This helper only upgrades the known running macOS installation.
-        mac=self.load('signed-mac.json');require(digest(self.dmg)==mac['digest'],'Verified DMG changed')
+        mac=self.load('signed-mac.json');require(digest(self.app/'Contents/MacOS/Stellar Secretary')==mac['app_digest'],'App differs from verified DMG');require(digest(self.dmg)==mac['digest'],'Verified DMG changed')
         run('codesign','--verify','--deep','--strict',self.app)
         signature=run('codesign','-dvv',self.app,capture_output=True,text=True)
         require('TeamIdentifier='+mac['team_id'] in signature.stderr,'App signing team changed')
