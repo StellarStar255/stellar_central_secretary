@@ -24,7 +24,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install
+from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -87,6 +87,7 @@ class Service:
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
+        self.video_request={}
         self.desktop_peer=None;self.desktop_heartbeat_at=0
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
@@ -205,7 +206,7 @@ class Service:
             if not isinstance(value,dict) or value.get('mode') not in ('desktop','browser') or value.get('state') not in ('ready','busy','error','starting'):raise ValueError('桌面状态无效')
             platform=value.get('platform','windows')
             if platform not in ('windows','linux'):raise ValueError('桌面状态无效')
-            fields={key:value.get(key,False) for key in ('tray','dock','window_visible','window_loaded','window_minimized')}
+            fields={key:value.get(key,False) for key in ('tray','dock','window_visible','window_loaded','window_minimized','video_player')}
             if any(type(flag) is not bool for flag in fields.values()):raise ValueError('桌面状态无效')
             for key in ('window_id','browser_opens'):
                 if type(value.get(key,0)) is not int or value.get(key,0)<0:raise ValueError('桌面状态无效')
@@ -747,10 +748,13 @@ class Service:
         for batch_id,files in [('',item.get('attachments',[]))]+[(batch['id'],batch.get('attachments',[])) for batch in item['additions']]:
             for file in files:
                 file['can_open']=attachment_editor.can_open(file['name']);file['editing']=attachment_editor.has_copy(self.archive,item_id,batch_id,file['id'])
+                if local_media.video_type(file['name']):
+                    file['media']=local_media.video_type(file['name'])
+                    file['warning']='视频原件已保存，可直接播放；暂未提取字幕或音轨正文。'
         catalog=[]
         base='/api/items/'+item_id
         if item['filename'] and not bundles.is_bundle(item['filename']):
-            catalog.append({'id':'original','name':item['filename'],'media':'image/'+Path(item['filename']).suffix[1:].lower() if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp') else 'application/octet-stream','path':base,'download_url':base+'/file','preview_url':base+'/preview','thumbnail_url':base+'/thumbnail','batch_id':'','can_open':item['can_open_file'],'editing':item['file_editing']})
+            catalog.append({'id':'original','name':item['filename'],'media':local_media.video_type(item['filename']) or ('image/'+Path(item['filename']).suffix[1:].lower() if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp') else 'application/octet-stream'),'path':base,'download_url':base+'/file','preview_url':base+'/preview','thumbnail_url':base+'/thumbnail','batch_id':'','can_open':item['can_open_file'],'editing':item['file_editing']})
         for batch_id,created,files in [('',item['created'],item.get('attachments',[]))]+[(batch['id'],batch['created'],batch.get('attachments',[])) for batch in item['additions']]:
             for file in files:
                 path=base+('/additions/'+batch_id if batch_id else '')+'/attachments/'+file['id']
@@ -839,11 +843,35 @@ def handler(service):
         def trusted(self):
             host = self.headers.get('Host', '')
             return host in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
+        def video(self,source,name):
+            size=len(source) if isinstance(source,bytes) else source.stat().st_size
+            bounds=self.headers.get('Range');start,end=0,size-1
+            if bounds:
+                try:start,end=local_media.byte_range(bounds,size)
+                except ValueError:return self.send(416,b'',extra={'Content-Range':f'bytes */{size}','Accept-Ranges':'bytes'})
+            self.send_response(206 if bounds else 200)
+            self.send_header('Content-Type',local_media.video_type(name))
+            self.send_header('Content-Length',str(max(0,end-start+1)))
+            self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','no-store')
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Content-Disposition',"inline; filename*=UTF-8''"+urllib.parse.quote(name,safe=''))
+            if bounds:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+            self.end_headers()
+            try:
+                if isinstance(source,bytes):self.wfile.write(memoryview(source)[start:end+1])
+                else:
+                    with source.open('rb') as stream:
+                        stream.seek(start);remaining=end-start+1
+                        while remaining>0:
+                            chunk=stream.read(min(65536,remaining))
+                            if not chunk:break
+                            self.wfile.write(chunk);remaining-=len(chunk)
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass # seeking/closing cancels the previous request
         def do_GET(self):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 batch_download=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions/([a-f0-9]{32})/file',path)
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
@@ -873,6 +901,7 @@ def handler(service):
                     file,data=bundles.attachment((service.archive.root/'files'/(batch_id or item['id'])).read_bytes(),bundle_match[3])
                     media='application/octet-stream';disposition='attachment'
                     if bundle_match[4]:
+                        if local_media.video_type(file['name']):return self.video(data,file['name'])
                         if file['media'] in bundles.IMAGE_MEDIA.values():media=file['media'];disposition='inline'
                         elif file['name'].lower().endswith('.pdf') and b'%PDF-' in data[:1024]:media='application/pdf';disposition='inline'
                     return self.send(200,data,media,{'Content-Disposition':disposition+"; filename*=UTF-8''"+urllib.parse.quote(file['name'],safe='')})
@@ -904,6 +933,7 @@ def handler(service):
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
+                        if local_media.video_type(item['filename']):return self.video(service.archive.root/'files'/item['id'],item['filename'])
                         if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp'):
                             data=(service.archive.root/'files'/item['id']).read_bytes()
                             try:
@@ -922,7 +952,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/image-viewer.js':'image-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -958,6 +988,15 @@ def handler(service):
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
                     return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
+                player_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/video-player',path)
+                if player_match:
+                    item_id,batch_id,key=player_match.groups()
+                    item=service.material_attachments(service.archive.get(item_id))
+                    file=next((f for f in item['all_attachments'] if f['id']==(key or 'original') and f['batch_id']==(batch_id or '')),None)
+                    if not file or not local_media.video_type(file['name']):raise ValueError('请选择视频附件')
+                    native=bool(service.desktop_status().get('video_player'))
+                    if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name']}
+                    return self.send(200,{'native':native})
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/install':
                     with service.lock:

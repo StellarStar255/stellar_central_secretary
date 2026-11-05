@@ -3,6 +3,7 @@ import base64,io,json,re,uuid,zipfile
 from pathlib import Path
 from PIL import Image,ImageOps
 from . import links
+from .media import video_type
 
 MAX_BYTES=50*1024*1024
 IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'image/webp'}
@@ -45,6 +46,8 @@ def create(text,files,urls=None):
         else:
             try:source,warning=extract(name,data)
             except Exception:warning='附件文字解析失败，原件已完整保存。'
+        if video_type(name):
+            media=video_type(name);warning='视频原件已保存，可直接播放；暂未提取字幕或音轨正文。'
         if len(source)>remaining:source=source[:remaining];warning+=' 正文超过组合资料索引上限，仅保存可索引的前部文字；原件完整保留。'
         remaining-=len(source)
         manifest['files'].append({'id':key,'name':name,'path':f'files/{len(manifest["files"])+1:02d}-{name}','media':media,'size':len(data),'text':source,'warning':warning})

@@ -19,3 +19,5 @@ Qt WebEngine source. The Stellar Secretary application code remains under its
 repository's MIT license.
 
 PDF attachment thumbnails use pypdfium2 and its PDFium shared library. Their license and third-party notice files are included in the bundled pypdfium2 distribution metadata. Upstream: https://github.com/pypdfium2-team/pypdfium2
+
+In-app Windows and Linux video playback uses dynamically linked Qt Multimedia and its FFmpeg media backend. Applicable component licenses and notices ship with Qt. Sources and build instructions: https://code.qt.io/cgit/qt/qtmultimedia.git/ and https://ffmpeg.org/download.html .

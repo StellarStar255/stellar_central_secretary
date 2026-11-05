@@ -85,6 +85,15 @@ def main():
                     status=wait(lambda:(lambda value:value if value['desktop'].get('window_visible') and not value['desktop'].get('window_minimized') else None)(request('/api/status')))
                     assert status['desktop']['window_id']==window_id
                     assert request('/api/items')[0]['id']==item_id
+                    clip=(Path(__file__).resolve().parent.parent/'tests/fixtures/video.mp4').read_bytes()
+                    video_id,_=archive.add('Synthetic H.264 native player',filename='clip.mp4',data=clip)
+                    assert request('/api/items/'+video_id+'/video-player',{})['native']
+                    video_state=wait(lambda:(lambda value:value if value.get('visible') and value.get('duration',0)>0 and value.get('position',0)>100 else None)(request('/api/status')['desktop'].get('video_status',{})))
+                    assert not video_state['error'],video_state
+                    assert close(video_state['window_id'],0x0010,0,0)
+                    wait(lambda:not request('/api/status')['desktop'].get('video_status',{}).get('visible',True))
+                    assert not request('/api/status')['desktop']['video_status']['playing']
+                    print('PASS: native in-app H.264 video decodes and plays; closing player stops playback')
                     request('/api/shutdown',{});assert proc.wait(timeout=20)==0
                     print('PASS: real Windows desktop, Chromium UI, tray/taskbar lifecycle, settings switches desktop→browser→desktop, shared chat/library, close/relaunch reuses window, persistence and clean shutdown')
                 finally:browser.close()

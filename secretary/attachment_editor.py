@@ -3,11 +3,12 @@ import base64,hashlib,io,json,os,re,secrets,sqlite3,subprocess,sys,zipfile
 from datetime import datetime,timezone
 from pathlib import Path
 from . import additions,bundles
+from .media import VIDEO_MEDIA
 
 OPEN_EXTENSIONS={'.pdf','.txt','.md','.csv','.tsv','.xlsx','.xls','.docx','.doc','.pptx','.ppt','.odt','.ods','.odp','.rtf','.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.json','.yaml','.yml','.log'}
 STALE='附件已修改，以下为修改前摘要；请重新整理后再使用。'
 WARNING='文件修改已保存，已有摘要可能过期；可手动重新整理。'
-def can_open(name):return Path(name).suffix.lower() in OPEN_EXTENSIONS
+def can_open(name):return Path(name).suffix.lower() in OPEN_EXTENSIONS or Path(name).suffix.lower() in VIDEO_MEDIA
 def digest(data):return hashlib.sha256(data).hexdigest()
 def atomic(path,data):
     temp=path.parent/(secrets.token_hex(16)+'.tmp')

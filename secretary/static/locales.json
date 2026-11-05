@@ -948,5 +948,12 @@
   "浏览器扩展文件过大。": "Browser extension files are too large.",
   "浏览器扩展清单无效。": "Invalid browser extension manifest.",
   "相关后台任务会自动取消，无需先停止总结或刷新页面。": "Related background tasks are canceled automatically. You do not need to stop summarizing or refresh first.",
-  "移入回收站时已自动取消后台任务，原文和已有摘要保留。": "Background tasks were canceled when this item moved to the recycle bin. Source text and existing summaries were kept."
+  "移入回收站时已自动取消后台任务，原文和已有摘要保留。": "Background tasks were canceled when this item moved to the recycle bin. Source text and existing summaries were kept.",
+  "视频播放器": "Video player",
+  "播放视频：": "Play video: ",
+  "当前播放器不支持此视频编码，或文件无法读取。可用默认程序打开，或下载原件。": "This player cannot decode the video, or the file is unreadable. Open it in the default app or download the original.",
+  "视频原件已保存，可直接播放；暂未提取字幕或音轨正文。": "Video original saved for playback. Subtitle and audio text have not been extracted.",
+  "播放 / 暂停": "Play / Pause",
+  "请选择视频附件": "Select a video attachment",
+  "音量": "Volume"
 }
