@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.62** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.62.md)
+版本 **v0.1.63** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.63.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 

@@ -2,3 +2,4 @@ pypdf[crypto]>=5,<7
 fonttools>=4.59,<5
 playwright>=1.49,<2
 Pillow>=11,<13
+pypdfium2>=5.14,<6

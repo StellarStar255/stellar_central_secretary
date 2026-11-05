@@ -20,10 +20,11 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai
+from . import __version__, local_paths, company_ai, thumbnails
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -670,6 +671,11 @@ class Service:
         item=self.with_progress(item)
         item['company_data']=company_ai.restricted(item)
         item['local_paths']=local_paths.extract(item['text'])
+        self.material_attachments(item)
+        return item
+
+    def material_attachments(self,item):
+        item_id=item['id']
         for batch in item['additions']:
             try:batch['attachments']=bundles.metadata((self.archive.root/'files'/batch['id']).read_bytes())
             except Exception:batch['attachment_error']='追加附件暂时无法读取，可下载原件后检查。'
@@ -681,6 +687,15 @@ class Service:
         for batch_id,files in [('',item.get('attachments',[]))]+[(batch['id'],batch.get('attachments',[])) for batch in item['additions']]:
             for file in files:
                 file['can_open']=attachment_editor.can_open(file['name']);file['editing']=attachment_editor.has_copy(self.archive,item_id,batch_id,file['id'])
+        catalog=[]
+        base='/api/items/'+item_id
+        if item['filename'] and not bundles.is_bundle(item['filename']):
+            catalog.append({'id':'original','name':item['filename'],'media':'image/'+Path(item['filename']).suffix[1:].lower() if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp') else 'application/octet-stream','path':base,'download_url':base+'/file','preview_url':base+'/preview','thumbnail_url':base+'/thumbnail','batch_id':'','can_open':item['can_open_file'],'editing':item['file_editing']})
+        for batch_id,created,files in [('',item['created'],item.get('attachments',[]))]+[(batch['id'],batch['created'],batch.get('attachments',[])) for batch in item['additions']]:
+            for file in files:
+                path=base+('/additions/'+batch_id if batch_id else '')+'/attachments/'+file['id']
+                catalog.append({**file,'path':path,'batch_id':batch_id,'created':created,'download_url':path,'preview_url':path+'/preview','thumbnail_url':path+'/thumbnail'})
+        item['all_attachments']=catalog
         return item
 
     def ask_material(self,question,item_ids):
@@ -772,6 +787,20 @@ def handler(service):
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
                     return self.send(200,(service.archive.root/'files'/batch_download[2]).read_bytes(),'application/zip',{'Content-Disposition':'attachment; filename="additional-materials.stellar.zip"'})
+                thumbnail_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/thumbnail',path)
+                if thumbnail_match:
+                    item_id,batch_id,key=thumbnail_match.groups()
+                    item=service.archive.get(item_id)
+                    if batch_id and additions.find(item,batch_id) is None:raise KeyError('追加资料不存在')
+                    data=(service.archive.root/'files'/(batch_id or item_id)).read_bytes()
+                    if key:
+                        if not batch_id and not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
+                        file,data=bundles.attachment(data,key);name=file['name']
+                    else:
+                        if not item['filename'] or bundles.is_bundle(item['filename']):raise KeyError('附件不存在')
+                        name=item['filename']
+                    image,media=thumbnails.render(name,data)
+                    return self.send(200,image,media)
                 bundle_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/additions/([a-f0-9]{32}))?/attachments/([a-f0-9]{32})(/preview)?',path)
                 if bundle_match:
                     item=service.archive.get(bundle_match[1])
@@ -807,11 +836,18 @@ def handler(service):
                 preview_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/quick-preview',path)
                 if preview_match:
                     from .rich_text import searchable_text
-                    item=service.archive.get(preview_match[1]);text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000})
+                    item=service.material_attachments(service.archive.get(preview_match[1]));text=searchable_text(item['text'])
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments']})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
+                        if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp'):
+                            data=(service.archive.root/'files'/item['id']).read_bytes()
+                            try:
+                                with Image.open(io.BytesIO(data)) as image:media=bundles.IMAGE_MEDIA.get(image.format)
+                            except OSError as error:raise ValueError('图片原件无法读取') from error
+                            if not media:raise ValueError('不支持的图片格式')
+                            return self.send(200,data,media)
                         item,original=service.pdf_original(item['id'])
                         return self.send(200,original.read_bytes(),'application/pdf',{'Content-Disposition':"inline; filename*=UTF-8''"+urllib.parse.quote(item['filename'],safe='')})
                     if len(parts)==5 and parts[4]=='file':

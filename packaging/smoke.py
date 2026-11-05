@@ -77,6 +77,9 @@ with tempfile.TemporaryDirectory() as data:
         assert imported == {'imported': 0, 'skipped': 1, 'total': 1}, imported
         assert b'import-backup' in request('/')
         pdf = json.loads(request('/api/ingest', {'filename':'aes-fixture.pdf', 'data':base64.b64encode(pdf_bytes(password='')).decode()}, status['token']))['item']
+        assert request('/api/items/'+pdf['id']+'/thumbnail').startswith(b'\x89PNG')
+        assert json.loads(request('/api/items/'+pdf['id']+'/quick-preview'))['all_attachments'][0]['name']=='aes-fixture.pdf'
+        print('PASS: frozen PDFium first-page thumbnail and standalone attachment catalog')
         assert 'Encrypted PDF extraction fixture' in pdf['text'] and not pdf['error'], pdf
         for query in ('Encrypted%20readable','readable%20Encrypted'):
             matches=json.loads(request('/api/items?q='+query+'&kind=file'))
