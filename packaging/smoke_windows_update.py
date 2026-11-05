@@ -74,7 +74,10 @@ def main():
                 time.sleep(.25)
             raise AssertionError('Windows update timed out: '+repr(last))
         try:
-            status=wait(lambda:request('/api/status'))
+            def native_status():
+                value=request('/api/status')
+                return value if value['desktop'].get('supports_window') else None
+            status=wait(native_status)
             assert status['desktop']['platform']=='windows'
             assert request('/api/update/check',{})['available']
             request('/api/update/install',{})
