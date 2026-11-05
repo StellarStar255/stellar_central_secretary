@@ -36,8 +36,12 @@ with tempfile.TemporaryDirectory() as root:
                     else:assert response.headers['content-type']=='image/svg+xml'
                 assert cards.first.bounding_box()['y']<page.locator('#preview-summary-heading').bounding_box()['y']
                 cards.filter(has=page.locator('[data-image-view]')).first.locator('[data-image-view]').click();page.wait_for_function('()=>document.querySelector("#image-viewer img").naturalWidth===1600');page.keyboard.press('ArrowRight');page.wait_for_function('()=>document.querySelector("#image-viewer img").naturalWidth===900');page.keyboard.press('Escape');expect(page.locator('#library-dialog')).to_be_visible();expect(page.locator('#detail-dialog')).not_to_be_visible()
-                with page.expect_popup() as opened:cards.filter(has_text='report.pdf').locator('.material-thumb').click()
-                popup=opened.value;assert '/preview' in popup.url or popup.url=='about:blank';popup.close()
+                pdf_url=base+next(entry['preview_url'] for entry in metadata if entry['name']=='report.pdf')
+                response=page.request.get(pdf_url);assert response.ok and response.headers['content-type']=='application/pdf' and response.body()==pdf_bytes()
+                # Chrome may replace the URL with its internal PDF viewer on Windows.
+                with page.context.expect_event('request',predicate=lambda request:request.url==pdf_url) as requested,page.expect_popup() as opened:
+                    cards.filter(has_text='report.pdf').locator('.material-thumb').click()
+                assert requested.value.method=='GET';opened.value.close()
                 page.screenshot(path='/tmp/secretary-attachment-overview-preview.png')
                 page.locator('#preview-full').click();expect(page.locator('#detail-attachments .material-card')).to_have_count(5)
                 section=page.locator('#detail-attachments');assert section.bounding_box()['y']<page.locator('.quick-note').bounding_box()['y']
