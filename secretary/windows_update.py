@@ -104,11 +104,12 @@ def install(setup, work, expected_sha):
     try:
         # PyInstaller's process-global DLL directory is inherited by child processes.
         if not kernel.SetDllDirectoryW(None):raise ctypes.WinError()
-        process = subprocess.Popen([str(powershell), '-NoProfile', '-NonInteractive',
-                                   '-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',str(script)],
-                                  env=env, cwd=str(work), stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
-                                  creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        with (work/'helper.log').open('ab') as log:
+            process = subprocess.Popen([str(powershell), '-NoProfile', '-NonInteractive',
+                                       '-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',str(script)],
+                                      env=env, cwd=str(work), stdin=subprocess.DEVNULL,
+                                      stdout=log, stderr=log, close_fds=True,
+                                      creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
     finally:
         kernel.SetDllDirectoryW(dll_path.value or None)
     deadline = time.monotonic()+20
