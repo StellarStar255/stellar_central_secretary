@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stellar Secretary 发版"
+  short_description: "发布 Stellar Secretary，检查三平台构建、公证、附件校验并更新本机"
+  default_prompt: "使用 $stellar-release 完成 Stellar Secretary 当前改动的正式发版。"

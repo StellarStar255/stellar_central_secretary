@@ -45,9 +45,9 @@
  }
  document.addEventListener('click',event=>{
   const trigger=event.target.closest('[data-image-view]');if(!trigger)return;
-  const group=trigger.closest('.note-images,.message-images,.bundle-files,#attachments,#append-files')||trigger.parentElement;
+  const group=trigger.closest('.note-images,.message-images,.bundle-files,.material-grid,#attachments,#append-files')||trigger.parentElement;
   const nodes=[...group.querySelectorAll('[data-image-view]')];
-  const images=nodes.map(node=>{const img=node.matches('img')?node:node.querySelector('img');return {src:img.currentSrc||img.src,name:img.alt||t('图片')}});
+  const images=nodes.map(node=>{const img=node.matches('img')?node:node.querySelector('img');return {src:node.dataset.imageSrc||img.currentSrc||img.src,name:img.alt||t('图片')}});
   event.preventDefault();event.stopImmediatePropagation();open(images,nodes.indexOf(trigger),trigger);
  },true);
  // Capture before app.js, keeping zoom shortcuts local to the image viewer.

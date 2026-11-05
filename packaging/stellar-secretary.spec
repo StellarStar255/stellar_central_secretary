@@ -13,10 +13,11 @@ APP = 'Stellar Secretary'
 driver = Path(__import__('playwright').__file__).parent / 'driver'
 node = driver / ('node.exe' if sys.platform == 'win32' else 'node')
 datas = [(str(ROOT/'secretary/static'), 'secretary/static'),
-         (str(ROOT/'browser-extension'), 'browser-extension'), (str(ROOT/'LICENSE'), '.')]
+         (str(ROOT/'browser-extension'), 'browser-extension'), (str(ROOT/'LICENSE'), '.'),
+         (str(ROOT/'packaging/THIRD_PARTY_NOTICES.md'),'.')]
+datas += collect_data_files('pypdfium2_raw') + collect_data_files('pypdfium2') + copy_metadata('pypdfium2')
 datas += [item for item in collect_data_files('playwright') if Path(item[0]) != node]
 if QT_DESKTOP:
-    datas.append((str(ROOT/'packaging/THIRD_PARTY_NOTICES.md'),'.'))
     for package in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6'):datas+=copy_metadata(package)
 a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
              binaries=[(str(node), 'playwright/driver')], datas=datas,

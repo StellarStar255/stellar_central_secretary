@@ -39,17 +39,18 @@ with tempfile.TemporaryDirectory() as temp:
     grouped=next(item for item in service.archive.list() if item['id']!=other)
     expect(page.locator('.message.user .message-images img')).to_be_visible()
     page.locator('.message.user .message-images img').click();expect(page.locator('#image-viewer')).to_be_visible()
-    page.wait_for_function("document.querySelector('#image-viewer img').naturalWidth===50");assert launched.call_count==0
+    page.wait_for_function("()=>document.querySelector('#image-viewer img').naturalWidth===50");assert launched.call_count==0
     page.keyboard.press('Escape')
     assert len(browser.contexts[0].pages)==1 and page.url==base+'/'
     expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#messages .archive-card[data-id="'+grouped['id']+'"]').click()
-    expect(page.locator('.bundle-file')).to_have_count(2);expect(page.locator('.bundle-file img')).to_be_visible()
-    page.locator('.bundle-file img').click();expect(page.locator('#image-viewer')).to_be_visible();assert launched.call_count==0 and len(browser.contexts[0].pages)==1
-    page.keyboard.press('Escape');page.locator('.bundle-file .image-open').press('Enter');expect(page.locator('#image-viewer')).to_be_visible()
+    expect(page.locator('#detail-attachments .material-card')).to_have_count(2);expect(page.locator('#detail-attachments [data-image-view] img')).to_be_visible()
+    page.locator('#detail-attachments [data-image-view] img').click();expect(page.locator('#image-viewer')).to_be_visible();assert launched.call_count==0 and len(browser.contexts[0].pages)==1
+    page.keyboard.press('Escape');page.locator('#detail-attachments .image-open').press('Enter');expect(page.locator('#image-viewer')).to_be_visible()
     page.keyboard.press('Escape');expect(page.locator('#detail-dialog')).to_be_visible();assert launched.call_count==0
     # External editing remains available only through its explicit action.
-    page.locator('.bundle-file').filter(has=page.locator('img')).get_by_role('button',name='默认程序打开',exact=True).click()
+    page.locator('#detail-attachments .material-card').filter(has=page.locator('[data-image-view]')).locator('summary').click()
+    page.locator('#detail-attachments .material-card').filter(has=page.locator('[data-image-view]')).get_by_role('button',name='默认程序打开',exact=True).click()
     expect(page.locator('#toast')).to_have_text('已在默认程序中打开编辑副本');assert launched.call_count==1
     expect(page.get_by_role('heading',name='图片解读（AI 生成，请核对原图）')).to_be_visible()
     assert 'Question: Explain' in service.archive.get(grouped['id'])['text']
