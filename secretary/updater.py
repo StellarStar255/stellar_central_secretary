@@ -279,6 +279,7 @@ def start(on_ready_to_quit):
                 on_ready_to_quit()
         except Exception as e:
             _set(phase="error", error=str(e))
+            print('Update failed:', str(e), file=sys.stderr, flush=True)
             try:
                 if "dest" in locals() and "校验失败" in str(e):
                     dest.unlink(missing_ok=True)

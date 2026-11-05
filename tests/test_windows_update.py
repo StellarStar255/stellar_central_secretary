@@ -1,5 +1,8 @@
 import json
 import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,6 +12,34 @@ from secretary import paths, updater, windows_update
 
 
 class WindowsUpdateTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform=='win32','Requires real Windows PowerShell')
+    def test_real_helper_readiness_and_post_handoff_checksum_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);work=root/'更新 with spaces';work.mkdir()
+            (work/'setup.exe').write_bytes(b'changed installer')
+            script=root/'parent.py'
+            script.write_text('''import sys
+from pathlib import Path
+from secretary import windows_update,paths
+root=Path(sys.argv[1]);work=root/'更新 with spaces'
+paths.DATA_DIR=root
+sys.executable=str(root/'missing-app.exe')
+assert windows_update.install(work/'setup.exe',work,'0'*64)
+''',encoding='utf-8')
+            process=subprocess.run([sys.executable,str(script),str(root)],env=dict(os.environ,PYTHONPATH=str(Path.cwd())),
+                                   capture_output=True,text=True,timeout=40)
+            helper=work/'helper.log'
+            log=helper.read_bytes().decode('utf-8',errors='replace') if helper.exists() else ''
+            self.assertEqual(process.returncode,0,process.stderr+'\n'+log)
+            deadline=time.monotonic()+15
+            while time.monotonic()<deadline:
+                try:value=json.loads((root/'windows-update.json').read_text(encoding='utf-8-sig'))
+                except (OSError,ValueError):value={}
+                if value.get('phase')=='error':break
+                time.sleep(.1)
+            self.assertEqual(value.get('phase'),'error',value)
+            self.assertIn('checksum changed',value['error'])
+
     def test_handoff_preserves_install_location_arguments_and_resets_frozen_environment(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve();work = root/'更新 with spaces';work.mkdir()
