@@ -24,7 +24,7 @@ class WindowsUpdateTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform=='win32','Requires real Windows PowerShell')
     def test_real_helper_readiness_and_post_handoff_checksum_failure(self):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             root=Path(temp);work=root/'更新 with spaces';work.mkdir()
             (work/'setup.exe').write_bytes(b'changed installer')
             script=root/'parent.py'
@@ -49,6 +49,11 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
                 time.sleep(.1)
             self.assertEqual(value.get('phase'),'error',value)
             self.assertIn('checksum changed',value['error'])
+            # The result is written just before the detached host closes its log.
+            deadline=time.monotonic()+5
+            while helper.exists() and time.monotonic()<deadline:
+                try:helper.unlink()
+                except PermissionError:time.sleep(.1)
 
     def test_handoff_preserves_install_location_arguments_and_resets_frozen_environment(self):
         with tempfile.TemporaryDirectory() as temp:

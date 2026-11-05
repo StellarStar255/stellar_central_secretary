@@ -88,6 +88,9 @@ def install(setup, work, expected_sha):
     result.write_text(json.dumps({'phase':'starting','error':''}), encoding='utf-8')
     (work/'proceed').unlink(missing_ok=True)
     env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT='1')
+    # A launcher running under PowerShell 7 may export its incompatible module path.
+    # Let Windows PowerShell initialize its own standard modules (e.g. Get-FileHash).
+    env.pop('PSModulePath', None)
     bundle = str(getattr(sys, '_MEIPASS', ''))
     if bundle:
         # Qt hooks also prepend bundle paths to PATH. Keep only external paths.
