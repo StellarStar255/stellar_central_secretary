@@ -962,7 +962,8 @@ def handler(service):
                 if path=='/api/update/install':
                     with service.lock:
                         if service.busy or service.captures or service.questions: raise ValueError('请等待摘要和会话读取完成后再升级')
-                    updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start())
+                    updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
+                                  desktop=bool(service.desktop_status().get('enabled')))
                     return self.send(200, updater.status())
                 if path=='/api/shutdown':
                     if body.get('force'):service.close()

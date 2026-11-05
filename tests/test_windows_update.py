@@ -69,11 +69,11 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
                  patch.object(windows_update.subprocess,'CREATE_NO_WINDOW',0x08000000,create=True), \
                  patch.object(windows_update.subprocess,'CREATE_NEW_PROCESS_GROUP',512,create=True), \
                  patch.object(windows_update.subprocess,'Popen',side_effect=spawn) as popen:
-                self.assertTrue(windows_update.install(root/'setup.exe',work,'a'*64))
+                self.assertTrue(windows_update.install(root/'setup.exe',work,'a'*64,desktop=True))
             config = json.loads((work/'install.json').read_text())
             self.assertEqual(config['exe'],str(root/'安装目录'/'Stellar Secretary.exe'))
             self.assertIn('--port 9988',config['arguments']);self.assertIn('--data-dir',config['arguments'])
-            self.assertNotIn('--desktop',config['arguments']);self.assertIn('--no-browser',config['arguments'])
+            self.assertIn('--desktop',config['arguments']);self.assertIn('--no-browser',config['arguments'])
             self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'],'1')
             self.assertFalse(any(key.upper()=='PSMODULEPATH' for key in popen.call_args.kwargs['env']))
             self.assertEqual(popen.call_args.kwargs['cwd'],str(work))

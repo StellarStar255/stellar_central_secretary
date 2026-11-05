@@ -70,11 +70,12 @@ def last_result():
         return {}
 
 
-def install(setup, work, expected_sha):
+def install(setup, work, expected_sha, desktop=False):
     exe = Path(sys.executable).resolve()
     work = Path(work).resolve()
     result = paths.DATA_DIR/'windows-update.json'
     arguments = [arg for arg in sys.argv[1:] if arg != '--desktop']
+    if desktop:arguments.append('--desktop')
     # The launcher consumes --desktop; retain the resolved data root independently.
     if '--data-dir' not in arguments and not any(arg.startswith('--data-dir=') for arg in arguments):
         arguments += ['--data-dir', str(paths.DATA_DIR)]
