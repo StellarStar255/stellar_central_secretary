@@ -31,6 +31,17 @@ with tempfile.TemporaryDirectory() as folder:
     row=page.locator('#items .library-row').first
     with page.expect_popup() as opened:row.dblclick(delay=60)
     popup=opened.value;popup.wait_for_load_state();assert popup.url==base+'/tutorial?lang=en#fixture';popup.close();expect(page.locator('#detail-dialog')).not_to_be_visible()
+    row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source')
+    before_rename=service.archive.get(linked)
+    page.locator('#preview-title').dblclick();expect(page.locator('#preview-title-input')).to_have_value('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
+    page.locator('#preview-title-input').fill('Uncommitted draft');page.evaluate('refresh()');expect(page.locator('#preview-title-input')).to_have_value('Uncommitted draft')
+    page.locator('#preview-title-input').press('Escape');expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#library-dialog')).to_be_visible();expect(page.locator('#preview-material')).to_be_visible()
+    page.locator('#preview-title').press('Enter');page.locator('#preview-title-input').fill('   ');page.locator('#preview-title-input').press('Enter');expect(page.locator('#preview-title-error')).to_have_text('标题不能为空')
+    page.locator('#preview-title-input').fill('Robot camera 新标题 <draft>');page.locator('#preview-title-input').press('Enter');expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>');expect(page.locator('#items .library-row').first).to_contain_text('Robot camera 新标题 <draft>')
+    after_rename=service.archive.get(linked);assert after_rename['title']=='Robot camera 新标题 <draft>'
+    for key in ('text','summary','tags','state','filename','url'):assert after_rename[key]==before_rename[key],key
+    page.reload();page.locator('#library-open').click();page.locator('#search').fill('robot camera');page.locator('#items [data-id="'+linked+'"]').click();expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>')
+    page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera source');page.locator('#preview-title-save').click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#items .library-row').first).to_contain_text('Robot camera source')
     row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible();page.locator('#preview-full').click();expect(page.locator('#detail-dialog')).to_be_visible();page.evaluate("document.querySelector('#detail-dialog').close()")
     page.locator('#sort-filter').select_option('viewed');expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked)
     page.locator('#preview-close').click();page.locator('#search').focus();page.locator('#search').press('ArrowDown');expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
@@ -54,7 +65,7 @@ with tempfile.TemporaryDirectory() as folder:
     failed_row=page.locator('[data-task-key="summary:'+failed+'"]');expect(failed_row).to_contain_text('网络或代理连接未成功',timeout=5000);failed_row.get_by_role('button',name='重新尝试').click();expect(failed_row).to_contain_text('处理完成',timeout=8000);assert service.archive.get(failed)['summary']=='Synthetic retry result'
     page.screenshot(path='/tmp/secretary-tasks-workflow.png');page.evaluate("document.querySelector('#tasks-dialog').close()")
     assert not errors,errors
-    print('PASS: compact scope badges, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
+    print('PASS: compact scope badges, inline preview title edit, Enter save, Esc cancel, refresh preserves draft, persisted rename without source changes, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
    except Exception:
     print({'page_errors':errors,'toast':page.locator('#toast').inner_text(),'html':page.locator('#result-count').inner_text()},flush=True);raise
    finally:browser.close()

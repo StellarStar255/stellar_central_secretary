@@ -556,4 +556,4 @@ globalThis.StellarBundles?.bind({api,toast,onSaved:async id=>{await refresh();if
 
 globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});
 
-globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),link:originalLink,describe:libraryPresentation});
+globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),link:originalLink,describe:libraryPresentation,onSaved:refresh});
