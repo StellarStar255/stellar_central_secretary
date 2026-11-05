@@ -106,10 +106,10 @@ def install(setup, work, expected_sha):
         if not kernel.SetDllDirectoryW(None):raise ctypes.WinError()
         with (work/'helper.log').open('ab') as log:
             process = subprocess.Popen([str(powershell), '-NoProfile', '-NonInteractive',
-                                       '-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',str(script)],
+                                       '-ExecutionPolicy','Bypass','-File',str(script)],
                                       env=env, cwd=str(work), stdin=subprocess.DEVNULL,
                                       stdout=log, stderr=log, close_fds=True,
-                                      creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+                                      creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
     finally:
         kernel.SetDllDirectoryW(dll_path.value or None)
     deadline = time.monotonic()+20
@@ -119,7 +119,8 @@ def install(setup, work, expected_sha):
             (work/'proceed').write_text('ready', encoding='ascii')
             return True
         if value.get('phase') == 'error' or process.poll() is not None:
-            raise RuntimeError('Windows 更新助手启动失败：'+(value.get('error') or 'PowerShell 未正常启动；请查看 update.log'))
+            raise RuntimeError('Windows 更新助手启动失败：'+(value.get('error') or
+                               f'PowerShell exit={process.poll()}；请查看 {work / "helper.log"}'))
         time.sleep(.1)
     # Parent remains running; a late helper can only time out, never replace live files.
     raise RuntimeError('Windows 更新助手未就绪，已保留当前程序；请查看 update.log')

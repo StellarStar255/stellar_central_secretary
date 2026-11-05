@@ -13,6 +13,16 @@ from secretary import paths, updater, windows_update
 
 class WindowsUpdateTest(unittest.TestCase):
     @unittest.skipUnless(sys.platform=='win32','Requires real Windows PowerShell')
+    def test_powershell_console_launch_regression(self):
+        powershell=str(Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe')
+        for name,flags,args in [('legacy',subprocess.DETACHED_PROCESS,['-WindowStyle','Hidden']),
+                                ('fixed',subprocess.CREATE_NO_WINDOW,[])]:
+            value=subprocess.run([powershell,'-NoProfile','-NonInteractive',*args,'-Command','Write-Output ready'],
+                                 stdin=subprocess.DEVNULL,capture_output=True,creationflags=flags|subprocess.CREATE_NEW_PROCESS_GROUP,timeout=15)
+            print('PowerShell console regression:',name,'exit=',value.returncode,'stdout=',repr(value.stdout),'stderr=',repr(value.stderr),flush=True)
+            if name=='fixed':self.assertEqual(value.returncode,0,value.stderr)
+
+    @unittest.skipUnless(sys.platform=='win32','Requires real Windows PowerShell')
     def test_real_helper_readiness_and_post_handoff_checksum_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);work=root/'更新 with spaces';work.mkdir()
@@ -51,7 +61,7 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
                  patch.object(windows_update.sys,'argv',['app','--port','9988','--desktop','--no-browser']), \
                  patch.object(windows_update.ctypes,'windll',Mock(kernel32=kernel),create=True), \
                  patch.dict(os.environ,{'SystemRoot':str(root/'Windows')}), \
-                 patch.object(windows_update.subprocess,'DETACHED_PROCESS',8,create=True), \
+                 patch.object(windows_update.subprocess,'CREATE_NO_WINDOW',0x08000000,create=True), \
                  patch.object(windows_update.subprocess,'CREATE_NEW_PROCESS_GROUP',512,create=True), \
                  patch.object(windows_update.subprocess,'Popen',side_effect=spawn) as popen:
                 self.assertTrue(windows_update.install(root/'setup.exe',work,'a'*64))
@@ -69,7 +79,7 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
             root=Path(temp);kernel=Mock();kernel.SetDllDirectoryW.return_value=1
             with patch.object(paths,'DATA_DIR',root), patch.object(windows_update.ctypes,'windll',Mock(kernel32=kernel),create=True), \
                  patch.dict(os.environ,{'SystemRoot':temp}), \
-                 patch.object(windows_update.subprocess,'DETACHED_PROCESS',8,create=True), \
+                 patch.object(windows_update.subprocess,'CREATE_NO_WINDOW',0x08000000,create=True), \
                  patch.object(windows_update.subprocess,'CREATE_NEW_PROCESS_GROUP',512,create=True), \
                  patch.object(windows_update.subprocess,'Popen',return_value=Mock(poll=lambda:1)):
                 with self.assertRaisesRegex(RuntimeError,'更新助手启动失败'):
