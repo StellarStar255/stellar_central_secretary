@@ -197,11 +197,29 @@ class WebReaderTest(unittest.TestCase):
         with patch.object(web_reader,'validate_public_url'):web_reader.snapshot_page(page,'en')
         frame.evaluate.assert_not_called()
 
-    def test_small_live_status_changes_do_not_prevent_capture(self):
-        body='The saved document content stays unchanged. '*30
-        self.assertTrue(web_reader.nearly_same_text(body+'revision 1',body+'revision 2'))
-        self.assertFalse(web_reader.nearly_same_text(body,'An entirely different document.'*30))
-        self.assertFalse(web_reader.nearly_same_text(None,body))
+    def test_short_live_progress_is_one_text_snapshot_without_stability_wait(self):
+        page=Mock(url=URL);page.is_closed.return_value=False
+        first=dict(text='任务A 下载中 35.8% 48.0GB / 134.2GB 23.5MB/s',readable_characters=38,login=False,denied=False,busy=False,ready=True,progress=True,truncated=False,title='Progress')
+        page.evaluate.side_effect=[first,{**first,'text':'任务A 下载中 36.9%'}]
+        stop=Mock();stop.is_set.return_value=False;stop.wait.return_value=False
+        with patch.object(web_reader,'validate_public_url'):result=web_reader.capture_loaded_page(page,URL,stop)
+        self.assertIn(first['text'],result['text']);self.assertNotIn('36.9%',result['text']);self.assertEqual(page.evaluate.call_count,1);stop.wait.assert_not_called()
+        self.assertEqual(result['capture_mode'],'text_snapshot');self.assertIn(result['captured_at'],result['text']);self.assertIn('不跟踪后续变化',result['text'])
+
+    def test_visible_text_does_not_wait_for_entire_document_load(self):
+        page=Mock(url=URL);page.is_closed.return_value=False
+        page.evaluate.return_value=dict(text='Status: running',login=False,denied=False,busy=False,ready=False,truncated=False,title='Streaming status')
+        stop=Mock();stop.is_set.return_value=False
+        with patch.object(web_reader,'validate_public_url'):result=web_reader.capture_loaded_page(page,URL,stop)
+        self.assertIn('Status: running',result['text']);stop.wait.assert_not_called()
+
+    def test_loading_only_waits_for_first_readable_snapshot(self):
+        page=Mock(url=URL);page.is_closed.return_value=False
+        first=dict(text='Loading...',readable_characters=10,login=False,denied=False,busy=True,ready=True,truncated=False,title='Loading')
+        page.evaluate.side_effect=[first,{**first,'text':'状态：运行中','busy':False}]
+        stop=Mock();stop.is_set.return_value=False;stop.wait.return_value=False
+        with patch.object(web_reader,'validate_public_url'):result=web_reader.capture_loaded_page(page,URL,stop)
+        self.assertIn('状态：运行中',result['text']);self.assertEqual(page.evaluate.call_count,2)
 
     def test_summary_retains_scope(self):
         text=web_reader.PREFIX_EN+' Loaded content only.\n\nExample project body.'

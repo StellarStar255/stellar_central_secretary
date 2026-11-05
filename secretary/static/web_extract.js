@@ -36,6 +36,7 @@ function extractWebPage(options={}) {
  let count=0,characters=0,truncated=false;
  const blockTags=new Set(['P','DIV','SECTION','ARTICLE','LI','H1','H2','H3','H4','H5','H6','TR','UL','OL','BLOCKQUOTE']);
  function walk(node){
+  if(!node)return '';
   if(++count>50000||characters>=limit){truncated=true;return '';}
   if(node.nodeType===3){const text=node.textContent.slice(0,Math.max(0,limit-characters));characters+=text.length;return text;}
   if(node.nodeType===11)return Array.from(node.childNodes).map(walk).join('');
@@ -60,6 +61,10 @@ function extractWebPage(options={}) {
  const denied=!documentRoot&&/没有访问权限|无访问权限|无权访问|你没有权限|您没有权限|Access denied|You do not have (?:access|permission)|Request access/i.test(text)&&text.length<1500;
  const loginButton=select('button,a').some(node=>visible(node)&&/^(?:登录|登入|Log in|Sign in)$/i.test((node.innerText||'').trim()));
  const progress=Array.from(root?.querySelectorAll('[aria-busy="true"],[role="progressbar"]')||[]).some(visible)||root?.getAttribute('aria-busy')==='true';
- const busy=documentRoot&&meaningful.length<40||progress&&meaningful.length<80||meaningful.length<120&&/正在加载|加载中|Loading\.\.\.|Please wait/i.test(text);
- return {title:document.title,text,url:location.href,login:loginURL||password||signIn||!documentRoot&&loginButton&&text.length<800,denied,busy,truncated,ready:document.readyState==='complete',document:documentRoot,readable_characters:meaningful.length};
+ // A progress indicator describes page content; it does not make that text unreadable.
+ // Reject empty/loading-only shells, rather than waiting for live values to stop.
+ const hasLoadingWords=/正在加载|加载中|载入中|请稍候|请稍等|Loading|Pleasewait|Saving|正在保存|保存中/i.test(meaningful);
+ const loadingOnly=hasLoadingWords&&/^(?:(?:正在加载|加载中|载入中)(?:文档|页面|内容|数据)?|请稍候|请稍等|Loading(?:content|document|page)?|Pleasewait(?:whileloading)?|Saving|正在保存|保存中|[.。…!！:：,，\d%％/()（）-])+$/i.test(meaningful);
+ const busy=!meaningful.length||loadingOnly;
+ return {title:document.title,text,url:location.href,login:loginURL||password||signIn||!documentRoot&&loginButton&&text.length<800,denied,busy,progress,truncated,ready:document.readyState!=='loading',document:documentRoot,readable_characters:meaningful.length};
 }

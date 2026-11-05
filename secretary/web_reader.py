@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 import urllib.request
+from datetime import datetime,timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -158,22 +159,6 @@ def snapshot_page(page,language,target=None):
     return result
 
 
-def nearly_same_text(previous,current):
-    if previous is None:return False
-    if previous==current:return True
-    size=max(len(previous),len(current))
-    if size<80 or abs(len(previous)-len(current))>size*.03:return False
-    prefix=0
-    for left,right in zip(previous,current):
-        if left!=right:break
-        prefix+=1
-    suffix=0
-    for left,right in zip(previous[prefix:][::-1],current[prefix:][::-1]):
-        if left!=right:break
-        suffix+=1
-    return (prefix+suffix)/size>=.97
-
-
 def open_capture_page(page,target,cancelled,language='zh'):
     """Wait for navigation commit, not a DOM event a SPA can supersede.
 
@@ -235,7 +220,7 @@ def open_capture_page(page,target,cancelled,language='zh'):
 def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
     validate_browser_url(page.url,target)
     if not same_page(page.url,target):raise RuntimeError('请先在浏览器返回目标网页，再确认读取')
-    deadline=time.monotonic()+timeout;last=None;stable=0;result={}
+    deadline=time.monotonic()+timeout;result={}
     while time.monotonic()<deadline:
         if cancelled.is_set():raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
         if page.is_closed():raise RuntimeError('任务网页已关闭，请重新打开后再试')
@@ -247,22 +232,24 @@ def capture_loaded_page(page,target,cancelled,language='zh',timeout=35):
         if not same_page(actual,target):raise RuntimeError('目标网页发生跳转，请返回原网页后重新读取')
         if result['login']:raise RuntimeError('页面仍是登录界面，请完成登录并打开目标内容后再确认')
         if result['denied']:raise RuntimeError('网页提示没有访问权限，请确认当前账号有权查看目标内容')
-        text=result['text'].strip();minimum=40 if result.get('document') else 80
-        readable=result.get('readable_characters',len(text))>=minimum
-        stable=stable+1 if nearly_same_text(last,text) and readable and not result['busy'] and result['ready'] else 0;last=text
-        if stable>=3:
+        text=result['text'].strip()
+        readable=bool(text) and result.get('readable_characters',len(text))>0
+        if readable and not result.get('busy',False):
+            captured_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
             if language=='en':
-                scope=PREFIX_EN+' Scope: content already loaded when you confirmed. Collapsed, paginated and unloaded content is not included.'
+                scope=PREFIX_EN+' Text snapshot at '+captured_at+'. Scope: displayed, already-loaded text. Collapsed, paginated and unloaded content is not included.'
+                if result.get('progress'):scope+=' Progress values are recorded as displayed; subsequent changes are not tracked.'
                 if result['truncated']:scope+=' Only the first 120,000 characters are included.'
             else:
-                scope=PREFIX_ZH+' 采集范围：确认时网页中已加载的可读内容；未展开、分页及尚未加载的内容不包含。'
+                scope=PREFIX_ZH+' 文字快照时间：'+captured_at+'。采集范围：读取时网页中已显示的文字；未展开、分页及尚未加载的内容不包含。'
+                if result.get('progress'):scope+=' 进度数值按当时显示值记录，不跟踪后续变化。'
                 if result['truncated']:scope+=' 本次最多保留前 12 万字符。'
             if result.get('captured_frames'):
                 scope+=(' Includes visible embedded content from the same site or Feishu/Lark document domains.' if language=='en' else ' 包含同站点或飞书/Lark 文档域中可见嵌入页面的已加载文字。')
-            return {'url':target,'title':result['title'] or urlsplit(target).hostname,'text':scope+'\n\n'+text,'web_capture':True,'capture_scope':'loaded_page'}
+            return {'url':target,'title':result['title'] or urlsplit(target).hostname,'text':scope+'\n\n'+text,'web_capture':True,'capture_scope':'loaded_page','capture_mode':'text_snapshot','captured_at':captured_at}
         if cancelled.wait(.8):raise reader.CaptureCancelled('已停止网页采集，原链接与浏览器窗口保持不变')
     counts=f"readable characters: {result.get('readable_characters',0)}, embedded pages: {result.get('captured_frames',0)}" if language=='en' else f"可读字符：{result.get('readable_characters',0)}，嵌入页面：{result.get('captured_frames',0)}"
-    message='No stable readable document was found. Wait for loading or expand the content, then retry.' if language=='en' else '页面未取得稳定的可读正文，请等待加载完成、展开目标内容后重试。'
+    message='No readable text is displayed yet. Wait for text to appear or expand the content, then retry.' if language=='en' else '页面尚未显示可读取的文字，请等待文字出现或展开内容后重试。'
     raise RuntimeError(message+' ('+counts+')')
 
 
