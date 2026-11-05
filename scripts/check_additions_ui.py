@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#append-text').evaluate('(input)=>input.setSelectionRange(input.value.length,input.value.length)')
     page.evaluate('''data=>{const d=new DataTransfer();d.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'new.png',{type:'image/png'}));d.setData('text/plain','Clipboard annotation');document.querySelector('#append-text').dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}))}''',base64.b64encode(png).decode())
     expect(page.locator('#append-files img')).to_be_visible();expect(page.locator('#append-text')).to_have_value('New experiment details Clipboard annotation')
+    page.locator('#append-files [data-image-view]').press('Enter');expect(page.locator('#image-viewer')).to_be_visible();page.keyboard.press('Escape');expect(page.locator('#append-dialog')).to_be_visible();assert launched.call_count==0
     page.locator('#append-file-input').set_input_files({'name':'context.txt','mimeType':'text/plain','buffer':b'New supplementary context'})
     page.locator('#append-dialog .dialog-head button').click();page.locator('#append-material').click()
     expect(page.locator('#append-text')).to_have_value('New experiment details Clipboard annotation')
@@ -38,7 +39,7 @@ with tempfile.TemporaryDirectory() as root:
     assert page.request.get(base+'/api/items/'+item_id+'/file').body()==b'Original paper text'
     batch=service.item_detail(item_id)['additions'][0];attachment=batch['attachments'][0]
     assert page.request.get(base+'/api/items/'+item_id+'/additions/'+batch['id']+'/attachments/'+attachment['id']+'/preview').body()==png
-    page.locator('.addition-batch .bundle-file img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==1 and launched.call_args.args[0].name=='new.png' and launched.call_args.args[0].read_bytes()==png;assert len(browser.contexts[0].pages)==1
+    page.locator('.addition-batch .bundle-file img').click();expect(page.locator('#image-viewer')).to_be_visible();page.wait_for_function("document.querySelector('#image-viewer img').naturalWidth>0");assert launched.call_count==0 and len(browser.contexts[0].pages)==1;page.keyboard.press('Escape');expect(page.locator('#detail-dialog')).to_be_visible()
     page.screenshot(path='/tmp/secretary-append-materials.png')
     page.reload();page.locator('#recent-items [data-id="'+item_id+'"]').click();expect(page.locator('.addition-batch')).to_have_count(1)
     page.locator('#append-material').click();page.locator('#append-text').fill('Second batch, text only');page.locator('#append-summarize').uncheck();page.locator('#append-save').click()

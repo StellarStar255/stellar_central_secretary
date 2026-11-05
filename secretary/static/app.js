@@ -258,10 +258,10 @@ const isImageFile=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|
 function releaseAttachment(file){const url=attachmentPreviews.get(file);if(url){URL.revokeObjectURL(url);attachmentPreviews.delete(file)}}
 function renderAttachments(){
  $('#attachments').innerHTML=attachedFiles.map((file,index)=>{
-  let image='';if(isImageFile(file)){try{let url=attachmentPreviews.get(file);if(!url){url=URL.createObjectURL(file);attachmentPreviews.set(file,url)}image='<img src="'+url+'" alt="'+esc(file.name)+'">'}catch{}}
+  let image='';if(isImageFile(file)){try{let url=attachmentPreviews.get(file);if(!url){url=URL.createObjectURL(file);attachmentPreviews.set(file,url)}image='<button type="button" class="image-open" data-image-view aria-label="'+esc(t('查看图片：')+file.name)+'"><img src="'+url+'" alt="'+esc(file.name)+'"></button>'}catch{}}
   return ui`<div class="attachment">${image}<span title="${esc(file.name)}">▧ ${esc(file.name)}</span><button type="button" data-remove="${index}" aria-label="移除 ${esc(file.name)}">×</button></div>`;
  }).join('')+(attachedFiles.length?t('<p class="bundle-composer-hint">同次文字、图片和附件将归档在一起。启用 AI 摘要或提问时，文字和支持的图片会发送给所选模型。</p>'):'');
- $('#attachments').querySelectorAll('button').forEach(button=>button.onclick=()=>{const [removed]=attachedFiles.splice(Number(button.dataset.remove),1);releaseAttachment(removed);renderAttachments()});updateSend();
+ $('#attachments').querySelectorAll('[data-remove]').forEach(button=>button.onclick=()=>{const [removed]=attachedFiles.splice(Number(button.dataset.remove),1);releaseAttachment(removed);renderAttachments()});updateSend();
 }
 function attach(files){for(const file of files){
  if(file.size>50*1024*1024){toast(file.name+t(' 超过 50 MB'));continue}

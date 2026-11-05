@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory() as temp:
     page.locator('#message-input').evaluate('(input)=>input.setSelectionRange(input.value.length,input.value.length)')
     pasted=page.evaluate('''data=>{const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'pasted.png',{type:'image/png'}));transfer.setData('text/plain','Explain this picture and the attached context.');const event=new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true});document.querySelector('#message-input').dispatchEvent(event);return event.defaultPrevented}''',base64.b64encode(png).decode())
     assert pasted;expect(page.locator('#attachments img')).to_be_visible()
+    page.locator('#attachments [data-image-view]').press('Enter');expect(page.locator('#image-viewer')).to_be_visible()
+    page.keyboard.press('Escape');expect(page.locator('#attachments .attachment')).to_have_count(1);assert launched.call_count==0
     assert page.locator('#message-input').input_value().startswith('Question: Explain')
     page.locator('#file-input').set_input_files({'name':'context.txt','mimeType':'text/plain','buffer':b'Attached synthetic context and decisions.'})
     expect(page.locator('#attachments .attachment')).to_have_count(2);page.locator('#send-button').click()
@@ -36,15 +38,19 @@ with tempfile.TemporaryDirectory() as temp:
     assert mocked.call_count==1 and len(service.archive.list())==2
     grouped=next(item for item in service.archive.list() if item['id']!=other)
     expect(page.locator('.message.user .message-images img')).to_be_visible()
-    page.locator('.message.user .message-images img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==1 and launched.call_args.args[0].name=='pasted.png' and launched.call_args.args[0].read_bytes()==png
+    page.locator('.message.user .message-images img').click();expect(page.locator('#image-viewer')).to_be_visible()
+    page.wait_for_function("document.querySelector('#image-viewer img').naturalWidth===50");assert launched.call_count==0
+    page.keyboard.press('Escape')
     assert len(browser.contexts[0].pages)==1 and page.url==base+'/'
     expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#messages .archive-card[data-id="'+grouped['id']+'"]').click()
     expect(page.locator('.bundle-file')).to_have_count(2);expect(page.locator('.bundle-file img')).to_be_visible()
-    page.locator('#toast').evaluate("node=>node.textContent=''");page.locator('.bundle-file img').click();expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');assert launched.call_count==2 and len(browser.contexts[0].pages)==1
-    page.locator('#toast').evaluate("node=>node.textContent=''")
-    with page.expect_response(lambda response:response.url.endswith('/editor/open')) as opened:page.locator('.bundle-file .image-open').press('Enter')
-    assert opened.value.ok and launched.call_count==3,(opened.value.status,opened.value.text(),launched.call_count);expect(page.locator('#toast')).to_have_text('已在默认程序中打开图片');expect(page.locator('.bundle-file .image-open')).to_be_enabled()
+    page.locator('.bundle-file img').click();expect(page.locator('#image-viewer')).to_be_visible();assert launched.call_count==0 and len(browser.contexts[0].pages)==1
+    page.keyboard.press('Escape');page.locator('.bundle-file .image-open').press('Enter');expect(page.locator('#image-viewer')).to_be_visible()
+    page.keyboard.press('Escape');expect(page.locator('#detail-dialog')).to_be_visible();assert launched.call_count==0
+    # External editing remains available only through its explicit action.
+    page.locator('.bundle-file').filter(has=page.locator('img')).get_by_role('button',name='默认程序打开',exact=True).click()
+    expect(page.locator('#toast')).to_have_text('已在默认程序中打开编辑副本');assert launched.call_count==1
     expect(page.get_by_role('heading',name='图片解读（AI 生成，请核对原图）')).to_be_visible()
     assert 'Question: Explain' in service.archive.get(grouped['id'])['text']
     image=service.item_detail(grouped['id'])['attachments'][0]

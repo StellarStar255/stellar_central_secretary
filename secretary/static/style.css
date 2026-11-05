@@ -77,3 +77,15 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .note-image-open{display:block;padding:0;border:0;background:none;border-radius:6px;cursor:zoom-in}.note-image-open:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 
 .company-data-policy{margin:18px 0;padding:14px;border:1px solid var(--line);border-radius:8px}.company-data-policy p{color:var(--muted)}#company-model-dialog{width:min(620px,94vw)}#company-model-dialog .check{margin:18px 0;line-height:1.7}
+
+/* Image viewer is a top-layer dialog, preserving the archive underneath. */
+#image-viewer{width:calc(100vw - 32px);height:calc(100dvh - 32px);max-width:none;max-height:none;padding:0;overflow:hidden;background:#171717;color:#eee;border:1px solid #555;border-radius:12px}
+#image-viewer[open]{display:flex;flex-direction:column}#image-viewer::backdrop{background:rgba(0,0,0,.8)}
+#image-viewer header{display:flex;gap:8px;align-items:center;padding:12px;border-bottom:1px solid #444;flex-shrink:0}
+#image-viewer-caption{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+#image-viewer header button{min-width:36px;height:36px;padding:4px 10px;background:#292929;color:#eee;border:1px solid #555;border-radius:6px;cursor:pointer}#image-viewer header button:disabled{opacity:.35;cursor:default}
+.image-viewer-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;cursor:grab;user-select:none}.image-viewer-stage:active{cursor:grabbing}
+#image-viewer .image-viewer-stage img{max-width:100%;max-height:100%;object-fit:contain;flex-shrink:0;transform-origin:center}
+.image-viewer-status{position:absolute;bottom:20px;background:#222b;padding:8px;pointer-events:none}.image-viewer-status:empty{display:none}
+#attachments img,#append-files img{cursor:zoom-in}
+@media(max-width:600px){#image-viewer{width:100vw;height:100dvh;border-radius:0}#image-viewer header{gap:4px;padding:6px}#image-viewer header button{min-width:30px;padding:4px}}

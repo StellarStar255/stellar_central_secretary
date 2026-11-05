@@ -900,5 +900,15 @@
   "公司模式": "Company mode",
   "启用公司模式": "Enable company mode",
   "公司模式选项无效": "Invalid company mode option",
-  "默认关闭。关闭时按当前模型和自动总结设置处理，不弹出额外确认；开启后，公司资料首次使用模型服务时需要确认。": "Off by default. When off, material uses the current model and automatic summary settings without extra confirmation. When on, company material requires first-use confirmation of the model service."
+  "默认关闭。关闭时按当前模型和自动总结设置处理，不弹出额外确认；开启后，公司资料首次使用模型服务时需要确认。": "Off by default. When off, material uses the current model and automatic summary settings without extra confirmation. When on, company material requires first-use confirmation of the model service.",
+  "查看图片：": "View image: ",
+  "图片查看器": "Image viewer",
+  "上一张": "Previous image",
+  "下一张": "Next image",
+  "缩小": "Zoom out",
+  "放大": "Zoom in",
+  "适应窗口": "Fit to window",
+  "正在加载图片…": "Loading image…",
+  "图片加载失败，请关闭后重试。": "Image failed to load. Close and try again.",
+  "图片": "Image"
 }
