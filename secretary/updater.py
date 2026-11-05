@@ -230,12 +230,12 @@ open "$APP"
     return True
 
 
-def _windows_install(setup, work, expected_sha):
+def _windows_install(setup, work, expected_sha, desktop=False):
     from .windows_update import install
-    return install(setup, work, expected_sha)
+    return install(setup, work, expected_sha, desktop=desktop)
 
 
-def start(on_ready_to_quit):
+def start(on_ready_to_quit, desktop=False):
     """Download + verify + hand over to the installer helper, in the background.
     Calls on_ready_to_quit() once the helper is waiting for us to exit."""
     if not supported():
@@ -268,7 +268,7 @@ def start(on_ready_to_quit):
                 raise RuntimeError("这个版本没有提供校验文件，为了安全不自动安装，请到 Release 页面手动下载")
             _set(phase="installing")
             if MAC:ready=_mac_install(dest,work)
-            elif WINDOWS:ready=_windows_install(dest,work,expected)
+            elif WINDOWS:ready=_windows_install(dest,work,expected,desktop=desktop)
             else:
                 from .linux_update import install,ManualInstall
                 try:ready=install(dest,work,expected,st['latest'])

@@ -23,7 +23,7 @@ def main():
     setup=Path(f'dist/Stellar-Secretary-{__version__}-windows-x64-setup.exe').resolve()
     sha=hashlib.sha256(setup.read_bytes()).hexdigest()
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with tempfile.TemporaryDirectory(prefix='stellar-update-') as temp:
+    with tempfile.TemporaryDirectory(prefix='stellar-update-',ignore_cleanup_errors=True) as temp:
         root=Path(temp);install=root/'安装 test';data=root/'资料 test';assets=root/'assets';assets.mkdir()
         logs=Path('test-results/windows-update');logs.mkdir(parents=True,exist_ok=True)
         # Serve synthetic release metadata; the installer itself remains real and checksum verified.
