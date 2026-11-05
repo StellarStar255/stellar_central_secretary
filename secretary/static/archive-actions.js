@@ -40,7 +40,6 @@
  menu.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();document.querySelector('#archive-delete-menu').focus()}});
  async function requestTrash(id){
   if(menu.open)menu.close();
-  if(sending){toast(t('请等待当前消息处理完成后再删除。'));return}
   try{
    candidate=await api('/api/items/'+id);
    document.querySelector('#delete-archive-title').textContent=candidate.title;
@@ -58,7 +57,7 @@
   deleting=true;button.disabled=true;cancel.disabled=true;
   try{
    await sharedChatSaves;
-   const result=await api('/api/items/'+item.id+'/trash',{expected_updated:item.updated});
+   const result=await api('/api/items/'+item.id+'/trash',{});
    allItems=allItems.filter(value=>value.id!==item.id);if(selectedId===item.id){$('#detail-dialog').close();selectedId=''}
    candidate=null;dialog.close();lastMessageMarkup=null;renderSidebar();renderChat(false);await refresh();StellarLibraryManagement.undo(item.id);
   }catch(error){toast(error.message)}

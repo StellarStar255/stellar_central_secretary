@@ -21,14 +21,13 @@ class TrashTest(unittest.TestCase):
   self.assertEqual(query(self.a)['items'][0]['id'],self.id);self.assertEqual([i['id'] for i in query(self.a,favorite='1')['items']],[self.id]);self.assertEqual(self.a.get(self.id)['updated'],before)
   for invalid in ({'favorite':'true'},{'text':True},{}):
    with self.assertRaises(ValueError):self.a.set_flags(self.id,invalid)
- def test_busy_stale_and_purge_guard(self):
-  before=self.a.get(self.id);self.service.busy.add(self.id)
-  with self.assertRaises(ValueError):self.service.trash_item(self.id,before['updated'])
-  self.service.busy.clear()
-  with self.assertRaises(ValueError):self.service.trash_item(self.id,'old revision')
-  self.service.trash_item(self.id,before['updated']);stamp=self.a.trash_items()[0]['trashed_at'];self.a.restore_item(self.id)
+ def test_stale_trash_keeps_latest_data_and_purge_still_checks_revision(self):
+  before=self.a.get(self.id)
+  self.a.update(self.id,summary='Latest completed summary')
+  self.service.trash_item(self.id,before['updated']);self.assertEqual(self.a.get(self.id,True)['summary'],'Latest completed summary')
+  stamp=self.a.trash_items()[0]['trashed_at'];self.a.restore_item(self.id)
   with self.assertRaises(ValueError):self.service.delete_item(self.id,before['updated'],stamp)
-  self.service.trash_item(self.id,before['updated'])
+  self.service.trash_item(self.id)
   with self.assertRaises(ValueError):self.service.delete_item(self.id,before['updated'],stamp)
   current=self.a.trash_items()[0];self.service.delete_item(self.id,current['updated'],current['trashed_at']);self.assertFalse((self.a.root/'files'/self.id).exists());self.assertIn(self.id,self.a.deletion_refs()['deletedItemIds'])
  def test_backup_retains_trash_and_metadata(self):

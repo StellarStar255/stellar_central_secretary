@@ -132,6 +132,14 @@ with tempfile.TemporaryDirectory() as data:
             update = json.loads(request('/api/update/check', {}, status['token']))
             assert not update.get('error'), update
             print('PASS: frozen HTTPS update check with certificate verification enabled')
+        stale=json.loads(request('/api/items/'+fixture['id']))
+        request('/api/items/'+fixture['id']+'/title',{'title':'Changed while confirmation was open'},status['token'])
+        request('/api/items/'+fixture['id']+'/trash',{'expected_updated':stale['updated']},status['token'])
+        trashed=next(item for item in json.loads(request('/api/trash'))['items'] if item['id']==fixture['id'])
+        assert trashed['title']=='Changed while confirmation was open'
+        request('/api/trash/'+fixture['id']+'/restore',{},status['token'])
+        assert json.loads(request('/api/items/'+fixture['id']))['note']==stale['note']
+        print('PASS: frozen recycle-bin removal accepts completed background revisions and restore retains latest content')
         current=json.loads(request('/api/items/'+fixture['id']))
         deleted=json.loads(request('/api/items/'+fixture['id']+'/delete',{'confirmed':True,'expected_updated':current['updated']},status['token']))
         assert deleted['ok'] and not deleted['warning']
