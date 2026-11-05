@@ -116,6 +116,12 @@ with tempfile.TemporaryDirectory() as data:
         assert request('/api/items/'+pdf['id']+'/preview')==request('/api/items/'+pdf['id']+'/file')
         assert json.loads(request('/api/items?q=supporting'))[0]['id']==pdf['id']
         print('PASS: frozen append-to-PDF archive, appended-image preview, search and original PDF retained')
+        removal=json.loads(request('/api/items/'+pdf['id']+'/additions/'+batch['id']+'/attachments/'+batch['attachments'][0]['id']+'/delete-attachment',{'confirmed':True,'expected_updated':extra['item']['updated']},status['token']))
+        assert removal['ok'] and removal['recovery_saved']
+        after_removal=json.loads(request('/api/items/'+pdf['id']))
+        assert len(after_removal['additions'])==1 and after_removal['additions'][0]['attachments']==[] and len(after_removal['all_attachments'])==1
+        assert request('/api/items/'+pdf['id']+'/preview')==request('/api/items/'+pdf['id']+'/file')
+        print('PASS: frozen single attachment deletion preserves parent PDF, record and batch history with local recovery')
         if os.environ.get('SECRETARY_TLS_TEST') == '1':
             update = json.loads(request('/api/update/check', {}, status['token']))
             assert not update.get('error'), update

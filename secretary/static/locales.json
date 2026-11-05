@@ -917,5 +917,15 @@
   "追加附件": "Added attachment",
   "更多操作": "More actions",
   "打开附件：": "Open attachment: ",
-  "在顶部查看本批附件": "View this batch in all attachments"
+  "在顶部查看本批附件": "View this batch in all attachments",
+  "删除附件": "Delete attachment",
+  "删除这个附件？": "Delete this attachment?",
+  "仅移除所选附件，保留其他附件、资料记录和速记。已有摘要会标记为可能过期；原件会保留在本机删除备份中。": "Remove only this attachment. Other attachments, the item and quick notes are kept. Existing summaries will be marked as potentially outdated; a recovery copy stays on this computer.",
+  "附件已删除，原件备份保存在本机。": "Attachment deleted. A recovery copy is saved on this computer.",
+  "请确认删除这个附件。": "Confirm deletion of this attachment.",
+  "资料已更新，请刷新后重新选择附件。": "This item changed. Refresh and select the attachment again.",
+  "资料正在处理，请等待完成后再删除附件。": "This item is being processed. Wait until it finishes before deleting an attachment.",
+  "单个附件已删除，已有摘要可能过期；可手动重新整理。": "An attachment was deleted. Existing summaries may be outdated; summarize again if needed.",
+  "附件已删除，以下为删除前摘要；请重新整理后再使用。": "An attachment was deleted. The following summary predates deletion; regenerate it before use.",
+  "本批附件已删除。": "This batch’s attachments have been deleted."
 }
