@@ -1,0 +1,35 @@
+name: macOS portable-helper diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Isolated transaction and retained synthetic diagnostics
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys,os,tempfile,unittest,shutil,subprocess
+          from pathlib import Path
+          roots=[]
+          original=tempfile.TemporaryDirectory
+          class Retain(original):
+              def cleanup(self):
+                  self._finalizer.detach()
+                  roots.append(Path(self.name))
+          tempfile.TemporaryDirectory=Retain
+          print('Interpreter:',sys.executable,'shell python:',shutil.which('python3'),flush=True)
+          result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName('tests.test_linux_update_transaction'))
+          for root in roots:
+              for pattern in ('data/update.log','data/fixture.pid','data/updates/*.sh'):
+                  for path in root.glob(pattern):
+                      print('\nSYNTHETIC',path,flush=True)
+                      print(path.read_text(),flush=True)
+          sys.exit(not result.wasSuccessful())
+          PY
