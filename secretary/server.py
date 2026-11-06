@@ -19,6 +19,7 @@ import webbrowser
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from .local_http import LocalHTTPServer
 from pathlib import Path
 from PIL import Image
 
@@ -1105,7 +1106,7 @@ def main(desktop=False):
     parser.add_argument('--data-dir', default=str(paths.DATA_DIR))
     parser.add_argument('--no-browser', action='store_true'); args = parser.parse_args()
     service = Service(args.data_dir)
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), handler(service))
+    server = LocalHTTPServer(('127.0.0.1', args.port), handler(service))
     for item in service.archive.list():
         if item['state']=='pending': service.queue(item['id'])
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
