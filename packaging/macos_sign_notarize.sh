@@ -18,7 +18,18 @@ sign() {
   if [ "$IDENTITY" = "-" ]; then
     codesign --force --sign - "$1"
   else
-    codesign --force --timestamp --options runtime --entitlements "$ENT" --sign "$IDENTITY" "$1"
+    # Retry only transient TSA failures; never omit the secure timestamp or relax verification.
+    local attempt output
+    for attempt in 1 2 3 4; do
+      if output="$(codesign --force --timestamp --options runtime --entitlements "$ENT" --sign "$IDENTITY" "$1" 2>&1)"; then
+        printf '%s\n' "$output"
+        return 0
+      fi
+      printf '%s\n' "$output" >&2
+      if [[ "$output" != *"timestamp service is not available"* ]] || [ "$attempt" = 4 ]; then return 1; fi
+      echo "==> Retrying Apple timestamp ($attempt/3): $1" >&2
+      sleep "$((attempt * 2))"
+    done
   fi
 }
 
