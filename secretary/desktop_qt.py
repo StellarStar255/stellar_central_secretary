@@ -15,6 +15,11 @@ def run(address,service=None,server=None,open_browser=True):
     from PySide6.QtWidgets import QApplication,QFileDialog,QMainWindow,QMenu,QMessageBox,QSystemTrayIcon
     from PySide6.QtWebEngineCore import QWebEnginePage,QWebEngineProfile,QWebEngineSettings
     from PySide6.QtWebEngineWidgets import QWebEngineView
+    try:
+        from .desktop_video import VideoWindow
+    except ImportError as error:
+        VideoWindow=None
+        print('Native video unavailable; using the inline player:',error,flush=True)
     if sys.platform=='win32':
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Stellar.Secretary.Desktop')
@@ -136,7 +141,7 @@ def run(address,service=None,server=None,open_browser=True):
         window.setWindowTitle(tr('Stellar Secretary · 知识秘书')+' — '+label['title'])
         metadata={'enabled':True,'supports_window':True,'platform':'linux' if linux else 'windows','dock':linux and window.isVisible(),'tray':bool(tray.isVisible() and tray.isSystemTrayAvailable()),'state':label['icon'],'mode':mode['value'],'language':language(),'window_visible':window.isVisible(),'window_minimized':window.isMinimized(),'window_loaded':loaded['value'],'window_id':int(window.winId()),'browser_opens':mode['browser_opens']}
         state['desktop']=metadata
-        metadata['video_player']=True
+        metadata['video_player']=VideoWindow is not None
         if mode['video'] is not None:metadata['video_status']=mode['video'].status()
         if service is not None:service.desktop=metadata
     def tick():
@@ -146,9 +151,8 @@ def run(address,service=None,server=None,open_browser=True):
         if video_request.get('id') and video_request['id']!=mode['video_id']:
             mode['video_id']=video_request['id']
             import re
-            if re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:additions/[a-f0-9]{32}/)?attachments/[a-f0-9]{32})?/preview',video_request.get('url','')):
+            if VideoWindow is not None and re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:additions/[a-f0-9]{32}/)?attachments/[a-f0-9]{32})?/preview',video_request.get('url','')):
                 if mode['video'] is None:
-                    from .desktop_video import VideoWindow
                     def open_external(path):
                         def launch():
                             try:post(path+'/editor/open',{})

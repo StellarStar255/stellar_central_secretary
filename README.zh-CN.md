@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.66** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.66.md)
+版本 **v0.1.67** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.67.md)
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 
@@ -20,7 +20,7 @@
 
 - **macOS Apple 芯片**：打开 `Stellar-Secretary-*-macos-arm64.dmg`，把 Stellar Secretary 拖入「应用程序」，双击启动。
 - **Windows 10/11 x64**：运行 `Stellar-Secretary-*-windows-x64-setup.exe`，按提示安装，支持桌面快捷方式和卸载。
-- **Linux x64（Ubuntu 22.04+ / Debian 12+，glibc 2.35+）**：用 `sudo apt install ./Stellar-Secretary-*-linux-x64.deb` 安装，从应用菜单启动 Stellar Secretary，或运行 `stellar-secretary`。也可解压 `.tar.gz` 后运行 `./Stellar-Secretary/start.sh`。自带 Python，支持独立窗口、托盘菜单，以及设置中可切换的网页模式。关闭窗口会最小化到 Dock/任务栏；GNOME 显示托盘需启用 AppIndicator 支持，没有托盘时仍可通过 Dock 和窗口菜单操作。网页采集需另装 Google Chrome。
+- **Linux x64（Ubuntu 22.04+ / Debian 12+，glibc 2.35+）**：用 `sudo apt install ./Stellar-Secretary-*-linux-x64.deb` 安装，从应用菜单启动 Stellar Secretary，或运行 `stellar-secretary`。也可解压 `.tar.gz` 后运行 `./Stellar-Secretary/start.sh`。精简系统使用便携版原生视频播放器需安装 `libpulse0` 和 `libpulse-mainloop-glib0`；`.deb` 已声明这两项依赖。自带 Python，支持独立窗口、托盘菜单，以及设置中可切换的网页模式。关闭窗口会最小化到 Dock/任务栏；GNOME 显示托盘需启用 AppIndicator 支持，没有托盘时仍可通过 Dock 和窗口菜单操作。网页采集需另装 Google Chrome。
 
 Linux 的资料保存在 `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`。可在设置中检查更新并升级，资料保留。Debian 安装需要系统授权，取消授权后原程序继续运行。便携版自动升级要求程序目录可写、系统安装 Python 3，且资料位于程序目录之外；新版启动失败会恢复旧程序。也可手动安装新版 `.deb`。运行 `stellar-secretary --no-browser` 可仅启动后台服务；从终端启动时按 Ctrl+C 停止。
 

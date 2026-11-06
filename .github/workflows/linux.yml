@@ -15,7 +15,7 @@ jobs:
       - name: Linux desktop test tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb dbus-x11 openbox stalonetray xdotool wmctrl x11-utils fonts-noto-cjk libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libopengl0 policykit-1
+          sudo apt-get install -y xvfb dbus-x11 openbox stalonetray xdotool wmctrl x11-utils fonts-noto-cjk libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libopengl0 libpulse0 libpulse-mainloop-glib0 policykit-1
       - run: python -m pip install -r requirements.txt -r packaging/requirements-build.txt "websocket-client>=1.8,<2"
       - name: Check Qt runtime dependencies
         run: |
