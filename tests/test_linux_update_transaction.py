@@ -15,13 +15,17 @@ class PortableUpdateTransactionTest(unittest.TestCase):
 import argparse,json,os
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,HTTPServer
+from socketserver import TCPServer
 p=argparse.ArgumentParser();p.add_argument('--port',type=int);p.add_argument('--data-dir');args=p.parse_args()
 Path(args.data_dir,'fixture.pid').write_text(str(os.getpid()))
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def do_GET(self):
   raw=json.dumps({'application':'stellar-central-secretary','fixture':VERSION}).encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
-HTTPServer(('127.0.0.1',args.port),Handler).serve_forever()
+class FixtureServer(HTTPServer):
+ def server_bind(self):
+  TCPServer.server_bind(self);self.server_name=self.server_address[0];self.server_port=self.server_address[1]
+FixtureServer(('127.0.0.1',args.port),Handler).serve_forever()
 '''.replace('VERSION',repr(version))
             executable=current/'Stellar Secretary';executable.write_text(app('old'));executable.chmod(0o755)
             new=root/'candidate'/'Stellar-Secretary';(new/'_internal').mkdir(parents=True)
