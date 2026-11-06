@@ -72,7 +72,7 @@ def main():
             f'Installed-Size: {size}\nSection: utils\nPriority: optional\n'
             'Depends: libc6 (>= 2.35), libstdc++6, zlib1g, libegl1, libgl1, libopengl0, '
             'libnss3, libnspr4, libgbm1, libdrm2, libwayland-client0, libwayland-cursor0, libwayland-egl1, '
-            'libasound2t64 | libasound2, libdbus-1-3, libfontconfig1, '
+            'libasound2t64 | libasound2, libpulse0, libpulse-mainloop-glib0, libdbus-1-3, libfontconfig1, '
             'libxkbcommon0, libxkbcommon-x11-0, libx11-xcb1, libxcb-cursor0, libxcb-icccm4, '
             'libxcb-image0, libxcb-keysyms1, libxcb-render-util0, libxcb-xinerama0, libxcb-randr0, '
             'libxcb-shape0, libxcb-xfixes0, libxcb-sync1, libxcb-xkb1, libxcomposite1, '

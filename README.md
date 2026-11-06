@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.66** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.66.md)
+Version **v0.1.67** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.67.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -16,7 +16,7 @@ Download the installer from [GitHub Releases](https://github.com/StellarStar255/
 
 - **Apple Silicon Mac:** open the DMG, drag Stellar Secretary into Applications, then launch it. macOS releases use Apple Developer ID signing and notarization.
 - **Windows 10/11 x64:** run the setup EXE.
-- **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Linux includes a desktop window, tray menu and a browser display mode selectable in settings. Closing the window minimizes it to the Dock/taskbar. GNOME requires AppIndicator support for tray icons; the Dock and application menu remain available without it. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
+- **Linux x64 (Ubuntu 22.04+ / Debian 12+, glibc 2.35+):** install the `.deb` with `sudo apt install ./Stellar-Secretary-*-linux-x64.deb`, then launch **Stellar Secretary** from the applications menu or run `stellar-secretary`. Alternatively, extract the `.tar.gz` and run `./Stellar-Secretary/start.sh`. Minimal portable systems need `libpulse0` and `libpulse-mainloop-glib0` for the native video player; the `.deb` declares these dependencies. Linux includes a desktop window, tray menu and a browser display mode selectable in settings. Closing the window minimizes it to the Dock/taskbar. GNOME requires AppIndicator support for tray icons; the Dock and application menu remain available without it. Python is bundled. Install a browser and Google Chrome separately for webpage capture.
 
 Installed builds include Python and the browser automation driver. Automatic ChatGPT capture also needs Google Chrome. AI summaries and answers can use a locally installed, signed-in Codex CLI / Claude Code / Gemini CLI, or a configured OpenAI-compatible Chat Completions API. No CLI installation is needed for API mode.
 
