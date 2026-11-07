@@ -17,6 +17,44 @@ def desktop_session(platform=None,env=None):
 
 
 def main():
+    # A status probe alone is not a single-instance guard: HTTP becomes available
+    # before Qt publishes its desktop state, especially just after an upgrade.
+    explicit_desktop = '--desktop' in sys.argv
+    desktop = desktop_session() and (explicit_desktop or '--no-browser' not in sys.argv)
+    if sys.platform != 'win32' or not desktop:
+        return _main()
+    from .windows_instance import DesktopSlot, acquire_or_activate
+    probe = argparse.ArgumentParser(add_help=False)
+    probe.add_argument('--port', type=int, default=8768)
+    probe.add_argument('--data-dir')
+    known, _ = probe.parse_known_args()
+    address = 'http://127.0.0.1:'+str(known.port)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def activate():
+        try:
+            with opener.open(address+'/api/status', timeout=2) as response:
+                status = json.load(response)
+            if status.get('application') != 'stellar-central-secretary':
+                return False
+            if known.data_dir and Path(known.data_dir).resolve() != Path(status.get('data_dir', '')).resolve():
+                raise RuntimeError('此端口已有使用其他资料目录的实例，请使用不同端口。')
+            if not status.get('desktop', {}).get('supports_window'):
+                return False
+            if '--no-browser' not in sys.argv:
+                request = urllib.request.Request(address+'/api/interface', data=json.dumps({'mode':status['settings'].get('interface_mode','desktop')}).encode(), headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
+                opener.open(request, timeout=3).close()
+            return True
+        except (OSError, ValueError):
+            return False
+    slot = DesktopSlot(known.port)
+    try:
+        if acquire_or_activate(slot, activate):
+            return _main()
+    finally:
+        slot.close()
+
+
+def _main():
     paths.configure_tls()
     explicit_desktop = '--desktop' in sys.argv
     if explicit_desktop: sys.argv.remove('--desktop')

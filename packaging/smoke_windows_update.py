@@ -57,7 +57,7 @@ def main():
         with archive.db() as db:before=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         address=f'http://127.0.0.1:{port}'
-        env=dict(os.environ,SECRETARY_UPDATE_API=url+'/release',QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu')
+        env=dict(os.environ,SECRETARY_UPDATE_API=url+'/release')
         proc=subprocess.Popen([str(exe),'--desktop','--no-browser','--port',str(port),'--data-dir',str(data)],env=env)
         status={}
         def request(path,body=None):

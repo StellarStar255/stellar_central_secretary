@@ -24,6 +24,12 @@ a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
              hiddenimports=collect_submodules('secretary') + collect_submodules('pypdf')
                            + ['cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython']+(['PySide6'] if not QT_DESKTOP else []))
+if WINDOWS:
+    # Qt >= 6.10 imports Windows' unversioned ICU API (Windows 10+). A conda
+    # installation on the build machine's PATH can supply same-named DLLs with
+    # incompatible, version-suffixed exports. Let Windows load its own ICU.
+    system_icu = {'icu.dll', 'icuuc.dll', 'icuin.dll'}
+    a.binaries = [item for item in a.binaries if Path(item[0]).name.lower() not in system_icu]
 exe = EXE(PYZ(a.pure), a.scripts, [('X utf8', None, 'OPTION')],
           name=APP, exclude_binaries=True, console=False,
           icon=str(ROOT/'secretary/static/icons'/('app.icns' if MAC else 'app.ico')))

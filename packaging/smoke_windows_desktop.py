@@ -18,10 +18,12 @@ def main():
         archive=Archive(root);archive.configure('codex',False);archive.set_language('en')
         item_id,_=archive.add('Synthetic Windows reference','Desktop and browser share this synthetic reference.')
         (Path(root)/'conversations.json').write_text(json.dumps({'conversations':[{'id':'shared-fixture','title':'Shared Windows history','updated':1,'messages':[{'id':'fixture-message','role':'user','text':'Shared Windows history fixture'}]}],'activeId':'shared-fixture'}),encoding='utf-8')
-        command=[sys.executable,'-m','secretary.launcher'] if args.source else [str(Path('dist/Stellar Secretary/Stellar Secretary.exe').resolve())]
+        command=[sys.executable,'-X','utf8','-m','secretary.launcher'] if args.source else [str(Path('dist/Stellar Secretary/Stellar Secretary.exe').resolve())]
         common=['--desktop','--port',str(port),'--data-dir',root]
-        env={**os.environ,'SECRETARY_DATA_DIR':root,'QTWEBENGINE_REMOTE_DEBUGGING':f'127.0.0.1:{debug_port}','QTWEBENGINE_CHROMIUM_FLAGS':f'--disable-gpu --remote-allow-origins=http://127.0.0.1:{debug_port}'}
-        proc=subprocess.Popen(command+common+['--no-browser'],env=env);channel=None;serial=0
+        env={**os.environ,'SECRETARY_DATA_DIR':root,'QTWEBENGINE_REMOTE_DEBUGGING':f'127.0.0.1:{debug_port}','QTWEBENGINE_CHROMIUM_FLAGS':f'--remote-allow-origins=http://127.0.0.1:{debug_port}'}
+        # Race three cold launches, as happens with installer restart + shortcuts.
+        processes=[subprocess.Popen(command+common+['--no-browser'],env=env) for _ in range(3)]
+        proc=processes[0];channel=None;serial=0
         def request(path,body=None):
             headers={'Content-Type':'application/json'}
             if body is not None:headers['X-Knowledge-Token']=status['token']
@@ -30,7 +32,7 @@ def main():
         def wait(check,seconds=40):
             deadline=time.monotonic()+seconds;last=None
             while time.monotonic()<deadline:
-                if proc.poll() is not None:raise RuntimeError('Native process exited unexpectedly')
+                if not any(p.poll() is None for p in processes):raise RuntimeError('Native processes exited unexpectedly')
                 try:
                     last=check()
                     if last:return last
@@ -51,6 +53,9 @@ def main():
             return value.get('result',{}).get('value')
         try:
             status=wait(lambda:(lambda value:value if value['desktop'].get('supports_window') else None)(request('/api/status')))
+            wait(lambda:sum(p.poll() is None for p in processes)==1)
+            proc=next(p for p in processes if p.poll() is None)
+            assert all(p.returncode==0 for p in processes if p is not proc)
             assert status['desktop']['platform']=='windows'
             request('/api/interface',{'mode':'desktop'})
             status=wait(lambda:(lambda value:value if value['desktop'].get('window_visible') and value['desktop'].get('window_loaded') else None)(request('/api/status')))
@@ -78,6 +83,19 @@ def main():
                     js("document.querySelector('#settings-dialog').close();true")
                     png=rpc('Page.captureScreenshot',{'format':'png'})['data'];folder=Path('test-results');folder.mkdir(exist_ok=True);(folder/('windows-desktop-source.png' if args.source else 'windows-desktop-frozen.png')).write_bytes(base64.b64decode(png))
                     from ctypes import wintypes
+                    from PIL import ImageGrab
+                    # Exercise the native compositor as well as Chromium's DOM.
+                    user32=ctypes.windll.user32
+                    rect=wintypes.RECT()
+                    user32.GetWindowRect.argtypes=[wintypes.HWND,ctypes.POINTER(wintypes.RECT)]
+                    user32.SetWindowPos.argtypes=[wintypes.HWND,wintypes.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT]
+                    assert user32.GetWindowRect(window_id,ctypes.byref(rect))
+                    width=rect.right-rect.left;height=rect.bottom-rect.top
+                    for delta in (80,0,120,0):
+                        assert user32.SetWindowPos(window_id,None,0,0,width-delta,height-delta//2,0x0002|0x0004)
+                        time.sleep(.15)
+                    wait(lambda:js("document.querySelector('#messages')?.textContent.includes('Shared Windows history fixture')"))
+                    ImageGrab.grab(window=window_id).save(folder/('windows-desktop-source-native.png' if args.source else 'windows-desktop-frozen-native.png'))
                     close=ctypes.windll.user32.PostMessageW;close.argtypes=[wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM];close.restype=wintypes.BOOL
                     assert close(window_id,0x0010,0,0)
                     wait(lambda:(lambda value:not value['desktop'].get('window_visible') or value['desktop'].get('window_minimized'))(request('/api/status')))
@@ -102,6 +120,8 @@ def main():
             if proc.poll() is None:
                 try:request('/api/shutdown',{'force':True});proc.wait(timeout=10)
                 except Exception:proc.kill();proc.wait()
+            for candidate in processes:
+                if candidate.poll() is None:candidate.kill();candidate.wait()
             log=Path(root)/'app.log'
             if log.exists():print(log.read_text(encoding='utf-8'))
 

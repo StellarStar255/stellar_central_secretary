@@ -1,15 +1,27 @@
 """Qt desktop host for Windows and Linux with a bundled view and tray controls."""
-import json,os,sys,threading,urllib.parse,urllib.request,uuid,webbrowser
+import json,os,sys,threading,urllib.error,urllib.parse,urllib.request,uuid,webbrowser
 from pathlib import Path
 from .desktop_status import presentation
 from .i18n import translate
 from .system_integration import open_browser as launch_browser
+
+def configure_rendering(platform=None,env=None):
+    platform=sys.platform if platform is None else platform
+    env=os.environ if env is None else env
+    if platform!='win32':return
+    # Both layers must use software rendering; disabling Chromium's GPU alone
+    # still leaves Qt Quick compositing on the Windows graphics driver.
+    env['QT_QUICK_BACKEND']='software'
+    flags=env.get('QTWEBENGINE_CHROMIUM_FLAGS','')
+    if '--disable-gpu' not in flags.split():
+        env['QTWEBENGINE_CHROMIUM_FLAGS']=(flags+' --disable-gpu').strip()
 
 def local_navigation(address,url):
     source=urllib.parse.urlsplit(address);target=urllib.parse.urlsplit(url)
     return target.scheme in ('http','https') and (source.scheme,source.netloc)==(target.scheme,target.netloc)
 
 def run(address,service=None,server=None,open_browser=True):
+    configure_rendering()
     from PySide6.QtCore import QCoreApplication,QEvent,QTimer,QUrl
     from PySide6.QtGui import QAction,QDesktopServices,QIcon
     from PySide6.QtWidgets import QApplication,QFileDialog,QMainWindow,QMenu,QMessageBox,QSystemTrayIcon
@@ -32,6 +44,22 @@ def run(address,service=None,server=None,open_browser=True):
     state={'value':{},'desktop':{},'errors':0,'exit':False};stopped=threading.Event();owner=uuid.uuid4().hex
     mode={'value':'desktop','handled':None,'started':False,'browser_opens':0,'panel':None,'video_id':None,'video':None}
     worker=None
+    # Publish/claim ownership before exposing HTTP or opening the shared Chromium
+    # profile. A rejected peer must never keep running as another tray host.
+    state['desktop']={'enabled':True,'supports_window':True,'platform':'linux' if linux else 'windows','mode':'desktop','state':'starting'}
+    if service is not None:service.desktop=dict(state['desktop'])
+    else:
+        with opener.open(address+'/api/status',timeout=3) as response:state['value']=json.load(response)
+        request=urllib.request.Request(address+'/api/desktop/heartbeat',data=json.dumps({'owner':owner,'desktop':state['desktop']}).encode(),headers={'Content-Type':'application/json','X-Knowledge-Token':state['value'].get('token','')})
+        try:opener.open(request,timeout=5).close()
+        except urllib.error.HTTPError:
+            # Another host won the lease while this launcher was starting.
+            with opener.open(address+'/api/status',timeout=3) as response:current=json.load(response)
+            if not current.get('desktop',{}).get('supports_window'):raise
+            if open_browser:
+                request=urllib.request.Request(address+'/api/interface',data=json.dumps({'mode':current['settings'].get('interface_mode','desktop')}).encode(),headers={'Content-Type':'application/json','X-Knowledge-Token':current['token']})
+                opener.open(request,timeout=3).close()
+            return
     if server is not None:
         if service is not None:
             with service.archive.db() as db:configured=db.execute("SELECT 1 FROM settings WHERE key='interface_mode'").fetchone()
@@ -48,6 +76,11 @@ def run(address,service=None,server=None,open_browser=True):
                 state['value']=value
                 if service is None and state['desktop']:post('/api/desktop/heartbeat',{'owner':owner,'desktop':state['desktop']})
                 state['errors']=0
+            except urllib.error.HTTPError as error:
+                # Losing the desktop lease is terminal, not a transient network
+                # failure. Do not leave a rejected tray sharing the same profile.
+                state['errors']+=1
+                if service is None and error.code in (400,409) or state['errors']>=5 and state['value']:state['exit']=True
             except Exception:
                 state['errors']+=1
                 if state['errors']>=5 and state['value']:state['exit']=True
@@ -133,6 +166,7 @@ def run(address,service=None,server=None,open_browser=True):
         for action,_ in actions:app_menu.addAction(action)
     shortcut=QAction(window);shortcut.setShortcut('Ctrl+Q');shortcut.triggered.connect(quit_request);window.addAction(shortcut)
     tray.activated.connect(lambda reason:request_mode('desktop') if reason==QSystemTrayIcon.ActivationReason.DoubleClick or linux and reason==QSystemTrayIcon.ActivationReason.Trigger else None);tray.show()
+    app.aboutToQuit.connect(tray.hide)
     def refresh():
         value=state['value'];label=presentation(value);icon=QIcon(str(icons/('tray-'+label['icon']+'.png')))
         tray.setIcon(icon);tray.setToolTip(tr('知识秘书')+' · '+label['detail']);status_action.setText(label['detail'])

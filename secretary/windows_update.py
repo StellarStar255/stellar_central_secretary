@@ -19,9 +19,12 @@ function Report($phase, $message) {
     Move-Item -LiteralPath $temp -Destination $config.result -Force
 }
 function Relaunch {
+    if ($script:relaunched) { return }
     $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
     Start-Process -FilePath $config.exe -ArgumentList $config.arguments -WorkingDirectory (Split-Path $config.exe) -ErrorAction Stop | Out-Null
+    $script:relaunched = $true
 }
+$script:relaunched = $false
 $exited = $false
 $transcript = $false
 try {
@@ -43,7 +46,7 @@ try {
     }
     # ArgumentList arrays are joined by PowerShell, so quote paths explicitly.
     $installerArgs = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /RESTARTEXITCODE=3010 /DIR="' + (Split-Path $config.exe) + '" /LOG="' + $config.installer_log + '"'
-    $installer = Start-Process -FilePath $config.setup -ArgumentList $installerArgs -WorkingDirectory $PSScriptRoot -PassThru -Wait
+    $installer = Start-Process -FilePath $config.setup -ArgumentList $installerArgs -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -Wait
     if ($installer.ExitCode -ne 0) { throw ('Installer exit code: ' + $installer.ExitCode + '. See ' + $config.installer_log) }
     Relaunch
     Report 'complete' ''

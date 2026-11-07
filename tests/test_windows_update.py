@@ -55,6 +55,24 @@ assert windows_update.install(work/'setup.exe',work,'0'*64)
                 try:helper.unlink()
                 except PermissionError:time.sleep(.1)
 
+    @unittest.skipUnless(sys.platform=='win32','Windows PowerShell helper')
+    def test_relaunch_is_idempotent_if_reporting_fails_after_start(self):
+        # Execute the actual helper function; a failed completion report enters
+        # the recovery path and must not start a second copy of the application.
+        function=windows_update.SCRIPT.split('function Relaunch {',1)[1].split('$exited =',1)[0]
+        script="function Relaunch {"+function+'''
+$config = @{exe='fixture.exe'; arguments='--port 9999'}
+$script:starts = 0
+function Start-Process { $script:starts += 1 }
+try { Relaunch; throw 'Report failed' } catch { Relaunch }
+if ($script:starts -ne 1) { throw "Duplicate restart: $script:starts" }
+'''
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'relaunch.ps1';path.write_text(script,encoding='utf-8-sig')
+            powershell=Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
+            subprocess.run([str(powershell),'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(path)],
+                           check=True,capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
+
     def test_handoff_preserves_install_location_arguments_and_resets_frozen_environment(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve();work = root/'更新 with spaces';work.mkdir()
