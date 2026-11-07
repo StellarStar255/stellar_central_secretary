@@ -956,7 +956,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1088,13 +1088,21 @@ def handler(service):
                     if path.endswith('/title'):
                         title=body.get('title')
                         if not isinstance(title,str) or not title.strip() or len(title.strip())>300:raise ValueError('标题不能为空，且不能超过 300 个字符')
-                        service.archive.update(item_id,title=title.strip())
+                        with service.archive.lock:
+                            if 'expected_title' in body and service.archive.get(item_id)['title']!=body['expected_title']:raise ValueError('标题已在其他窗口更新，草稿已保留，请核对后保存。')
+                            service.archive.update(item_id,title=title.strip())
                         return self.send(200,{'ok':True,'item':service.archive.get(item_id)})
                     if 'text' in body:
                         text = str(body['text'])
                         if len(text)>2_000_000: raise ValueError('正文超过 200 万字')
-                        service.archive.update(item_id, text=text, summary='', tags=[], category='未分类', state='pending' if text.strip() else 'needs_content', error='')
+                        with service.archive.lock:
+                            current=service.archive.get(item_id)
+                            if 'expected_text' in body and current['text']!=body['expected_text']:raise ValueError('正文已在其他窗口更新，草稿已保留，请核对后保存。')
+                            if body.get('defer_summary'):
+                                service.archive.update(item_id,text=text,state='ready' if current['summary'] else 'saved',error='正文已修改，已有摘要可能过期；可手动重新整理。')
+                            else:service.archive.update(item_id, text=text, summary='', tags=[], category='未分类', state='pending' if text.strip() else 'needs_content', error='')
                     if 'title' in body: service.archive.update(item_id, title=str(body['title'])[:300])
+                    if body.get('defer_summary'):return self.send(200,{'ok':True,'item':service.archive.get(item_id)})
                     service.queue(item_id, force=True, full_pdf=body.get('full_pdf') is True); return self.send(200, {'ok':True})
                 self.send(404, {'error':'不存在'})
             except company_ai.ApprovalRequired as exc:self.send(409,{'error':str(exc),'company_model':exc.info})

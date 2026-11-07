@@ -91,7 +91,20 @@ def main():
             status=wait(lambda:request('/api/status'),240)
             wait(lambda:request('/api/status')['desktop'].get('supports_window'))
             result=data/'windows-update.json'
-            wait(lambda:result.exists() and json.loads(result.read_text(encoding='utf-8-sig')).get('phase')=='complete')
+            wait(lambda:result.exists() and json.loads(result.read_text(encoding='utf-8-sig')).get('phase')=='rolled_back',180)
+            assert b'old installation probe' in asset.read_bytes(),'Version mismatch did not restore previous program'
+            status=wait(native_status)
+            # Exercise the same frozen worker with the real expected version.
+            from unittest.mock import patch
+            from secretary import paths,update_transaction
+            work=data/'updates'/'positive';work.mkdir(parents=True)
+            pid=request('/api/update/health')['pid']
+            argv=[str(exe),'--no-browser','--port',str(port),'--data-dir',str(data)]
+            with patch.object(paths,'DATA_DIR',data),patch.object(paths,'FROZEN',True),patch.object(sys,'executable',str(exe)),patch.object(sys,'argv',argv):
+                update_transaction.prepare(setup,work,sha,__version__,desktop=True,kind='windows',parent_pid=pid)
+            request('/api/shutdown',{})
+            wait(lambda:result.exists() and json.loads(result.read_text(encoding='utf-8-sig')).get('phase')=='complete',180)
+            status=wait(native_status)
             assert status['version']==__version__,status.get('version')
             assert Path(status['data_dir']).resolve()==data.resolve()
             assert hashlib.sha256(asset.read_bytes()).hexdigest()==original,'Installer did not replace existing files'

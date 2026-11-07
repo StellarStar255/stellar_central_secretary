@@ -9,6 +9,7 @@
    draft={id:item.id,text:item.note||'',images:(item.note_images||[]).map(image=>({...image,key:image.id})),version:item.note_version,revision:0,dirty:false,busy:false,error:'',timer:null};
    try{const cached=JSON.parse(localStorage.getItem(storageKey(item.id))||'null');if(cached&&typeof cached.text==='string'&&cached.version===item.note_version&&cached.text!==draft.text){draft.text=cached.text;draft.dirty=true}}catch{}
    drafts.set(item.id,draft);
+   void globalThis.StellarDrafts?.read('note:'+item.id).then(cached=>{if(cached&&typeof cached.text==='string'&&!draft.dirty&&!draft.busy&&!draft.deleted){draft.text=cached.text;draft.version=cached.version;draft.images=cached.images||draft.images;draft.dirty=true;draft.revision++;draft.onRestore?.()}});
   }
   return draft;
  }
@@ -19,7 +20,7 @@
   const text=container.querySelector('#note-text'),status=container.querySelector('#note-status'),saveButton=container.querySelector('#note-save');
   const active=()=>document.querySelector('.quick-note')===container;
   function paint(){if(!active())return;status.textContent=draft.busy?t('正在保存…'):draft.error?t('保存失败：')+draft.error:draft.dirty?t('尚未保存'):t('已保存');status.classList.toggle('note-error',!!draft.error);saveButton.disabled=draft.busy}
-  function cache(){if(draft.deleted)return;try{localStorage.setItem(storageKey(item.id),JSON.stringify({text:draft.text,version:draft.version}))}catch{}}
+  function cache(){if(draft.deleted)return;void globalThis.StellarDrafts?.cache('note:'+item.id,{text:draft.text,images:draft.images,version:draft.version});try{localStorage.setItem(storageKey(item.id),JSON.stringify({text:draft.text,version:draft.version}))}catch{}}
   function changed(){if(draft.deleted)return;draft.dirty=true;draft.error='';draft.revision++;cache();paint();clearTimeout(draft.timer);draft.timer=setTimeout(save,500)}
   function images(){if(!active())return;container.querySelector('#note-images').innerHTML=imageMarkup(draft);container.querySelectorAll('[data-note-remove]').forEach(button=>button.onclick=()=>{draft.images.splice(Number(button.dataset.noteRemove),1);images();changed()})}
   async function save(){
@@ -31,7 +32,7 @@
     draft.version=result.item.note_version;
     snapshot.forEach((image,index)=>{const current=draft.images.findIndex(value=>value.key===image.key);if(current>=0)draft.images[current]={...result.item.note_images[index],key:image.key}});
     draft.dirty=draft.revision!==revision;
-    if(!draft.dirty){try{localStorage.removeItem(storageKey(item.id))}catch{}}else cache();
+    if(!draft.dirty){void globalThis.StellarDrafts?.discard('note:'+item.id);try{localStorage.removeItem(storageKey(item.id))}catch{}}else cache();
     images();onSaved?.(result.item);
    }catch(error){draft.error=error.message}
    finally{draft.busy=false;if(!draft.deleted){paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500)}}
@@ -47,7 +48,7 @@
     }
    }catch(error){toast(error.message)}
   }
-  draft.save=save;
+  draft.save=save;draft.onRestore=()=>{if(active()){text.value=draft.text;images();paint();draft.timer=setTimeout(save,500)}};
   text.onblur=()=>void save();
   text.oninput=()=>{draft.text=text.value;changed()};
   text.onkeydown=event=>{if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();void save()}if(event.key==='Escape'&&(draft.busy||draft.dirty)){event.preventDefault();event.stopPropagation();void save()}};
@@ -60,6 +61,8 @@
  }
  addEventListener('blur',()=>{for(const draft of drafts.values())if(draft.dirty)void draft.save?.()});
  addEventListener('beforeunload',event=>{if(Array.from(drafts.values()).some(draft=>draft.dirty||draft.busy)){event.preventDefault();event.returnValue=''}});
- function discard(id){const draft=drafts.get(id);if(draft){draft.deleted=true;draft.dirty=false;clearTimeout(draft.timer);drafts.delete(id)}try{localStorage.removeItem(storageKey(id))}catch{}}
- globalThis.StellarNotes={render,bind,discard,isDirty:id=>{const draft=drafts.get(id);return !!draft&&(draft.dirty||draft.busy)}};
+ function discard(id){void globalThis.StellarDrafts?.discard('note:'+id);const draft=drafts.get(id);if(draft){draft.deleted=true;draft.dirty=false;clearTimeout(draft.timer);drafts.delete(id)}try{localStorage.removeItem(storageKey(id))}catch{}}
+ async function flushAll(){for(const draft of drafts.values()){const deadline=Date.now()+10000;while((draft.dirty||draft.busy)&&!draft.deleted){if(draft.error)return false;if(!draft.busy)await draft.save?.();else await new Promise(resolve=>setTimeout(resolve,25));if(Date.now()>deadline)return false}}return true}
+ async function cacheAll(){for(const draft of drafts.values())if((draft.dirty||draft.busy)&&!draft.deleted&&!await StellarDrafts.cache('note:'+draft.id,{text:draft.text,images:draft.images,version:draft.version}))return false;return true}
+ globalThis.StellarNotes={render,bind,discard,flushAll,cacheAll,hasDirty:()=>[...drafts.values()].some(d=>d.dirty||d.busy),isDirty:id=>{const draft=drafts.get(id);return !!draft&&(draft.dirty||draft.busy)}};
 })();
