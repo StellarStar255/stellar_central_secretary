@@ -55,6 +55,10 @@ def status():
         result = last_result()
         if result.get('phase') == 'error':
             value['error'] = '上次 Windows 更新未完成：'+str(result.get('error',''))
+    if value['phase'] in ('idle','error') and not value['error']:
+        from .update_transaction import last_result
+        result=last_result()
+        if result.get('phase') in ('error','rolled_back'):value['error']=str(result.get('error',''))
     return value
 
 
@@ -191,48 +195,13 @@ def _mac_install(dmg, work):
         subprocess.Popen(["open", str(dmg)])  # let the user drag it to Applications
         _set(phase="manual", error=None)
         return False
-    # Check the new app before we hand over: mount, verify signature, unmount.
-    mnt = Path(tempfile.mkdtemp(prefix="secretary-mnt-"))
-    subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", str(mnt), str(dmg)],
-                   check=True, capture_output=True)
-    try:
-        _verify_mac_app(mnt / f"{APP_NAME}.app")
-    finally:
-        subprocess.run(["hdiutil", "detach", "-quiet", str(mnt)], capture_output=True)
-    q = shlex.quote
-    script = work / "install.sh"
-    script.write_text(f"""#!/bin/bash
-# Installed by 知识秘书's updater: wait for the app to quit, swap in the new version, relaunch.
-exec >>{q(str(paths.DATA_DIR / "update.log"))} 2>&1
-set -eu
-APP={q(str(bundle))}; DMG={q(str(dmg))}; PID={os.getpid()}
-echo "== $(date) updating $APP"
-for i in $(seq 1 120); do kill -0 $PID 2>/dev/null || break; sleep 0.5; done
-if kill -0 $PID 2>/dev/null; then echo "app still running; update cancelled"; exit 1; fi
-MNT=$(mktemp -d)
-hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" || {{ open "$APP"; exit 1; }}
-rm -rf "$APP.new"
-ditto "$MNT/{APP_NAME}.app" "$APP.new"
-hdiutil detach -quiet "$MNT"
-if codesign --verify --deep --strict "$APP.new" && codesign -dv "$APP.new" 2>&1 | grep -q "TeamIdentifier={TEAM_ID}"; then
-  BACKUP="$APP.previous-$(date +%s)"
-  mv "$APP" "$BACKUP"
-  if mv "$APP.new" "$APP"; then rm -rf "$BACKUP"; else mv "$BACKUP" "$APP"; fi
-  echo "updated"
-else
-  echo "signature check failed; keeping the current version"; rm -rf "$APP.new"
-fi
-open "$APP"
-""")
-    script.chmod(0o755)
-    subprocess.Popen(["/bin/bash", str(script)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
-    return True
+    from .update_transaction import prepare
+    return prepare(dmg,work,_sha256(dmg),status()['latest'],desktop=True,kind='mac')
 
 
 def _windows_install(setup, work, expected_sha, desktop=False):
-    from .windows_update import install
-    return install(setup, work, expected_sha, desktop=desktop)
+    from .update_transaction import prepare
+    return prepare(setup,work,expected_sha,status()['latest'],desktop=desktop,kind='windows')
 
 
 def start(on_ready_to_quit, desktop=False):
@@ -270,8 +239,9 @@ def start(on_ready_to_quit, desktop=False):
             if MAC:ready=_mac_install(dest,work)
             elif WINDOWS:ready=_windows_install(dest,work,expected,desktop=desktop)
             else:
-                from .linux_update import install,ManualInstall
-                try:ready=install(dest,work,expected,st['latest'])
+                from .linux_update import install_kind,ManualInstall
+                from .update_transaction import prepare
+                try:ready=prepare(dest,work,expected,st['latest'],desktop=desktop,kind=install_kind())
                 except ManualInstall as error:
                     from .system_integration import open_browser
                     open_browser(work.as_uri());_set(phase='manual',error=str(error));ready=False
