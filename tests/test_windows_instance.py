@@ -54,6 +54,7 @@ class WindowsInstanceTest(unittest.TestCase):
             with patch.object(launcher.sys,'platform','win32'), patch.object(launcher.sys,'argv',['app']), \
                  patch('secretary.windows_instance.DesktopSlot',return_value=slot), \
                  patch('secretary.windows_instance.acquire_or_activate',return_value=True), \
+                 patch.object(launcher.urllib.request,'build_opener'), \
                  patch.object(launcher,'_main',side_effect=failure) as start:
                 if failure:
                     with self.assertRaises(RuntimeError):launcher.main()
