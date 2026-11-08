@@ -75,24 +75,57 @@ class Backups:
                 with self.archive.lock,tempfile.TemporaryDirectory(dir=self.folder) as temp:
                     snapshot=Path(temp)/'archive.sqlite3'
                     with closing(sqlite3.connect(snapshot)) as dst,self.archive.db() as src:src.backup(dst)
+                    with closing(sqlite3.connect(snapshot)) as db:record_count=db.execute('SELECT count(*) FROM items').fetchone()[0]
                     with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as output:
-                        output.write(snapshot,'archive.sqlite3');output.writestr('archive.json',json.dumps(self.archive.export(),ensure_ascii=False))
+                        manifest={}
+                        def write_file(path,name):
+                            hasher=hashlib.sha256();size=0
+                            with path.open('rb') as src,output.open(name,'w',force_zip64=True) as dst:
+                                while chunk:=src.read(1024*1024):hasher.update(chunk);size+=len(chunk);dst.write(chunk)
+                            manifest[name]={'sha256':hasher.hexdigest(),'size':size}
+                        def write_bytes(name,value):
+                            raw=value.encode();output.writestr(name,raw);manifest[name]={'sha256':hashlib.sha256(raw).hexdigest(),'size':len(raw)}
+                        write_file(snapshot,'archive.sqlite3');write_bytes('archive.json',json.dumps(self.archive.export(),ensure_ascii=False))
                         for source in (self.archive.root/'files').iterdir():
-                            if source.is_file():output.write(source,'files/'+source.name)
+                            if source.is_file():write_file(source,'files/'+source.name)
                         chats=self.archive.root/'conversations.json'
-                        if chats.exists():output.write(chats,'conversations.json')
+                        if chats.exists():write_file(chats,'conversations.json')
+                        output.writestr('manifest.json',json.dumps({'version':1,'records':record_count,'files':manifest}))
                 with temporary.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
                 if temporary.stat().st_size>self.limit:raise ValueError('单份备份超过容量上限，请提高备份容量；已有备份保留。')
                 temporary.replace(target)
                 value={'id':key,'created':datetime.now(timezone.utc).isoformat(),'reason':reason,'size':target.stat().st_size,'sha256':digest}
                 meta=self.folder/(key+'.json');meta.write_text(json.dumps(value))
+                value=self.verify(key,allow_source_mismatch=reason=='before-restore')
+                if value['verification']['state']!='verified':
+                    self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
+                    return value
                 self._prune(key)
                 self._save_state(state='ready',last_success=value['created'],last_error='')
                 self.error='';return value
             except Exception as error:
                 temporary.unlink(missing_ok=True);self.error=str(error);self._save_state(state='error',last_error=self.error);raise
+    def verify(self,key,allow_source_mismatch=False):
+        from . import backup_verification
+        with self.lock:
+            entry=next((value for value in self.entries() if value['id']==key),None)
+            if not entry:raise ValueError('本机备份不存在')
+            meta=Path(entry['folder'])/(key+'.json');checked=datetime.now(timezone.utc).isoformat()
+            def save(value):
+                entry['verification']=value
+                encoded={name:value for name,value in entry.items() if name!='folder'}
+                temporary=meta.with_suffix('.verify-part');temporary.write_text(json.dumps(encoded));temporary.replace(meta)
+                self._save_state(last_verification=value)
+            self._save_state(last_verification={'state':'checking','id':key,'checked_at':checked})
+            try:
+                with self.archive.db() as db:max_schema=db.execute('PRAGMA user_version').fetchone()[0]
+                result=backup_verification.verify(Path(entry['folder'])/(key+'.zip'),entry['sha256'],max_schema,allow_source_mismatch)
+                value={**result,'id':key,'checked_at':datetime.now(timezone.utc).isoformat()};save(value)
+                return {name:value for name,value in entry.items() if name!='folder'}
+            except Exception as error:
+                save({'state':'failed','id':key,'checked_at':datetime.now(timezone.utc).isoformat(),'error':str(error)[:1000]});raise
     def due(self):
-        if not any(value['reason']=='daily' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self.entries()):self.create('daily')
+        if not any(value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self.entries()):self.create('daily')
     def start(self):
         def loop():
             while not self.stop.is_set():
@@ -104,6 +137,7 @@ class Backups:
         with self.lock,self.archive.lock:
             entry=next((value for value in self.entries() if value['id']==key),None)
             if not entry:raise ValueError('本机备份不存在')
+            self.verify(key)
             source=Path(entry['folder'])/(key+'.zip')
             with source.open('rb') as stream:
                 if hashlib.file_digest(stream,'sha256').hexdigest()!=entry['sha256']:raise ValueError('备份校验失败，未修改当前资料')
@@ -112,7 +146,7 @@ class Backups:
                 with zipfile.ZipFile(source) as archive:
                     for info in archive.infolist():
                         name=info.filename
-                        if name not in ('archive.sqlite3','archive.json','conversations.json') and not re.fullmatch(r'files/[a-f0-9]{32}',name):raise ValueError('备份包含无效文件')
+                        if name not in ('archive.sqlite3','archive.json','conversations.json','manifest.json') and not re.fullmatch(r'files/[a-f0-9]{32}',name):raise ValueError('备份包含无效文件')
                         target=stage/name
                         with archive.open(info) as src,target.open('wb') as dst:shutil.copyfileobj(src,dst,1024*1024)
                 database=stage/'archive.sqlite3'

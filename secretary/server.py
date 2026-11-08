@@ -1147,6 +1147,7 @@ def handler(service):
                     with service.lock:active=set(service.busy)|set(service.captures)
                     result=dashboard(service.archive,body.get('ids',[]),active);result['items']=[service.with_progress(item) for item in result['items']];return self.send(200,result)
                 if path=='/api/backups/configure':return self.send(200,service.backups.configure(body))
+                if path=='/api/backups/verify':return self.send(200,service.backups.verify(body.get('id')))
                 if path=='/api/backups/create':return self.send(200,service.backups.create())
                 if path=='/api/backups/restore':
                     if body.get('confirmed') is not True:raise ValueError('请先确认恢复此备份')

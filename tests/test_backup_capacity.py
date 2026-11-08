@@ -54,7 +54,7 @@ class BackupCapacityTest(unittest.TestCase):
      db.close()
      with zipfile.ZipFile(source,'w',zipfile.ZIP_DEFLATED) as archive:
       for file in work.rglob('*'):
-       if file.is_file():archive.write(file,str(file.relative_to(work)))
+       if file.is_file() and file.name!='manifest.json':archive.write(file,str(file.relative_to(work)))
     meta=source.with_suffix('.json');value=json.loads(meta.read_text());value.update(size=source.stat().st_size,sha256=hashlib.sha256(source.read_bytes()).hexdigest());meta.write_text(json.dumps(value))
     service.backups.restore(saved['id']);self.assertEqual(service.archive.get(ident)['title'],'Legacy');self.assertTrue(service.archive.retrieve('legacy'));self.assertEqual(service.archive.get(ident)['pdf_reads'],{})
    finally:service.close()

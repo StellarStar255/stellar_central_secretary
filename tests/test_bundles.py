@@ -18,7 +18,7 @@ class BundleTest(unittest.TestCase):
             archive=Archive(root);item,_=archive.add('Legacy record','Legacy source text')
             with archive.db() as db:
                 db.execute('ALTER TABLE items DROP COLUMN tags_manual')
-                db.execute('ALTER TABLE items DROP COLUMN vision_text')
+                db.execute('DROP TRIGGER IF EXISTS library_insert');db.execute('DROP TRIGGER IF EXISTS library_update');db.execute('ALTER TABLE items DROP COLUMN vision_text')
             upgraded=Archive(root)
             self.assertEqual(upgraded.get(item)['vision_text'],'')
             self.assertEqual(upgraded.list(q='Legacy source')[0]['id'],item)

@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as temp:
     result=configured.value.json();assert configured.value.ok,result
     page.evaluate('status=>StellarBackups.sync(status)',stale)
     expect(page.locator('#backup-folder')).to_have_value(str((Path(temp)/'Chosen'/'Stellar Secretary Backups').resolve()))
-    page.locator('#backup-create').click();expect(page.locator('#backup-entries button')).to_have_count(1,timeout=15000);expect(page.locator('#backup-status')).to_contain_text('0.2 GB')
+    page.locator('#backup-create').click();expect(page.locator('#backup-entries').get_by_role('button',name='恢复此备份',exact=True)).to_have_count(1,timeout=15000);expect(page.locator('#backup-status')).to_contain_text('0.2 GB');expect(page.locator('#backup-entries')).to_contain_text('数据库与原件已验证');page.locator('[data-backup-verify]').click();expect(page.locator('#toast')).to_contain_text('备份验证通过')
     service.backups.error='Synthetic backup failure';service.backups._save_state(state='error',last_error=service.backups.error,last_attempt='fixture')
     page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
     print('PASS: real backup directory/capacity settings, snapshot creation, last-success/usage display, persistent failure notice and retained previous backup')

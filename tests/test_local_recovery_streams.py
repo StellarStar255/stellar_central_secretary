@@ -23,7 +23,8 @@ class RecoveryStreamsTest(unittest.TestCase):
                 source=service.backups.folder/(saved['id']+'.zip');source.write_bytes(b'corrupted')
                 with self.assertRaisesRegex(ValueError,'校验'):service.backups.restore(saved['id'])
                 self.assertEqual(archive.get(ident)['title'],'Before')
-                service.backups.due();self.assertEqual(len([x for x in service.backups.entries() if x['reason']=='daily']),1)
+                service.backups.due();self.assertEqual(len([x for x in service.backups.entries() if x['reason']=='daily' and x.get('verification',{}).get('state')=='verified']),1)
+                count=len(service.backups.entries());service.backups.due();self.assertEqual(len(service.backups.entries()),count)
             finally:service.close()
 
     def test_large_upload_bundle_range_delete_and_backup_without_read_bytes(self):
