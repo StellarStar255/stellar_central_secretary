@@ -117,10 +117,14 @@ class Release:
         require(status.get('application')=='stellar-central-secretary' and not any(status.get('runtime',{}).values()),'Wrong application or active tasks; installation deferred')
         require(status.get('update',{}).get('phase') not in ('downloading','verifying','installing'),'Another update is active')
         data=Path(status['data_dir']).resolve();require(data==Path.home()/'Library/Application Support/Stellar Secretary','Unexpected data directory')
+        with sqlite3.connect('file:'+str(data/'archive.sqlite3')+'?mode=ro',uri=True) as db:
+            preserved_columns=[row[1] for row in db.execute('PRAGMA table_info(items)')]
+        require(preserved_columns,'Missing archive schema')
         def fingerprint():
             with sqlite3.connect('file:'+str(data/'archive.sqlite3')+'?mode=ro',uri=True) as db:
                 # Every persisted column, including additions, is compared.
-                rows=db.execute('SELECT * FROM items ORDER BY id').fetchall()
+                columns=','.join('\"'+name.replace('\"','\"\"')+'\"' for name in preserved_columns)
+                rows=db.execute('SELECT '+columns+' FROM items ORDER BY id').fetchall()
             return hashlib.sha256(json.dumps(rows,ensure_ascii=False).encode()).hexdigest(),len(rows)
         before,count=fingerprint();mode=status['settings'].get('company_mode',False)
         pid_text=output('/usr/sbin/lsof','-t','-iTCP:8768','-sTCP:LISTEN').split();require(len(pid_text)==1,'Unexpected listening processes');pid=int(pid_text[0])

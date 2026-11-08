@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.72** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.72.md)
+Version **v0.1.73** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.73.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -148,7 +148,7 @@ After saving in the external app, click **Save changes to archive**. This explic
 - Originals, grouped downloads, video ranges, single-attachment deletion and local backups stream from disk. A completed large upload is removed from staging; abandoned uploads expire after 24 hours on the next upload. Staging is limited to 4 GB. Edited file save-back remains limited to 50 MB per edited file, while unchanged large attachments are copied through in bounded blocks.
 
 
-### Page reading, undo and resumable uploads (current development code)
+### Page reading, undo and resumable uploads (v0.1.73)
 
 PDF attachments support explicit ranges of 1–10 consecutive pages, next-five-page continuation and local OCR. Selections are retained separately from originals, indexed for search and included in later summaries (up to 200 retained pages per item). Search/answer anchors open the owned attachment page. OCR uses Apple Vision on macOS, installed Windows OCR languages, or Tesseract on Linux; portable Linux users must install Tesseract and language packs. OCR makes no model call; summaries still follow the configured model and company-mode policy.
 
