@@ -193,7 +193,15 @@ def run(address,service=None,server=None,open_browser=True):
                             except Exception as error:print('Video external open failed:',error,flush=True)
                         threading.Thread(target=launch,daemon=True).start()
                     def save_video(path,body):
-                        threading.Thread(target=lambda:post(path+'/video-state',body),daemon=True).start()
+                        if service is not None:
+                            from .video_state import save
+                            try:save(service.archive.root,service.video_identity(path),body)
+                            except Exception as error:print('Video state save failed:',error,flush=True)
+                        else:
+                            def save_remote():
+                                try:post(path+'/video-state',body)
+                                except Exception as error:print('Video state save failed:',error,flush=True)
+                            threading.Thread(target=save_remote,daemon=True).start()
                     mode['video']=VideoWindow(window,tr,open_external,save_video)
                 mode['video'].open_video(address+video_request['url'],video_request.get('name',tr('视频播放器')),video_request.get('state',{}))
         if value and not mode['started']:

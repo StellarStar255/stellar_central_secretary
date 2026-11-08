@@ -112,7 +112,9 @@ def main():
                 subprocess.run(['wmctrl','-ic',hex(video_state['window_id'])],check=True)
                 wait(lambda:not request('/api/status')['desktop'].get('video_status',{}).get('visible',True))
                 assert not request('/api/status')['desktop']['video_status']['playing']
-                print('PASS: native in-app H.264 video decodes and plays; closing player stops playback')
+                saved=request('/api/items/'+video_id+'/video-state');assert saved.get('position',0)>0,saved
+                assert saved.get('poster'),saved
+                print('PASS: native in-app H.264 video decodes and plays; closing player stops playback and preserves resume position and decoded cover')
                 png=rpc('Page.captureScreenshot',{'format':'png'})['data'];(folder/('linux-desktop-source.png' if args.source else 'linux-desktop-frozen.png')).write_bytes(base64.b64decode(png))
                 tray_action(6);assert proc.wait(timeout=20)==0
                 channel.close();channel=None

@@ -111,7 +111,9 @@ def main():
                     assert close(video_state['window_id'],0x0010,0,0)
                     wait(lambda:not request('/api/status')['desktop'].get('video_status',{}).get('visible',True))
                     assert not request('/api/status')['desktop']['video_status']['playing']
-                    print('PASS: native in-app H.264 video decodes and plays; closing player stops playback')
+                    saved=request('/api/items/'+video_id+'/video-state');assert saved.get('position',0)>0,saved
+                    assert saved.get('poster'),saved
+                    print('PASS: native in-app H.264 video decodes and plays; closing player stops playback and preserves resume position and decoded cover')
                     request('/api/shutdown',{});assert proc.wait(timeout=20)==0
                     print('PASS: real Windows desktop, Chromium UI, tray/taskbar lifecycle, settings switches desktop→browser→desktop, shared chat/library, close/relaunch reuses window, persistence and clean shutdown')
                 finally:browser.close()
