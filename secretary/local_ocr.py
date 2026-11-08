@@ -45,11 +45,14 @@ def recognize(image):
     with tempfile.TemporaryDirectory(prefix='stellar-ocr-') as temp:
         source=Path(temp)/'page.png';image.save(source,'PNG')
         if sys.platform=='win32':
-            from .update_transaction import clean_env
+            from .update_transaction import spawn
             script=Path(temp)/'ocr.ps1';script.write_text(WINDOWS_SCRIPT,encoding='utf-8-sig')
-            result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(script),str(source)],capture_output=True,timeout=45,env=clean_env(),creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode:raise ValueError('Windows 本机 OCR 不可用，请检查已安装的识别语言。')
-            return str(json.loads(result.stdout.decode('utf-8-sig'))['text'])[:8000]
+            process=spawn(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(script),str(source)],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            try:stdout,stderr=process.communicate(timeout=45)
+            except subprocess.TimeoutExpired:
+                process.kill();process.communicate();raise ValueError('Windows 本机 OCR 超时，请缩小页面范围后重试。')
+            if process.returncode:raise ValueError('Windows 本机 OCR 不可用，请检查已安装的识别语言。')
+            return str(json.loads(stdout.decode('utf-8-sig'))['text'])[:8000]
         tool=shutil.which('tesseract')
         if not tool:raise ValueError('本机 OCR 需要安装 Tesseract 和识别语言包。')
         from .system_integration import external_env

@@ -17,7 +17,7 @@
  $('#append-dialog').ondragover=e=>{e.preventDefault();e.stopPropagation()};$('#append-dialog').ondrop=e=>{e.preventDefault();e.stopPropagation();attach([...e.dataTransfer.files])};
  $('#append-dialog').addEventListener('cancel',e=>{if(saving)e.preventDefault()});
  $('#append-form').onsubmit=async e=>{e.preventDefault();if(saving||!current)return;const draft=current,config=options;if(!draft.text.trim()&&!draft.files.length){error(t('请添加文字或最多 20 个附件'));return}saving=true;error('');for(const control of $('#append-dialog').querySelectorAll('input,textarea,button'))control.disabled=true;
-  try{const attachments=[];for(const file of draft.files)attachments.push(await StellarUploads.encode(file,(name,percent)=>error(t('正在上传：')+name+' '+percent+'%')));await config.api('/api/items/'+draft.id+'/additions',{text:draft.text,attachments,expected_updated:draft.expected,summarize:$('#append-summarize').checked});await StellarUploads.cleanup();discard(draft.id);config.toast(t('追加资料已保存，旧资料保持不变'));await config.onSaved()}
-  catch(e){error(e.message)}finally{saving=false;for(const control of $('#append-dialog').querySelectorAll('input,textarea,button'))control.disabled=false}}
+  try{const attachments=[];for(const file of draft.files)attachments.push(await StellarUploads.encode(file,(name,percent)=>error(t('正在上传：')+name+' '+percent+'%'),'append:'+draft.id));await config.api('/api/items/'+draft.id+'/additions',{text:draft.text,attachments,expected_updated:draft.expected,summarize:$('#append-summarize').checked});await StellarUploads.cleanup(attachments);discard(draft.id);config.toast(t('追加资料已保存，旧资料保持不变'));await config.onSaved()}
+  catch(e){globalThis.StellarUploads?.abandon(draft.files);error(e.message)}finally{saving=false;for(const control of $('#append-dialog').querySelectorAll('input,textarea,button'))control.disabled=false}}
  globalThis.StellarAdditions={open,render,bind,discard};
 })();

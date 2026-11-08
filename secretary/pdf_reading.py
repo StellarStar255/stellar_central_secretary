@@ -12,7 +12,7 @@ def records(value):
         if not re.fullmatch(r'(?:original|[a-f0-9]{32}):(?:original|[a-f0-9]{32})',token) or not isinstance(entry,dict) or not re.fullmatch('[a-f0-9]{64}',str(entry.get('digest',''))):raise ValueError('PDF 选读记录无效')
         if not isinstance(entry.get('name'),str) or len(entry['name'])>300 or type(entry.get('total')) is not int or entry['total']<1 or not isinstance(entry.get('pages'),dict):raise ValueError('PDF 选读记录无效')
         for number,page in entry['pages'].items():
-            if not str(number).isdigit() or not 1<=int(number)<=entry['total'] or not isinstance(page,dict) or not isinstance(page.get('text'),str) or len(page['text'])>8000 or page.get('method') not in ('text','ocr'):raise ValueError('PDF 页面记录无效')
+            if not re.fullmatch('[1-9][0-9]*',str(number)) or not 1<=int(number)<=entry['total'] or not isinstance(page,dict) or not isinstance(page.get('text'),str) or len(page['text'])>8000 or page.get('method') not in ('text','ocr'):raise ValueError('PDF 页面记录无效')
             count+=1
     if count>200:raise ValueError('每份档案最多保存 200 页选读文字，请另建档案')
     return value

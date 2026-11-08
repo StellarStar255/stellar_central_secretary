@@ -102,7 +102,7 @@ def _import_backup(archive, data,stage):
                 image_data=z.read(name);media=image_bytes(image_data)
                 attachments.append((image['name'][:180],media,image_data))
             links.records(item.get('group_links',[]))
-            pdf_reading.records(item.get('pdf_reads',{}))
+            item['pdf_reads']=pdf_reading.records(item.get('pdf_reads',{}))
             batches=additions.records(item.get('additions',[]));batch_files=[]
             for batch in batches:
                 name='files/'+batch['id']

@@ -413,6 +413,7 @@ class Archive:
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
+        source_hits=self.retrieve(q,100) if keywords else []
         columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links,pdf_reads' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
@@ -435,7 +436,7 @@ class Archive:
                 if hits:
                     start=max(0,min(hits)-65);row['search_snippet']=('…' if start else '')+readable[start:start+240]+('…' if len(readable)>start+240 else '')
             if keywords:
-                row['source_matches']=[{'text':hit['text'][:240],'origin':hit['origin']} for hit in self.retrieve(q,30) if hit['item_id']==row['id'] and hit.get('origin')][:3]
+                row['source_matches']=[{'text':hit['text'][:240],'origin':hit['origin']} for hit in source_hits if hit['item_id']==row['id'] and hit.get('origin')][:3]
             result.append(row)
         return result
     def retrieve(self, query, limit=8):

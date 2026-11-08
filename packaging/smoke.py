@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as data:
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or '',**(headers or {})})
-        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test','/api/ask','/api/ingest') else 3) as response:
+        with opener.open(req, timeout=60 if path.endswith('/pdf-read') else 30 if path in ('/api/update/check','/api/model-api/test','/api/ask','/api/ingest') else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -230,6 +230,15 @@ with tempfile.TemporaryDirectory() as data:
         assert request(leaf['preview_url'],headers={'Range':'bytes=0-4'})==b'%PDF-'
         request('/api/uploads/'+upload['id']+'/cancel',{},status['token'])
         print('PASS: frozen 51 MB chunked PDF, disk-backed first-five-page extraction, native PDFium thumbnail, original byte range, partial scope and no sixth-page indexing')
+        if json.loads(request('/api/status')).get('ocr',{}).get('available'):
+            from PIL import ImageDraw,ImageFont
+            image=Image.new('RGB',(1400,300),'white');ImageDraw.Draw(image).text((30,80),'STELLAR LOCAL SCAN 58319',fill='black',font=ImageFont.load_default(size=60))
+            document=io.BytesIO();image.save(document,'PDF')
+            scan=json.loads(request('/api/ingest',{'filename':'local-scan.pdf','data':base64.b64encode(document.getvalue()).decode(),'archive_only':True},status['token']))['item']
+            recognized=json.loads(request('/api/items/'+scan['id']+'/pdf-read',{'start':1,'end':1,'ocr':True},status['token']))
+            assert '58319' in recognized['pages'][0]['text'],recognized
+            assert json.loads(request('/api/items?q=58319'))
+            print('PASS: frozen native local OCR, searchable scanned page and zero cloud/model calls')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

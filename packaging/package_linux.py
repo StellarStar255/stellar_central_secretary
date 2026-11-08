@@ -78,7 +78,7 @@ def main():
             'libxcb-shape0, libxcb-xfixes0, libxcb-sync1, libxcb-xkb1, libxcomposite1, '
             'libxdamage1, libxrandr2, libxtst6, libxrender1, libxi6, libxext6, libxfixes3, '
             'libxss1, libsm6, libice6, libglib2.0-0t64 | libglib2.0-0, libcups2t64 | libcups2, '
-            'xdg-utils, policykit-1, python3\nRecommends: fonts-noto-cjk\nSuggests: gnome-shell-extension-appindicator\n'
+            'xdg-utils, policykit-1, python3\nRecommends: fonts-noto-cjk, tesseract-ocr, tesseract-ocr-eng, tesseract-ocr-chi-sim\nSuggests: gnome-shell-extension-appindicator\n'
             'Homepage: https://github.com/StellarStar255/stellar_central_secretary\n'
             'Description: Local knowledge library and AI summaries\n'
             ' Archive webpages, AI conversations, documents, images and notes.\n'

@@ -20,7 +20,7 @@ def material(archive,db,item_id):
     for batch,key,name,digest,text in sources:
         anchor={'batch_id':batch,'attachment_id':key,'name':name,'digest':digest}
         if name.lower().endswith('.pdf'):
-            for page,content in pages(text):outputs[(batch,key,page)]=(content,{**anchor,'page':page,'method':'text'})
+            for page,content in (pages(text) if batch or key else []):outputs[(batch,key,page)]=(content,{**anchor,'page':page,'method':'text'})
             entry=selected.get(pdf_reading.key(batch,key))
             if entry and (not digest or entry['digest']==digest):
                 for number,value in entry['pages'].items():outputs[(batch,key,int(number))]=(value['text'],{**anchor,'page':int(number),'method':value['method']})

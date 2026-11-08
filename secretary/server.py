@@ -426,7 +426,8 @@ class Service:
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
                 else:
                     selected,scope=service_pdf_material(self.archive,item,item['text'],'')
-                    if scope:fields,_=ai.analyze_material(selected,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
+                    if full_pdf:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=True)
+                    elif scope:fields,_=ai.analyze_material(selected,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
                     else:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=full_pdf)
                 with self.lock:
                     self.summary_jobs.check(item_id)
@@ -825,11 +826,12 @@ class Service:
                 self.archive.update(item_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                 source,scope=service_pdf_material(self.archive,item,source,scope)
-                fields,answer=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope,question=question)
+                references=[dict(hit,number=index+1) for index,hit in enumerate([hit for hit in self.archive.retrieve(question,12) if hit['item_id']==item_id and hit.get('origin')])]
+                fields,answer=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope,question=question,**({'source_references':references} if references else {}))
                 with self.lock:
                     self.summary_jobs.check(item_id)
                     self.archive.update(item_id,**fields);self.summary_jobs.commit(item_id)
-            return {'answer':answer,'sources':[{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
+            return {'answer':answer,'sources':references or [{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
         except Exception as error:
             self.summary_failed(item_id,error);raise
         finally:
@@ -1049,8 +1051,10 @@ def handler(service):
             try:
                 path = urllib.parse.urlsplit(self.path).path
                 length = int(self.headers.get('Content-Length', 0))
-                chunk=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/chunk',path)
-                if chunk:return self.send(200,service.uploads.chunk(chunk[1],int(self.headers.get('X-Upload-Offset','-1')),self.rfile,length))
+                chunk=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/(chunk|verify)',path)
+                if chunk:
+                    self.connection.settimeout(30)
+                    return self.send(200,service.uploads.chunk(chunk[1],int(self.headers.get('X-Upload-Offset','-1')),self.rfile,length,self.headers.get('X-Upload-Lease'),chunk[2]=='verify'))
                 if path=='/api/import':
                     if not 0<length<=MAX_BACKUP: raise ValueError('请选择不超过 8 GB 的 ZIP 备份')
                     import tempfile
@@ -1065,9 +1069,11 @@ def handler(service):
                         return self.send(200,import_backup(service.archive,source))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
-                if path=='/api/uploads/start':return self.send(200,service.uploads.start(body.get('name'),body.get('size')))
+                upload_status=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/status',path)
+                if upload_status:return self.send(200,service.uploads.status(upload_status[1],body.get('lease')))
+                if path=='/api/uploads/start':return self.send(200,service.uploads.start(body.get('name'),body.get('size'),body.get('fingerprint'),body.get('owner'),body.get('fresh') is True))
                 cancel_upload=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/cancel',path)
-                if cancel_upload:service.uploads.discard(cancel_upload[1]);return self.send(200,{'ok':True})
+                if cancel_upload:service.uploads.discard(cancel_upload[1],body.get('lease'));return self.send(200,{'ok':True})
                 if path.endswith('/video-state'):
                     base=path.rsplit('/',1)[0];value=video_state.save(service.archive.root,service.video_identity(base),body)
                     if body.get('probe_complete'):service.video_probes.pop(base,None)

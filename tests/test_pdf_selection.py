@@ -22,11 +22,11 @@ class PdfSelectionTest(unittest.TestCase):
     with self.assertRaises(ValueError):pdf_reading.read(service.archive,item_id,None,key,{'start':0,'end':1})
     with self.assertRaises(ValueError):pdf_reading.read(service.archive,item_id,None,key,{'start':1,'end':11})
    finally:service.close()
- @unittest.skipUnless(sys.platform=='darwin','Apple Vision real local OCR')
+ @unittest.skipUnless(sys.platform in ('darwin','win32') or __import__('shutil').which('tesseract'),'Installed native OCR engine')
  def test_actual_scanned_page_ocr(self):
   from PIL import Image,ImageDraw,ImageFont
   with tempfile.TemporaryDirectory() as temp:
-   image=Image.new('RGB',(1000,250),'white');ImageDraw.Draw(image).text((30,80),'STELLAR SCAN 58319',fill='black',font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf',48))
+   image=Image.new('RGB',(1000,250),'white');ImageDraw.Draw(image).text((30,80),'STELLAR SCAN 58319',fill='black',font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf' if sys.platform=='darwin' else 'C:/Windows/Fonts/arial.ttf' if sys.platform=='win32' else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',48))
    source=Path(temp)/'scan.pdf';image.save(source,'PDF')
    self.assertFalse(pdf_preview.inspect(source)['pages'][0]['text'])
    with patch('secretary.ai.run',side_effect=AssertionError('Cloud call')):result=pdf_preview.inspect(source,1,1,True)

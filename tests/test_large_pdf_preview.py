@@ -62,7 +62,10 @@ class LargePdfPreviewTest(unittest.TestCase):
             service=Service(Path(temp)/'archive');service.archive.configure('codex',False)
             try:
                 upload=service.uploads.start('large.pdf',source.stat().st_size);target=service.uploads.path(upload['id'])
-                bundles.copy_data(source,target)
+                offset=0
+                with source.open('rb') as stream:
+                    while offset<source.stat().st_size:
+                        length=min(4*1024*1024,source.stat().st_size-offset);offset=service.uploads.chunk(upload['id'],offset,stream,length)['offset']
                 with patch.object(Path,'read_bytes',side_effect=AssertionError('Whole-file read')):
                     item=service.ingest({'attachments':[{'name':'large.pdf','upload_id':upload['id']}],'archive_only':True})['item']
                 self.assertIn('PAGETOKEN5',item['text']);self.assertNotIn('PAGETOKEN6',item['text'])

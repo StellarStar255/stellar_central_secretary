@@ -148,6 +148,7 @@ function bindDetails(container,items=allItems){container.querySelectorAll('[data
  const show=()=>{const action=inLibrary&&globalThis.StellarLibraryPreview?.select;return (action?action(button.dataset.id):detail(button.dataset.id,true)).catch(error=>toast(error.message))};
  const linkedRow=container===$('#messages')&&button.classList.contains('archive-card')||container===$('#items')&&button.classList.contains('library-row');
  const url=linkedRow?originalLink(items.find(item=>item.id===button.dataset.id)):'';
+ if(button.dataset.sourceOrigin){button.onclick=()=>{try{const origin=JSON.parse(button.dataset.sourceOrigin);if(origin.page){const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page);return}}catch{}void show()};return}
  if(!url){button.onclick=show;return}
  let pending;
  button.title=t('单击查看资料；双击打开原始链接');
@@ -404,7 +405,7 @@ $('#composer-form').onsubmit=async event=>{
    const asking=!archiveOnly&&(mode==='ask'||mode==='auto'&&!!groupQuestion&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(groupQuestion));
    updateMessage(chat,response,{text:t('正在保存这组资料…')});
    const attachments=[];for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{$('#composer-status').textContent=t('正在上传：')+name+' '+percent+'%'}));
-   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup();results.push(result);response.items.push(result.item.id);
+   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup(attachments);results.push(result);response.items.push(result.item.id);
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
@@ -424,7 +425,7 @@ $('#composer-form').onsubmit=async event=>{
   if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources}
   if(errors.length)answer+=(answer?'\n\n':'')+t('以下资料未能保存：\n')+errors.join('\n');
   updateMessage(chat,response,{text:answer||t('已处理。'),pending:false,error:errors.length>0&&!results.length});
- }catch(e){if((files.length||text)&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+t('本次处理未完成：')+e.message,pending:false,error:true})}
+ }catch(e){globalThis.StellarUploads?.abandon(files);if((files.length||text)&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+t('本次处理未完成：')+e.message,pending:false,error:true})}
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
 async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.isFlushing()&&!await StellarDrafts.flush())return;const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;if(recordView)void api('/api/items/'+id+'/view',{}).catch(()=>{});selectedId=id;detailVersion=item.updated;
@@ -596,6 +597,6 @@ $('#backup-create').onclick=()=>busy($('#backup-create'),async()=>{await api('/a
 
 if(globalThis.StellarUploads)StellarUploads.bind(api);
 
-document.addEventListener('click',event=>{const button=event.target.closest('[data-origin-item]');if(!button)return;const origin=JSON.parse(button.dataset.origin);if(!origin.page)return;event.preventDefault();const path='/api/items/'+button.dataset.originItem+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)});
+document.addEventListener('click',event=>{const button=event.target.closest('[data-origin-item]');if(!button?.dataset?.origin||!button.dataset.originItem)return;let origin;try{origin=JSON.parse(button.dataset.origin)}catch{return}if(!origin.page)return;event.preventDefault();const path='/api/items/'+button.dataset.originItem+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)});
 
 if(globalThis.StellarBackups)StellarBackups.bind({api,toast});

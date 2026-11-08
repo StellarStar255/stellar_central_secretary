@@ -39,3 +39,22 @@ class BackupCapacityTest(unittest.TestCase):
     with self.assertRaisesRegex(ValueError,'超过容量'):service.backups.create()
     self.assertTrue(any(entry['id']==latest['id'] for entry in service.backups.entries()))
    finally:service.close()
+
+ def test_older_backup_schema_is_migrated_before_restoring_live_database(self):
+  import hashlib,json,sqlite3,zipfile
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(Path(temp)/'data')
+   try:
+    ident,_=service.archive.add('Legacy','retained legacy text');saved=service.backups.create();source=service.backups.folder/(saved['id']+'.zip')
+    with tempfile.TemporaryDirectory() as work:
+     work=Path(work)
+     with zipfile.ZipFile(source) as archive:archive.extractall(work)
+     with sqlite3.connect(work/'archive.sqlite3') as db:
+      db.execute('ALTER TABLE items DROP COLUMN pdf_reads');db.execute('ALTER TABLE chunks DROP COLUMN origin')
+     db.close()
+     with zipfile.ZipFile(source,'w',zipfile.ZIP_DEFLATED) as archive:
+      for file in work.rglob('*'):
+       if file.is_file():archive.write(file,str(file.relative_to(work)))
+    meta=source.with_suffix('.json');value=json.loads(meta.read_text());value.update(size=source.stat().st_size,sha256=hashlib.sha256(source.read_bytes()).hexdigest());meta.write_text(json.dumps(value))
+    service.backups.restore(saved['id']);self.assertEqual(service.archive.get(ident)['title'],'Legacy');self.assertTrue(service.archive.retrieve('legacy'));self.assertEqual(service.archive.get(ident)['pdf_reads'],{})
+   finally:service.close()

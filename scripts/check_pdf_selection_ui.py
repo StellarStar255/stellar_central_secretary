@@ -22,7 +22,10 @@ with tempfile.TemporaryDirectory() as temp:
     expect(page.locator('[data-pdf-scope]')).to_contain_text('1, 2, 3, 4, 5');expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN1')
     page.locator('[data-pdf-next]').click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN6')
     expect(page.locator('[data-pdf-scope]')).to_contain_text('6, 7, 8, 9');assert page.locator('[data-pdf-original]').get_attribute('href').endswith('#page=6')
-    page.locator('[data-pdf-close]').click();assert service.archive.list(q='PAGETOKEN9');page.locator('#search').fill('PAGETOKEN9');hit=page.locator('[data-origin-item]').filter(has_text='p.9').first;hit.click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN9');page.locator('[data-pdf-close]').click();assert not errors,errors
+    page.locator('[data-pdf-close]').click();assert service.archive.list(q='PAGETOKEN9');page.locator('#search').fill('PAGETOKEN9');hit=page.locator('[data-origin-item]').filter(has_text='p.9').first;hit.click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN9');page.locator('[data-pdf-close]').click();page.locator('#library-dialog .dialog-head button').click()
+    with patch('secretary.ai.run',return_value='Synthetic answer [1]'):
+     page.locator('#input-mode').select_option('ask');page.locator('#message-input').fill('PAGETOKEN9?');page.locator('#send-button').click();source=page.locator('.source-list .source').first;expect(source).to_contain_text('p.9');source.click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN9')
+    assert not errors,errors
     print('PASS: PDF range controls, continuation to pages 6-9, local page image/text, searchable retained selections, zero model calls')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

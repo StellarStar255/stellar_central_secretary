@@ -105,3 +105,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 #attachment-undo{position:fixed;bottom:25px;right:25px;z-index:10000;background:var(--panel);border:1px solid var(--line);padding:14px;border-radius:10px;display:flex;gap:12px;align-items:center}#attachment-recovery-dialog{width:min(650px,90vw)}
 
 #settings-open[data-backup-warning=true]::after{content:"●";color:var(--red,#d66);margin-left:6px}
+
+#upload-progress{position:fixed;bottom:20px;right:20px;z-index:9999;width:min(600px,90vw);max-height:45vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}#upload-progress p{font-size:.8rem;color:var(--muted)}.upload-progress-row{display:flex;align-items:center;gap:8px;margin:8px 0}.upload-progress-row span{flex:1;overflow-wrap:anywhere}.upload-progress-row button{font-size:.8rem;padding:6px}

@@ -123,6 +123,9 @@ class Backups:
                     db.execute('SELECT id,title,text FROM items LIMIT 1')
                     refs=[row[0] for row in db.execute("SELECT id FROM items WHERE filename!=''")]
                     if any(not (incoming/value).is_file() for value in refs):raise ValueError('备份缺少原件')
+                # Upgrade the staged database, never the user's live library, before replacement.
+                from .core import Archive
+                Archive(stage,recover=False)
                 self.create('before-restore')
                 old=stage/'previous-files';current=self.archive.root/'files';current.replace(old)
                 old_chats=self.archive.root/'conversations.json';chat_copy=old_chats.read_bytes() if old_chats.exists() else None
