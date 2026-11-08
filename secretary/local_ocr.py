@@ -16,7 +16,8 @@ $stream=Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Window
 try{
  $decoder=Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
  $bitmap=Await ($decoder.GetSoftwareBitmapAsync([Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8,[Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied)) ([Windows.Graphics.Imaging.SoftwareBitmap])
- $engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+ $language=[Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages | Where-Object {$_.LanguageTag -match '^zh'} | Select-Object -First 1
+ $engine=if($language){[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language)}else{[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()}
  if($null -eq $engine){throw 'No installed OCR recognition language'}
  $result=Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
  [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
