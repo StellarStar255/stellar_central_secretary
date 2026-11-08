@@ -19,6 +19,8 @@ jobs:
       - run: python scripts/check_video_title_ui.py
       - run: python scripts/check_recovery_ui.py
       - run: python scripts/check_pdf_selection_ui.py
+      - run: python scripts/check_pdf_scope_ui.py
+      - run: python scripts/check_storage_ui.py
       - run: python scripts/check_backup_settings_ui.py
       - run: python scripts/check_upload_resume_ui.py
       - run: python packaging/smoke_windows_desktop.py --source

@@ -41,6 +41,8 @@ jobs:
           python scripts/check_recovery_ui.py
           python scripts/check_large_pdf_ui.py
           python scripts/check_pdf_selection_ui.py
+          python scripts/check_pdf_scope_ui.py
+          python scripts/check_storage_ui.py
           python scripts/check_backup_settings_ui.py
           python scripts/check_upload_resume_ui.py
       - name: Verified Debian installer helper

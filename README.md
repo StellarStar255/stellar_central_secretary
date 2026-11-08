@@ -157,3 +157,13 @@ Attachment deletion can be undone immediately or from deleted-attachment history
 Backup settings expose the folder, byte limit and retention counts, with last-success/usage status and nonmodal failure notices. The default storage limit is 10 GB. Old snapshots are pruned only after a new snapshot completes; a failed backup preserves previous snapshots. Previous backup folders remain accessible after changing location. Older snapshot schemas are migrated in staging before restoring the live database.
 
 Large uploads support pause/resume, cancellation and resuming after restarting by reselecting the original file. Committed chunks are SHA256-checked before continuation, with at most 4 MB processed at a time. Independent consumer leases prevent one submission from deleting another submission's staging file. Unfinished staging expires after 24 hours and remains limited to 4 GB total.
+
+### Reading and maintenance improvements (current development code)
+
+PDF viewing displays original pages immediately; extraction is explicit. Local text/OCR jobs report page progress, continue after closing the viewer and support cancellation without committing partial results. Summary coverage records the actual page text submitted; older summaries have unknown coverage until regenerated. Later additions can be summarized separately while retaining the earlier summary.
+
+Library results are paged in SQL, with a trigram index for substring queries and SQL substring filtering for one/two-character searches. Dashboard refreshes fetch recent records and the current conversation/task references instead of the entire library.
+
+Storage settings show usage and an explicit cleanup preview for expired uploads, deleted-attachment recovery copies and eligible older backups. No entries are selected automatically; previews expire after ten minutes and changed files require a new preview. Originals, databases and working edit copies are excluded. The newest and most recently verified backup in each folder are retained. Removing recovery copies and older backups is permanent.
+
+New snapshots include a per-file SHA256 manifest and pass database/original/reference checks before success and retention pruning. Older snapshots can be checked with their legacy limitations shown. An inconsistent state preserved before recovery is labeled accordingly and does not prevent restoring a verified good snapshot. Verification never replaces the current library.

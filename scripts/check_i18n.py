@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory() as temp:
   with sync_playwright() as p:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
    try:
-    page=browser.new_page(viewport={'width':1280,'height':950});errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+    page=browser.new_page(viewport={'width':1280,'height':950});errors=[];page.on('pageerror',lambda error:(errors.append(str(error)),print('PAGE ERROR:',error,flush=True)))
     page.goto(base);page.locator('#message-input').fill('未发送的中文草稿');page.locator('#settings-open').click()
     page.locator('#auto-ai').check();page.locator('#ui-language').select_option('en');expect(page.locator('html')).to_have_attribute('lang','en')
     assert 'Models & settings' in page.locator('#settings-open').inner_text()
