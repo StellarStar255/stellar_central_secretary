@@ -16,6 +16,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else if(path.endsWith('/capture'))data=captureReplyMode==='current'?{capture_started:true,item:archive[0]}:{ok:true};
  else if(path.startsWith('/api/items/')&&options?.method==='POST'){archive.find(i=>i.id===path.split('/').pop()).state='processing';data={ok:true}}
  else if(path.startsWith('/api/items'))data=archive;
+ else if(path==='/api/dashboard')data={items:archive,total:archive.length,categories:[...new Set(archive.map(item=>item.category))]};
  else if(path==='/api/ingest'){const item={id:'a'+archive.length,title:body.url||'笔记',url:body.url||'',kind:body.url?'link':'note',category:'未分类',state:'pending',text:body.text||'',summary:'',tags:[],created:new Date().toISOString()};archive.push(item);data={created:true,item}}
  else if(path==='/api/conversations')data=body||{conversations:[],activeId:''};
  else if(path==='/api/proxy/check')data={ok:true,message:'代理端口可以连接'};

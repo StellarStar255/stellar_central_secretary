@@ -1140,6 +1140,10 @@ def handler(service):
                         return self.send(200,{'native':True})
                     if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name'],'state':video_state.read(service.archive.root,service.video_identity(file['path']))}
                     return self.send(200,{'native':native})
+                if path=='/api/dashboard':
+                    from .library import dashboard
+                    with service.lock:active=set(service.busy)|set(service.captures)
+                    result=dashboard(service.archive,body.get('ids',[]),active);result['items']=[service.with_progress(item) for item in result['items']];return self.send(200,result)
                 if path=='/api/backups/configure':return self.send(200,service.backups.configure(body))
                 if path=='/api/backups/create':return self.send(200,service.backups.create())
                 if path=='/api/backups/restore':

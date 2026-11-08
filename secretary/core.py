@@ -148,10 +148,14 @@ class Archive:
                         db.execute('UPDATE items SET additions=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),row['id']))
                 db.execute("UPDATE items SET state='pending',error='上次处理被中断，等待重新处理' WHERE state='processing'")
                 db.execute("UPDATE items SET state='needs_content',error='上次登录读取已中断，请点击登录并读取重试。' WHERE state IN ('queued_capture','opening_browser','waiting_login','confirming_login','waiting_browser_close','reading')")
+            from .library import initialize
+            initialize(db)
         if recover:self.finish_deletions()
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.root / 'archive.sqlite3', timeout=30); db.row_factory = sqlite3.Row
+        from .library import document,rank_values
+        db.create_function('library_document',13,document,deterministic=True);db.create_function('library_rank',6,rank_values,deterministic=True)
         try:
             with db: yield db
         finally: db.close()

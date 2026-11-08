@@ -50,7 +50,7 @@ class BackupCapacityTest(unittest.TestCase):
      work=Path(work)
      with zipfile.ZipFile(source) as archive:archive.extractall(work)
      with sqlite3.connect(work/'archive.sqlite3') as db:
-      db.execute('ALTER TABLE items DROP COLUMN pdf_reads');db.execute('ALTER TABLE chunks DROP COLUMN origin')
+      db.execute('DROP TRIGGER IF EXISTS library_insert');db.execute('DROP TRIGGER IF EXISTS library_update');db.execute('ALTER TABLE items DROP COLUMN pdf_reads');db.execute('ALTER TABLE chunks DROP COLUMN origin')
      db.close()
      with zipfile.ZipFile(source,'w',zipfile.ZIP_DEFLATED) as archive:
       for file in work.rglob('*'):

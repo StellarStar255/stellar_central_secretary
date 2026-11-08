@@ -104,7 +104,7 @@ let supportsCapture=false;
 let supportsWebCapture=false;
 let latestStatus=null,lastUpdateState=null,uiLanguageRevision=0,languageChanging=false;
 let backendRevision=0;
-let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
+let libraryCategories=[],libraryTotal=0;let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
 const storageKey='stellar.conversations.v1';
 let conversations=[], activeId='';
 let sharedChatsReady=false,historyLoaded=false,sharedChatSaves=Promise.resolve();
@@ -138,7 +138,7 @@ function date(value){return new Date(value).toLocaleDateString(StellarI18n.local
 function newChat(){activeId='';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
 function renderSidebar(){
  $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
- $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar')});
+ $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))});
  $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
  bindDetails($('#recent-items'));
 }
@@ -164,7 +164,7 @@ function summaryProgress(item){
 function updateSummaryProgress(){
  document.querySelectorAll('[data-summary-id]').forEach(node=>{const html=summaryProgress(allItems.find(item=>item.id===node.dataset.summaryId));if(node.innerHTML!==html)node.innerHTML=html});
 }
-function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return '';return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${id}"></div>`:''}</button>${captureControls(item)}`}
+function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return ui`<button class="archive-card" data-id="${id}">查看归档资料</button>`;return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${id}"></div>`:''}</button>${captureControls(item)}`}
 function renderChat(scroll=true){
  if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
@@ -182,21 +182,21 @@ function refresh(){if(refreshPromise){refreshAgain=true;return refreshPromise}re
 async function refreshNow(){
  const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');globalThis.StellarBackups?.sync(languageStatus.backup);syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);activeWork=Object.values(languageStatus.runtime||{}).some(Boolean);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
  if(Date.now()-lastHistoryPoll>5000){lastHistoryPoll=Date.now();try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}}
- allItems=(await api('/api/items')).filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
+ const referenced=[...new Set([selectedId,...captureActions.keys(),...(currentChat()?.messages||[]).slice(-200).flatMap(message=>message.items||[])].filter(Boolean))].slice(-1000);const dashboard=await api('/api/dashboard',{ids:referenced});libraryTotal=dashboard.total;libraryCategories=dashboard.categories;allItems=dashboard.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  for(const [id,action] of captureActions){
   const item=allItems.find(i=>i.id===id);
   if(action.accepted&&item?.state!=='waiting_login')captureActions.delete(id);
   else if(action.accepted&&Date.now()-action.at>30000){action.accepted=false;action.error=true;action.text=t('后台已收到确认，但 30 秒内未进入读取。可以再次确认；若仍停在此处，请停止任务后重试，已保存的浏览器登录状态会保留。')}
  }
  let changed=false;
- for(const chat of conversations)for(const m of chat.messages){
-  if(m.role==='assistant'&&!m.pending&&m.archiveOnly&&m.items?.length){
+ for(const chat of conversations.filter(chat=>chat.id===activeId))for(const m of chat.messages){
+  if(m.role==='assistant'&&!m.pending&&m.archiveOnly&&m.items?.length&&m.items.every(id=>allItems.some(item=>item.id===id))){
    const text=m.items.map(id=>allItems.find(i=>i.id===id)).filter(Boolean).map(item=>archiveReply({item,created:true})).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
    if(text&&text!==m.text){m.text=text;chat.updated=Date.now();changed=true}
   }
  }
  if(changed)saveChats();
- $('#count').textContent=allItems.length;renderSidebar();renderChat(false);
+ $('#count').textContent=libraryTotal;renderSidebar();renderChat(false);
  const progress=$('#detail-content').querySelector('#detail-summary-progress');if(progress&&selectedId)progress.innerHTML=summaryProgress(allItems.find(i=>i.id===selectedId));
  if($('#library-dialog').open)await renderLibrary();
  if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
@@ -211,15 +211,15 @@ function libraryPresentation(item){
 }
 function highlightMatches(value){const text=String(value||''),words=[...new Set($('#search').value.trim().split(/\s+/).filter(Boolean))].slice(0,20).sort((a,b)=>b.length-a.length);if(!words.length)return esc(text);const pattern=new RegExp(words.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'giu');let html='',end=0;for(const match of text.matchAll(pattern)){html+=esc(text.slice(end,match.index))+'<mark>'+esc(match[0])+'</mark>';end=match.index+match[0].length}return html+esc(text.slice(end))}
 function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${highlightMatches(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${highlightMatches(item.search_snippet||view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button><div class="source-matches">${(item.source_matches||[]).map(hit=>`<button type="button" class="secondary" data-origin-item="${item.id}" data-origin="${esc(JSON.stringify(hit.origin))}">${esc(hit.origin.name)}${hit.origin.page?' · p.'+hit.origin.page:''}</button>`).join('')}</div><div class="library-flags">${['favorite','pinned'].map(flag=>`<button class="secondary" data-flag="${flag}" data-item="${item.id}" data-active="${Boolean(item[flag])}" aria-pressed="${Boolean(item[flag])}" title="${t(flag==='favorite'?(item[flag]?'取消收藏':'收藏'):(item[flag]?'取消置顶':'置顶'))}">${t(flag==='favorite'?(item[flag]?'★ 已收藏':'☆ 收藏'):(item[flag]?'已置顶':'置顶'))}</button>`).join('')}</div>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
-let lastLibraryMarkup='',libraryOffset=0,libraryQueryKey='',libraryResults=[],lastRenderedLibraryKey='',lastRenderedLibraryOffset=0;
+let libraryRequestRevision=0;let lastLibraryMarkup='',libraryOffset=0,libraryQueryKey='',libraryResults=[],lastRenderedLibraryKey='',lastRenderedLibraryOffset=0;
 async function renderLibrary(){
  const filters={q:$('#search').value.trim(),kind:$('#kind-filter').value,category:$('#category-filter').value,state:$('#state-filter').value,days:$('#date-filter').value,sort:$('#sort-filter').value,favorite:$('#favorite-filter').value};
  const key=JSON.stringify(filters);if(key!==libraryQueryKey){libraryQueryKey=key;libraryOffset=0}
- const offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
- if(key!==libraryQueryKey||offset!==libraryOffset)return;
+ const revision=++libraryRequestRevision,offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
+ if(revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
  if(data.total&&offset>=data.total){libraryOffset=Math.floor((data.total-1)/100)*100;return renderLibrary()}
  const items=data.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));libraryResults=items;
- const cats=[...new Set(allItems.map(item=>item.category))].sort();$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(category=>`<option value="${esc(category)}" ${category===filters.category?'selected':''}>${esc(displayCategory(category))}</option>`).join('');
+ const cats=libraryCategories;$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(category=>`<option value="${esc(category)}" ${category===filters.category?'selected':''}>${esc(displayCategory(category))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(data.total,'份资料','item','items');$('#empty').hidden=items.length>0;
  $('#library-pager').hidden=data.total<=100;$('#library-prev').disabled=offset===0;$('#library-next').disabled=offset+items.length>=data.total;$('#library-page').textContent=(Math.floor(offset/100)+1)+' / '+Math.max(1,Math.ceil(data.total/100));
  const listScroll=$('#library-list-scroll'),scroll=key===lastRenderedLibraryKey&&offset===lastRenderedLibraryOffset?listScroll.scrollTop:0,focused=document.activeElement?.closest?.('#items .library-row')?.dataset.id;
