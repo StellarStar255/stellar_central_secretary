@@ -600,3 +600,5 @@ if(globalThis.StellarUploads)StellarUploads.bind(api);
 document.addEventListener('click',event=>{const button=event.target.closest('[data-origin-item]');if(!button?.dataset?.origin||!button.dataset.originItem)return;let origin;try{origin=JSON.parse(button.dataset.origin)}catch{return}if(!origin.page)return;event.preventDefault();const path='/api/items/'+button.dataset.originItem+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)});
 
 if(globalThis.StellarBackups)StellarBackups.bind({api,toast});
+
+globalThis.StellarStorage?.bind({api,toast});

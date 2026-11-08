@@ -25,7 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
+from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -100,7 +100,7 @@ class Service:
         self.interface_request={}
         self.video_request={};self.video_probes={}
         self.uploads=uploads.Uploads(self.archive.root);self.backups=local_backups.Backups(self.archive)
-        self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self)
+        self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self);self.storage=storage.Storage(self)
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
         with self.lock:
@@ -1046,7 +1046,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1140,6 +1140,8 @@ def handler(service):
                         return self.send(200,{'native':True})
                     if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name'],'state':video_state.read(service.archive.root,service.video_identity(file['path']))}
                     return self.send(200,{'native':native})
+                if path=='/api/storage/preview':return self.send(200,service.storage.preview())
+                if path=='/api/storage/clean':return self.send(200,service.storage.clean(body))
                 if path=='/api/dashboard':
                     from .library import dashboard
                     with service.lock:active=set(service.busy)|set(service.captures)
