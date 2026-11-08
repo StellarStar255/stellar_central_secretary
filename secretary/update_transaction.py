@@ -40,7 +40,7 @@ def healthy(config,version,legacy=False):
         with opener.open(config['address']+endpoint,timeout=2) as response:value=json.loads(response.read(100000))
         same=Path(value.get('data_dir','')).resolve()==Path(config['data']).resolve()
         desktop=value.get('desktop',{})
-        return value.get('application')=='stellar-central-secretary' and value.get('version')==version and same and (legacy or value.get('database_ok') is True and value.get('pid')==config.get('child_pid',value.get('pid'))) and (not config['desktop'] or desktop.get('supports_window') and desktop.get('window_loaded'))
+        return value.get('application')=='stellar-central-secretary' and value.get('version')==version and same and (legacy or value.get('database_ok') is True and value.get('pid')==config.get('child_pid',value.get('pid'))) and (not config['desktop'] or desktop.get('supports_window') and (desktop.get('window_loaded') or desktop.get('mode')=='browser'))
     except (OSError,ValueError,TypeError):return False
 
 def last_result():

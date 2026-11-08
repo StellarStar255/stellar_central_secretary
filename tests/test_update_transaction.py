@@ -47,3 +47,17 @@ S(('127.0.0.1',a.port),H).serve_forever()
     def test_success_keeps_old_program_until_health_passes(self):self.exercise()
     def test_failed_start_rolls_back_program_without_touching_data(self):self.exercise(broken=True)
     def test_wrong_version_rolls_back_even_if_process_serves_http(self):self.exercise(wrong_version=True)
+
+class HealthModeTest(unittest.TestCase):
+    def test_desktop_requires_loaded_window_but_browser_mode_is_intentional(self):
+        import io
+        from unittest.mock import patch,Mock
+        from secretary.update_transaction import healthy
+        with tempfile.TemporaryDirectory() as temp:
+            config={'address':'http://127.0.0.1:1','data':temp,'desktop':True,'child_pid':123}
+            value={'application':'stellar-central-secretary','version':'new','database_ok':True,'pid':123,'data_dir':temp,'desktop':{'supports_window':True,'window_loaded':False,'mode':'desktop'}}
+            def check():
+                opener=Mock();opener.open.return_value.__enter__=lambda *_:io.BytesIO(json.dumps(value).encode());opener.open.return_value.__exit__=lambda *_:None
+                with patch('secretary.update_transaction.urllib.request.build_opener',return_value=opener):return healthy(config,'new')
+            self.assertFalse(check());value['desktop']['mode']='browser';self.assertTrue(check())
+            value['pid']=124;self.assertFalse(check())
