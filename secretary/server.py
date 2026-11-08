@@ -76,21 +76,13 @@ def fetch_page(url):
 
 
 def service_pdf_material(archive,item,source,scope):
-    selected=[]
-    for token,entry in item.get('pdf_reads',{}).items():
-        batch,key=token.split(':')
-        try:
-            _,_,_,digest,_=pdf_reading.owned(archive,item['id'],'' if batch=='original' else batch,'' if key=='original' else key)
-            if digest==entry['digest']:selected.append(pdf_reading.text(entry))
-        except (KeyError,ValueError):continue
+    selected,note,used=pdf_reading.summary_material(archive,item)
+    item['_pdf_used']=used
     if selected:
         if item['filename'].lower().endswith('.pdf'):source=''
-        selected_text='\n\n'.join(selected)
-        truncated=len(selected_text)>100000
-        source+='\n\n【按页补充读取，以下页码也在本次范围内】\n'+selected_text[:100000]
-        scope='【资料概览；包含原有文字与以下 PDF 选读页，未读取页面不作推断】\n'+'\n'.join(value.splitlines()[0] for value in selected)
-        if truncated:scope+='\n选读文字过长，本次概览仅使用前 10 万字符；完整选读文字保留在本机。'
+        source+='\n\n'+selected;scope=scope+'\n'+note
     return source,scope
+
 
 
 class Service:
@@ -387,10 +379,10 @@ class Service:
             self.summary_failed(item_id,error,batch_id)
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
-    def queue(self, item_id, force=False, full_pdf=False):
+    def queue(self, item_id, force=False, full_pdf=False, pdf_new=False):
         item = self.archive.get(item_id)
         if self.stopping:return
-        if not (item['text'].strip() or item.get('user_context','').strip()) or (not force and not self.archive.settings()['auto_ai']): return
+        if not (item['text'].strip() or item.get('user_context','').strip() or pdf_reading.index_text(item.get('pdf_reads',{})).strip()) or (not force and not self.archive.settings()['auto_ai']): return
         if company_ai.restricted(item):
             try:self.model_backend(item_ids=[item_id])
             except company_ai.ApprovalRequired:
@@ -404,8 +396,8 @@ class Service:
             self.busy.add(item_id)
             short=self.short_summary(item,full_pdf)
             self.summary_jobs.enqueue(item_id,len(item["text"]),short)
-            self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf)
-    def process(self, item_id, full_pdf=False):
+            self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf, pdf_new)
+    def process(self, item_id, full_pdf=False, pdf_new=False):
         try:item=self.archive.get(item_id)
         except KeyError:
             with self.lock:self.summary_jobs.finish(item_id,'stopped');self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
@@ -420,7 +412,14 @@ class Service:
                     self.summary_jobs.check(item_id)
                     item = self.archive.get(item_id)
                     self.archive.update(item_id, state='processing', error='')
-                if bundles.is_bundle(item['filename']):
+                if pdf_new:
+                    source,scope,used=pdf_reading.summary_material(self.archive,item,new_only=True)
+                    if not source:raise ValueError('没有尚未总结的已读页面')
+                    fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
+                    combined=(item.get('base_summary') or '')+'\n\n【PDF 新增页补充摘要】\n'+fields['summary']
+                    if len(combined)>60000:raise ValueError('摘要已达到容量上限，请另建档案总结新增页')
+                    fields={'summary':combined,'state':'ready','error':'','pdf_reads':pdf_reading.mark_summary(item,used,True)}
+                elif bundles.is_bundle(item['filename']):
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                     source,scope=service_pdf_material(self.archive,item,source,scope)
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
@@ -429,6 +428,8 @@ class Service:
                     if full_pdf:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=True)
                     elif scope:fields,_=ai.analyze_material(selected,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
                     else:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=full_pdf)
+                if not pdf_new and not full_pdf and item.get('_pdf_used'):
+                    fields['pdf_reads']=pdf_reading.mark_summary(item,item['_pdf_used'])
                 with self.lock:
                     self.summary_jobs.check(item_id)
                     self.archive.update(item_id, **fields);self.summary_jobs.commit(item_id)
@@ -761,6 +762,7 @@ class Service:
             item=self.archive.get(item_id)
             item['append_busy']=item_id in self.busy or item_id in self.captures
         item=self.with_progress(item)
+        item['pdf_coverage']=pdf_reading.coverage(item)
         item['company_data']=company_ai.restricted(item)
         item['local_paths']=local_paths.extract(item['text'])
         with self.archive.db() as db:
@@ -1022,7 +1024,7 @@ def handler(service):
                 if preview_match:
                     from .rich_text import searchable_text
                     item=service.material_attachments(service.archive.get(preview_match[1]));text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments'],'deleted_attachment_count':item['deleted_attachment_count']})
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'pdf_coverage':pdf_reading.coverage(item),'all_attachments':item['all_attachments'],'deleted_attachment_count':item['deleted_attachment_count']})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
@@ -1102,6 +1104,12 @@ def handler(service):
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
                     return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
+                pdf_summary=re.fullmatch(r'/api/items/([a-f0-9]{32})/summarize-pdf-pages',path)
+                if pdf_summary:
+                    item=service.archive.get(pdf_summary[1]);new_only=body.get('new_only') is True
+                    if new_only and not any(value['known'] for value in pdf_reading.coverage(item)):raise ValueError('旧摘要范围未记录，请先重新整理已读页面')
+                    if not pdf_reading.summary_material(service.archive,item,new_only)[0]:raise ValueError('没有尚未总结的已读页面')
+                    service.queue(item['id'],force=True,pdf_new=new_only);return self.send(200,{'ok':True})
                 recovery=re.fullmatch(r'/api/items/([a-f0-9]{32})/deleted-attachments/([a-f0-9]{32})/restore',path)
                 if recovery:
                     with service.lock:

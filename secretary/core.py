@@ -341,6 +341,13 @@ class Archive:
     def update(self, item_id, **values):
         allowed = {'title','text','summary','tags','category','state','error','vision_text','group_links','pdf_reads'}
         if not values or not set(values) <= allowed: raise ValueError('无效更新')
+        if 'summary' in values and 'pdf_reads' not in values:
+            with self.db() as db:row=db.execute('SELECT pdf_reads FROM items WHERE id=?',(item_id,)).fetchone()
+            if row:
+                selected=json.loads(row[0])
+                if any('summary_pages' in entry for entry in selected.values()):
+                    for entry in selected.values():entry.pop('summary_pages',None)
+                    values['pdf_reads']=selected
         if 'pdf_reads' in values:values['pdf_reads']=json.dumps(pdf_reading.records(values['pdf_reads']),ensure_ascii=False)
         if 'group_links' in values:values['group_links']=json.dumps(links.records(values['group_links']),ensure_ascii=False)
         values['updated'] = datetime.now(timezone.utc).isoformat()
