@@ -1,5 +1,5 @@
 """Managed local editing copies; explicit save-back updates the owned original and index."""
-import base64,hashlib,io,json,os,re,secrets,sqlite3,subprocess,sys,zipfile
+import base64,hashlib,io,json,os,re,secrets,sqlite3,subprocess,sys,zipfile,shutil,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 from . import additions,bundles
@@ -9,11 +9,17 @@ OPEN_EXTENSIONS={'.pdf','.txt','.md','.csv','.tsv','.xlsx','.xls','.docx','.doc'
 STALE='附件已修改，以下为修改前摘要；请重新整理后再使用。'
 WARNING='文件修改已保存，已有摘要可能过期；可手动重新整理。'
 def can_open(name):return Path(name).suffix.lower() in OPEN_EXTENSIONS or Path(name).suffix.lower() in VIDEO_MEDIA
-def digest(data):return hashlib.sha256(data).hexdigest()
+def digest(data):
+    if isinstance(data,(Path,bundles.Member)):
+        with data.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
+    return hashlib.sha256(data).hexdigest()
 def atomic(path,data):
     temp=path.parent/(secrets.token_hex(16)+'.tmp')
     try:
-        with os.fdopen(os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'wb') as stream:stream.write(data)
+        with os.fdopen(os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'wb') as stream:
+            if isinstance(data,(Path,bundles.Member)):
+                with data.open('rb') as source:shutil.copyfileobj(source,stream,1024*1024)
+            else:stream.write(data)
         temp.replace(path)
     finally:temp.unlink(missing_ok=True)
 def directory(archive,item_id,batch_id,key):
@@ -28,12 +34,12 @@ def directory(archive,item_id,batch_id,key):
 def read(path):
     if path.is_symlink() or not path.is_file():raise ValueError('编辑文件不存在，请先打开附件并保存文件。')
     before=path.stat()
-    if before.st_size>bundles.MAX_BYTES:raise ValueError('修改后的文件不能超过 50 MB')
+    if before.st_size>bundles.INLINE_MAX:raise ValueError('修改后的文件不能超过 50 MB')
     try:
-        with path.open('rb') as stream:data=stream.read(bundles.MAX_BYTES+1)
+        with path.open('rb') as stream:data=stream.read(bundles.INLINE_MAX+1)
     except PermissionError as error:raise ValueError('外部程序仍占用文件，请保存完成后重试；必要时关闭该文件。') from error
     after=path.stat()
-    if len(data)>bundles.MAX_BYTES or (before.st_size,before.st_mtime_ns,before.st_ino)!=(after.st_size,after.st_mtime_ns,after.st_ino):raise ValueError('文件仍在写入，请在外部程序保存完成后重试。')
+    if len(data)>bundles.INLINE_MAX or (before.st_size,before.st_mtime_ns,before.st_ino)!=(after.st_size,after.st_mtime_ns,after.st_ino):raise ValueError('文件仍在写入，请在外部程序保存完成后重试。')
     return data
 def source(archive,item_id,batch_id='',key=''):
     item=archive.get(item_id);batch=additions.find(item,batch_id) if batch_id else None
@@ -41,10 +47,10 @@ def source(archive,item_id,batch_id='',key=''):
     if batch_id and not key:raise ValueError('请选择本批附件')
     path=archive.root/'files'/(batch_id or item_id)
     if not path.is_file() or path.is_symlink():raise KeyError('附件原文件不存在')
-    data=path.read_bytes()
+    data=path
     if key:
         if not batch_id and not bundles.is_bundle(item['filename']):raise ValueError('这份资料没有组合附件')
-        file,content=bundles.attachment(data,key);name=file['name']
+        file,content=bundles.member(data,key);name=file['name']
     else:
         name=item['filename'];content=data
         if not name or bundles.is_bundle(name):raise ValueError('请选择要打开的附件')
@@ -99,10 +105,15 @@ def replace_bundle(data,key,changed,link_values):
         manifest['links']=link_values
         before=bundles.assemble(manifest)
         manifest['files']=[replacement if file['id']==key else file for file in manifest['files']]
-        output=io.BytesIO()
+        output=tempfile.NamedTemporaryFile(suffix='.stellar.zip',delete=False) if isinstance(data,Path) else io.BytesIO()
         with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as result:
             result.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False))
-            for file in manifest['files']:result.writestr(file['path'],changed if file['id']==key else original.read(file['path']))
+            for file in manifest['files']:
+                if file['id']==key:result.writestr(file['path'],changed)
+                else:
+                    with original.open(file['path']) as src,result.open(file['path'],'w',force_zip64=True) as dst:shutil.copyfileobj(src,dst,1024*1024)
+        if isinstance(data,Path):
+            target=Path(output.name);output.close();return target,before,bundles.assemble(manifest),old['media'].startswith('image/') or replacement['media'].startswith('image/')
         if len(output.getbuffer())>bundles.MAX_BYTES:raise ValueError('修改后的组合归档超过 50 MB')
         return output.getvalue(),before,bundles.assemble(manifest),old['media'].startswith('image/') or replacement['media'].startswith('image/')
 
@@ -118,12 +129,12 @@ def save_file(archive,item_id,batch_id='',key=''):
         if meta.get('name')!=name:raise ValueError('附件编辑记录无效')
         changed=read(folder/name)
         if digest(content)!=meta.get('base_sha'):raise ValueError('归档附件已被其他操作更新，未覆盖归档；本机编辑文件仍保留，可在文件夹中找回。')
-        if changed==content:return {'ok':True,'changed':False}
+        if digest(changed)==digest(content):return {'ok':True,'changed':False}
         if key:
             updated,before,after,image=replace_bundle(original,key,changed,batch.get('links',[]) if batch else item['group_links'])
         else:
             updated=changed;image=Path(name).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff')
-            try:before,_=extract(name,content)
+            try:before,_=extract(name,content.read_bytes() if isinstance(content,Path) else content)
             except Exception:before=''
             try:after,warning=extract(name,changed)
             except Exception:after='';warning='文件修改已保存，但暂时无法提取正文。'
@@ -132,6 +143,7 @@ def save_file(archive,item_id,batch_id='',key=''):
         if (folder/'history').is_symlink():raise ValueError('附件历史目录无效')
         version=folder/'history'/(datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(4))
         (version/'state').mkdir(mode=0o700,parents=True);atomic(version/name,content);atomic(version/'state'/'metadata.json',json.dumps({'item_id':item_id,'batch_id':batch_id,'attachment_id':key,'filename':name,'summary':batch['summary'] if batch else item['base_summary'],'vision_text':batch['vision_text'] if batch else item['vision_text']},ensure_ascii=False).encode())
+        container=version/'state'/'container';atomic(container,original)
         now=datetime.now(timezone.utc).isoformat();replaced=False
         try:
             with archive.db() as db:
@@ -152,8 +164,9 @@ def save_file(archive,item_id,batch_id='',key=''):
                 archive._index(db,item_id,text)
                 atomic(path,updated);replaced=True
         except BaseException as error:
-            if replaced:atomic(path,original)
+            if replaced:atomic(path,container)
             if isinstance(error,sqlite3.IntegrityError) and 'items.digest' in str(error):raise ValueError('修改后的文件已存在于另一份归档，未覆盖当前原件；本机编辑文件已保留。') from error
             raise
+        bundles.cleanup(updated)
         meta['base_sha']=digest(changed);atomic(meta_path,json.dumps(meta,ensure_ascii=False).encode())
         return {'ok':True,'changed':True}

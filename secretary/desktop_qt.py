@@ -192,8 +192,10 @@ def run(address,service=None,server=None,open_browser=True):
                             try:post(path+'/editor/open',{})
                             except Exception as error:print('Video external open failed:',error,flush=True)
                         threading.Thread(target=launch,daemon=True).start()
-                    mode['video']=VideoWindow(window,tr,open_external)
-                mode['video'].open_video(address+video_request['url'],video_request.get('name',tr('视频播放器')))
+                    def save_video(path,body):
+                        threading.Thread(target=lambda:post(path+'/video-state',body),daemon=True).start()
+                    mode['video']=VideoWindow(window,tr,open_external,save_video)
+                mode['video'].open_video(address+video_request['url'],video_request.get('name',tr('视频播放器')),video_request.get('state',{}))
         if value and not mode['started']:
             mode['started']=True
             if open_browser:request_mode(value['settings'].get('interface_mode','desktop'))

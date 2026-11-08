@@ -17,7 +17,7 @@ class MediaTest(unittest.TestCase):
             content=b'0123456789abcdef';encoded=base64.b64encode(content).decode()
             item_id,_=service.archive.add('Original',filename='clip.MP4',data=content)
             bundled=service.ingest({'attachments':[{'name':'clip.mp4','data':encoded}],'archive_only':True})['item']
-            added=service.append_material(bundled['id'],{'attachments':[{'name':'extra.webm','data':encoded}], 'expected_updated':bundled['updated'],'summarize':False})['item']
+            added=service.append_material(bundled['id'],{'attachments':[{'name':'extra.webm','data':base64.b64encode(b'Z'+content[1:]).decode()}], 'expected_updated':bundled['updated'],'summarize':False})['item']
             urls=[f'/api/items/{item_id}/preview']+[f['preview_url'] for f in service.material_attachments(added)['all_attachments']]
             server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
             opener=urllib.request.build_opener(urllib.request.ProxyHandler({}));base=f'http://127.0.0.1:{server.server_port}'

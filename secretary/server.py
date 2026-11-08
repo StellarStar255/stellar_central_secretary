@@ -25,7 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, media as local_media
+from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, uploads, local_backups, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -89,6 +89,7 @@ class Service:
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
         self.video_request={}
+        self.uploads=uploads.Uploads(self.archive.root);self.backups=local_backups.Backups(self.archive)
         self.desktop_peer=None;self.desktop_heartbeat_at=0
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
@@ -261,7 +262,7 @@ class Service:
             if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后追加')
             urls=body.get('links',links.extract(body.get('text',''))) if body.get('read_links',True) else []
             if body.get('summarize',self.archive.settings()['auto_ai']) is True:self.model_backend(item_ids=[item_id])
-            batch_id=additions.save(self.archive,item_id,body.get('text',''),body.get('attachments',[]),body.get('expected_updated'),urls)
+            batch_id=additions.save(self.archive,item_id,body.get('text',''),self.uploads.resolve(body.get('attachments',[])),body.get('expected_updated'),urls)
             summarize=body.get('summarize',self.archive.settings()['auto_ai']) is True
             if urls:
                 self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id,'read',summarize);self.summary_futures[item_id]=self.pool.submit(self.process_group_links,item_id,batch_id,summarize)
@@ -298,7 +299,7 @@ class Service:
                 try:self.model_backend(item_ids=[item_id])
                 except company_ai.ApprovalRequired:summarize=False;approval_waiting=True
             if self.stopping:return
-            original,manifest=bundles.load((self.archive.root/'files'/(batch_id or item_id)).read_bytes());original.close()
+            original,manifest=bundles.load((self.archive.root/'files'/(batch_id or item_id)));original.close()
             old_source=bundles.assemble(dict(manifest,links=previous));source=bundles.assemble(dict(manifest,links=values))
             with self.lock:
                 self.summary_jobs.check(item_id)
@@ -356,7 +357,7 @@ class Service:
                     self.summary_jobs.check(item_id)
                     item=self.archive.get(item_id);batch=additions.find(item,batch_id)
                     additions.update(self.archive,item_id,batch_id,state='processing',error='')
-                source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id).read_bytes(),batch['text'],batch.get('links',[]))
+                source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id),batch['text'],batch.get('links',[]))
                 new_source=source;context_limit=1000 if not images and len(source)<=4000 else 8000
                 source='本次仅总结新追加资料，不重述旧摘要；旧摘要仅供理解背景。\n旧摘要：\n'+item['summary'][:context_limit]+'\n\n本次新增：\n'+source
                 fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,'【追加资料概览】'+scope,summary_text=new_source)
@@ -401,7 +402,7 @@ class Service:
                     item = self.archive.get(item_id)
                     self.archive.update(item_id, state='processing', error='')
                 if bundles.is_bundle(item['filename']):
-                    source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
+                    source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
                 else:fields=ai.summary_fields(item, self.model_backend(item_ids=[item_id]), full_pdf=full_pdf)
                 with self.lock:
@@ -649,7 +650,9 @@ class Service:
         parsed=False
         try:
             self.archive.update(item_id,state='processing',error='正在重新解析原文件…')
-            text,warning=extract(item['filename'],(self.archive.root/'files'/item_id).read_bytes())
+            original=self.archive.root/'files'/item_id
+            if not bundles.is_bundle(item['filename']) and original.stat().st_size>bundles.INLINE_MAX:raise ValueError('大附件原件已完整保存；自动正文解析限 50 MB，可手动补充正文。')
+            text,warning=extract(item['filename'],original if bundles.is_bundle(item['filename']) else original.read_bytes())
             if text.strip():
                 self.archive.replace_capture(item_id,item['title'],text)
                 self.archive.update(item_id,state='ready' if self.archive.get(item_id)['summary'] else 'pending',error=warning)
@@ -668,11 +671,12 @@ class Service:
         archive_only=body.get("archive_only") is True
         browser_import=bool(body.get('url') and body.get('text') or body.get('captured_at') or body.get('web_capture') or body.get('company_data') is True)
         if 'attachments' in body:
-            text=body.get('text','');urls=body.get('links',[]);data,source=bundles.create(text,body['attachments'],urls)
+            text=body.get('text','');urls=body.get('links',[]);data,source=bundles.create(text,self.uploads.resolve(body['attachments']),urls)
             annotation=text
             for url in urls:annotation=annotation.replace(url,'')
             title=(str(body.get('title') or '').strip() or (annotation.strip().splitlines()[0].rstrip('：:')[:100] if annotation.strip() else '相关链接与资料' if urls else '组合资料'))
-            item_id,created=self.archive.add(title,source,filename='materials.stellar.zip',data=data)
+            try:item_id,created=self.archive.add(title,source,filename='materials.stellar.zip',data=data)
+            finally:bundles.cleanup(data)
             if browser_import:company_ai.mark(self.archive,item_id)
             if urls:self.archive.update(item_id,group_links=links.prepare(urls))
             if archive_only:
@@ -739,10 +743,10 @@ class Service:
     def material_attachments(self,item):
         item_id=item['id']
         for batch in item['additions']:
-            try:batch['attachments']=bundles.metadata((self.archive.root/'files'/batch['id']).read_bytes())
+            try:batch['attachments']=bundles.metadata((self.archive.root/'files'/batch['id']))
             except Exception:batch['attachment_error']='追加附件暂时无法读取，可下载原件后检查。'
         if bundles.is_bundle(item['filename']):
-            try:item['attachments']=bundles.metadata((self.archive.root/'files'/item_id).read_bytes())
+            try:item['attachments']=bundles.metadata((self.archive.root/'files'/item_id))
             except Exception:item['bundle_error']='组合附件暂时无法读取，可下载原文件后检查。'
         item['can_open_file']=not bundles.is_bundle(item['filename']) and attachment_editor.can_open(item['filename'])
         item['file_editing']=attachment_editor.has_copy(self.archive,item_id)
@@ -763,6 +767,14 @@ class Service:
         item['all_attachments']=catalog
         return item
 
+    def video_identity(self,path):
+        match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?',path)
+        if not match:raise ValueError('视频地址无效')
+        item_id,batch_id,key=match.groups();item=self.material_attachments(self.archive.get(item_id))
+        file=next((f for f in item['all_attachments'] if f['id']==(key or 'original') and f['batch_id']==(batch_id or '')),None)
+        if not file or not local_media.video_type(file['name']):raise ValueError('请选择视频附件')
+        return video_state.identity(self.archive.root,self.archive.root/'files'/(batch_id or item_id),key or '')
+
     def ask_material(self,question,item_ids):
         if not isinstance(item_ids,list) or len(item_ids)!=1 or not isinstance(item_ids[0],str):raise ValueError('请选择一份本次组合资料')
         item_id=item_ids[0];item=self.archive.get(item_id)
@@ -775,7 +787,7 @@ class Service:
         try:
             with self.summary_jobs.session(item_id,len(item["text"]),short=True):
                 self.archive.update(item_id,state='processing',error='')
-                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id).read_bytes(),item['text'],item['group_links'])
+                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                 fields,answer=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope,question=question)
                 with self.lock:
                     self.summary_jobs.check(item_id)
@@ -806,6 +818,7 @@ class Service:
             ids=list(self.captures)
             for stop in self.captures.values():stop.set()
         for item_id in ids:self.cancel_capture(item_id)
+        self.backups.stop.set()
         self.summary_jobs.close();ai.cancel_all()
         self.quick_pool.shutdown(wait=False,cancel_futures=True)
         self.capture_pool.shutdown(wait=False, cancel_futures=True)
@@ -844,6 +857,14 @@ def handler(service):
         def trusted(self):
             host = self.headers.get('Host', '')
             return host in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
+        def stream_file(self,source,name,media='application/octet-stream',inline=False):
+            size=source.stat().st_size
+            self.send_response(200);self.send_header('Content-Type',media);self.send_header('Content-Length',str(size));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Cache-Control','no-store')
+            self.send_header('Content-Security-Policy',"default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'")
+            self.send_header('Content-Disposition',('inline' if inline else 'attachment')+"; filename*=UTF-8''"+urllib.parse.quote(name,safe=''));self.end_headers()
+            try:
+                with source.open('rb') as stream:shutil.copyfileobj(stream,self.wfile,65536)
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass
         def video(self,source,name):
             size=len(source) if isinstance(source,bytes) else source.stat().st_size
             bounds=self.headers.get('Range');start,end=0,size-1
@@ -876,23 +897,28 @@ def handler(service):
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
                 if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path.endswith(('/video-state','/video-poster')):
+                    base=path.rsplit('/',1)[0];key=service.video_identity(base)
+                    if path.endswith('/video-poster'):return self.send(200,(service.archive.root/'video-cache'/(key+'.jpg')).read_bytes(),'image/jpeg')
+                    return self.send(200,video_state.read(service.archive.root,key))
                 batch_download=re.fullmatch(r'/api/items/([a-f0-9]{32})/additions/([a-f0-9]{32})/file',path)
                 if batch_download:
                     if additions.find(service.archive.get(batch_download[1]),batch_download[2]) is None:raise KeyError('追加资料不存在')
-                    return self.send(200,(service.archive.root/'files'/batch_download[2]).read_bytes(),'application/zip',{'Content-Disposition':'attachment; filename="additional-materials.stellar.zip"'})
+                    return self.stream_file(service.archive.root/'files'/batch_download[2],'additional-materials.stellar.zip','application/zip')
                 thumbnail_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/thumbnail',path)
                 if thumbnail_match:
                     item_id,batch_id,key=thumbnail_match.groups()
                     item=service.archive.get(item_id)
                     if batch_id and additions.find(item,batch_id) is None:raise KeyError('追加资料不存在')
                     if not key and (not item['filename'] or bundles.is_bundle(item['filename'])):raise KeyError('附件不存在')
-                    data=(service.archive.root/'files'/(batch_id or item_id)).read_bytes()
+                    data=service.archive.root/'files'/(batch_id or item_id)
                     if key:
                         if not batch_id and not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
-                        file,data=bundles.attachment(data,key);name=file['name']
+                        file,source=bundles.member(data,key);name=file['name']
+                        data=source.read_bytes() if file['size']<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
                     else:
                         if not item['filename'] or bundles.is_bundle(item['filename']):raise KeyError('附件不存在')
-                        name=item['filename']
+                        name=item['filename'];data=data.read_bytes() if data.stat().st_size<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
                     image,media=thumbnails.render(name,data)
                     return self.send(200,image,media)
                 bundle_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/additions/([a-f0-9]{32}))?/attachments/([a-f0-9]{32})(/preview)?',path)
@@ -902,13 +928,13 @@ def handler(service):
                     if batch_id:
                         if additions.find(item,batch_id) is None:raise KeyError('追加资料不存在')
                     elif not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
-                    file,data=bundles.attachment((service.archive.root/'files'/(batch_id or item['id'])).read_bytes(),bundle_match[3])
+                    file,source=bundles.member(service.archive.root/'files'/(batch_id or item['id']),bundle_match[3])
                     media='application/octet-stream';disposition='attachment'
                     if bundle_match[4]:
-                        if local_media.video_type(file['name']):return self.video(data,file['name'])
+                        if local_media.video_type(file['name']):return self.video(source,file['name'])
                         if file['media'] in bundles.IMAGE_MEDIA.values():media=file['media'];disposition='inline'
-                        elif file['name'].lower().endswith('.pdf') and b'%PDF-' in data[:1024]:media='application/pdf';disposition='inline'
-                    return self.send(200,data,media,{'Content-Disposition':disposition+"; filename*=UTF-8''"+urllib.parse.quote(file['name'],safe='')})
+                        elif file['name'].lower().endswith('.pdf'):media='application/pdf';disposition='inline'
+                    return self.stream_file(source,file['name'],media,disposition=='inline')
                 image_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})',path)
                 if image_match:
                     image,source=notes.note_image(service.archive,*image_match.groups())
@@ -916,6 +942,7 @@ def handler(service):
                 if path=='/api/browser-extension/download':return self.send(200,extension_install.download(),'application/zip',{'Content-Disposition':'attachment; filename="Stellar-Capture-Extension.zip"'})
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/trash':return self.send(200,{'items':service.archive.trash_items()})
+                if path=='/api/backups':return self.send(200,{'items':service.backups.entries(),'error':service.backups.error})
                 if path=='/api/tasks':return self.send(200,service.task_status())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/library':
@@ -928,7 +955,9 @@ def handler(service):
                 if path=='/api/items':
                     q = urllib.parse.parse_qs(parsed.query)
                     return self.send(200, [service.with_progress(item) for item in service.archive.list(**{k:q.get(k,[''])[0] for k in ('q','category','kind')})])
-                if path=='/api/backup': return self.send(200, service.backup(), 'application/zip', {'Content-Disposition':'attachment; filename="stellar-knowledge-backup.zip"'})
+                if path=='/api/backup':
+                    snapshot=service.backups.create()
+                    return self.stream_file(service.backups.folder/(snapshot['id']+'.zip'),'stellar-knowledge-backup.zip','application/zip')
                 preview_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/quick-preview',path)
                 if preview_match:
                     from .rich_text import searchable_text
@@ -949,14 +978,13 @@ def handler(service):
                         return self.send(200,original.read_bytes(),'application/pdf',{'Content-Disposition':"inline; filename*=UTF-8''"+urllib.parse.quote(item['filename'],safe='')})
                     if len(parts)==5 and parts[4]=='file':
                         if not item['filename']: raise KeyError('没有原文件')
-                        data = (service.archive.root/'files'/item['id']).read_bytes()
-                        return self.send(200, data, 'application/octet-stream', {'Content-Disposition':"attachment; filename*=UTF-8''"+urllib.parse.quote(item['filename'], safe='')})
+                        return self.stream_file(service.archive.root/'files'/item['id'],item['filename'])
                     return self.send(200, service.item_detail(item['id']))
                 if path in ('/tutorial','/tutorial.html'):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -968,11 +996,27 @@ def handler(service):
             try:
                 path = urllib.parse.urlsplit(self.path).path
                 length = int(self.headers.get('Content-Length', 0))
+                chunk=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/chunk',path)
+                if chunk:return self.send(200,service.uploads.chunk(chunk[1],int(self.headers.get('X-Upload-Offset','-1')),self.rfile,length))
                 if path=='/api/import':
-                    if not 0<length<=MAX_BACKUP: raise ValueError('请选择不超过 256 MB 的 ZIP 备份')
-                    return self.send(200, import_backup(service.archive, self.rfile.read(length)))
+                    if not 0<length<=MAX_BACKUP: raise ValueError('请选择不超过 8 GB 的 ZIP 备份')
+                    import tempfile
+                    with tempfile.TemporaryDirectory(prefix='stellar-import-') as temp:
+                        source=Path(temp)/'backup.zip'
+                        with source.open('wb') as dst:
+                            remaining=length
+                            while remaining:
+                                chunk=self.rfile.read(min(1024*1024,remaining))
+                                if not chunk:raise ValueError('备份上传中断')
+                                dst.write(chunk);remaining-=len(chunk)
+                        return self.send(200,import_backup(service.archive,source))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                if path=='/api/uploads/start':return self.send(200,service.uploads.start(body.get('name'),body.get('size')))
+                cancel_upload=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/cancel',path)
+                if cancel_upload:service.uploads.discard(cancel_upload[1]);return self.send(200,{'ok':True})
+                if path.endswith('/video-state'):
+                    return self.send(200,video_state.save(service.archive.root,service.video_identity(path.rsplit('/',1)[0]),body))
                 trash_match=re.fullmatch(r'/api/trash/([a-f0-9]{32})/(restore|purge)',path)
                 if trash_match:
                     item=service.archive.get(trash_match[1],include_trashed=True)
@@ -999,12 +1043,19 @@ def handler(service):
                     file=next((f for f in item['all_attachments'] if f['id']==(key or 'original') and f['batch_id']==(batch_id or '')),None)
                     if not file or not local_media.video_type(file['name']):raise ValueError('请选择视频附件')
                     native=bool(service.desktop_status().get('video_player'))
-                    if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name']}
+                    if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name'],'state':video_state.read(service.archive.root,service.video_identity(file['path']))}
                     return self.send(200,{'native':native})
+                if path=='/api/backups/create':return self.send(200,service.backups.create())
+                if path=='/api/backups/restore':
+                    if body.get('confirmed') is not True:raise ValueError('请先确认恢复此备份')
+                    with service.lock:
+                        if service.busy or service.captures or service.questions:raise ValueError('请等待当前任务结束后恢复备份')
+                        return self.send(200,service.backups.restore(body.get('id')))
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/install':
                     with service.lock:
                         if service.busy or service.captures or service.questions: raise ValueError('请等待摘要和会话读取完成后再升级')
+                    service.backups.create('upgrade')
                     updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
                                   desktop=bool(service.desktop_status().get('enabled')))
                     return self.send(200, updater.status())
@@ -1097,6 +1148,7 @@ def handler(service):
                         if len(text)>2_000_000: raise ValueError('正文超过 200 万字')
                         with service.archive.lock:
                             current=service.archive.get(item_id)
+                            if 'expected_title' in body and current['title']!=body['expected_title']:raise ValueError('标题已在其他窗口更新，草稿已保留，请核对后保存。')
                             if 'expected_text' in body and current['text']!=body['expected_text']:raise ValueError('正文已在其他窗口更新，草稿已保留，请核对后保存。')
                             if body.get('defer_summary'):
                                 service.archive.update(item_id,text=text,state='ready' if current['summary'] else 'saved',error='正文已修改，已有摘要可能过期；可手动重新整理。')
@@ -1124,6 +1176,7 @@ def main(desktop=False):
     address = f'http://127.0.0.1:{server.server_port}'
     print(f'Stellar Secretary：{address}\n资料目录：{service.archive.root}', flush=True)
     updater.check_periodically()
+    service.backups.start()
     try:
         if desktop:
             if sys.platform=='darwin':

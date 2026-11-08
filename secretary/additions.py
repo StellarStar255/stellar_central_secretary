@@ -26,7 +26,15 @@ def find(item,batch_id):
     return next((batch for batch in item['additions'] if batch['id']==batch_id),None)
 
 def save(archive,item_id,text,files,expected,urls=None):
-    data,source=bundles.create(text,files,urls)
+    existing=set()
+    with archive.lock:
+        item=archive.get(item_id)
+        if bundles.is_bundle(item['filename']):existing.update(bundles.hashes(archive.root/'files'/item_id))
+        elif item['filename']:
+            import hashlib
+            with (archive.root/'files'/item_id).open('rb') as stream:existing.add(hashlib.file_digest(stream,'sha256').hexdigest())
+        for batch in item['additions']:existing.update(bundles.hashes(archive.root/'files'/batch['id']))
+    data,source=bundles.create(text,files,urls,existing)
     batch={'id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'text':source[:200000],'summary':'','vision_text':'','state':'pending','error':'','links':links.prepare(urls or [])}
     if len(source)>200000:batch['text']+='\n【追加索引仅保留前部文字；完整原件已保存。】';batch['text']=batch['text'][:199940]+'\n【追加索引仅保留前部文字；完整原件已保存。】'
     with archive.lock:
@@ -35,13 +43,14 @@ def save(archive,item_id,text,files,expected,urls=None):
         batches=item['additions']+[batch];records(batches)
         target=archive.root/'files'/batch['id'];created=False
         try:
-            with target.open('xb') as stream:created=True;stream.write(data)
+            target.touch(exist_ok=False);created=True;bundles.copy_data(data,target)
             with archive.db() as db:
                 db.execute('UPDATE items SET additions=?,updated=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),batch['created'],item_id))
                 archive._index(db,item_id,item['text'])
         except BaseException:
             if created:target.unlink(missing_ok=True)
             raise
+        finally:bundles.cleanup(data)
     return batch['id']
 
 def update(archive,item_id,batch_id,**fields):

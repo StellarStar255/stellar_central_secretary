@@ -189,14 +189,14 @@ def _can_replace_in_place(bundle):
         and os.access(bundle.parent, os.W_OK)
 
 
-def _mac_install(dmg, work):
+def _mac_install(dmg, work,desktop=True):
     bundle = _current_app_bundle()
     if not _can_replace_in_place(bundle):
         subprocess.Popen(["open", str(dmg)])  # let the user drag it to Applications
         _set(phase="manual", error=None)
         return False
     from .update_transaction import prepare
-    return prepare(dmg,work,_sha256(dmg),status()['latest'],desktop=True,kind='mac')
+    return prepare(dmg,work,_sha256(dmg),status()['latest'],desktop=desktop,kind='mac')
 
 
 def _windows_install(setup, work, expected_sha, desktop=False):
@@ -236,7 +236,7 @@ def start(on_ready_to_quit, desktop=False):
             if not expected:
                 raise RuntimeError("这个版本没有提供校验文件，为了安全不自动安装，请到 Release 页面手动下载")
             _set(phase="installing")
-            if MAC:ready=_mac_install(dest,work)
+            if MAC:ready=_mac_install(dest,work,desktop=desktop)
             elif WINDOWS:ready=_windows_install(dest,work,expected,desktop=desktop)
             else:
                 from .linux_update import install_kind,ManualInstall

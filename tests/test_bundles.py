@@ -70,7 +70,12 @@ class BundleTest(unittest.TestCase):
 
     def test_invalid_bundle_paths_and_attachment_limits(self):
         with self.assertRaises(ValueError):bundles.create('',files()*11)
-        with self.assertRaises(ValueError):bundles.create('',[files()[0]]*9)
+        duplicate,_=bundles.create('',[files()[0]]*9)
+        self.assertEqual(len(bundles.metadata(duplicate)),1)  # Contents, regardless of repeated filenames.
+        unique=[]
+        for index in range(9):
+            output=io.BytesIO();Image.new('RGB',(2,2),(index*20,0,0)).save(output,'PNG');unique.append({'name':str(index)+'.png','data':base64.b64encode(output.getvalue()).decode()})
+        with self.assertRaises(ValueError):bundles.create('',unique)
         data,_=bundles.create('',files());source=zipfile.ZipFile(io.BytesIO(data));manifest=json.loads(source.read('manifest.json'));manifest['files'][0]['path']='../escape'
         altered=io.BytesIO()
         with zipfile.ZipFile(altered,'w') as target:

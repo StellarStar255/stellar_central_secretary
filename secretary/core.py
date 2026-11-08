@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
-from . import additions,links
+from . import additions,links,bundles
 
 
 class PageText(HTMLParser):
@@ -218,7 +218,9 @@ class Archive:
             cursor = db.execute('INSERT INTO chunks(item_id,position,text) VALUES (?,?,?)', (item_id, pos, chunk))
             db.execute('INSERT INTO search VALUES (?,?,?)', (' '.join(terms(keywords+' '+chunk)), cursor.lastrowid, item_id))
     def add(self, title='', text='', url='', filename='', data=None, warning=''):
-        digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
+        if isinstance(data,Path):
+            with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+        else:digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
             old = db.execute("SELECT id,text,trashed_at FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY created LIMIT 1", (digest, url, url)).fetchone()
@@ -227,11 +229,11 @@ class Archive:
                 if text.strip() and not old['text'].strip():
                     db.execute("UPDATE items SET text=?,title=?,state='pending',error='',updated=? WHERE id=?", (text, title or filename or url, now, old['id']))
                     if data is not None:
-                        (self.root / 'files' / old['id']).write_bytes(data)
+                        bundles.copy_data(data,self.root / 'files' / old['id'])
                         db.execute("UPDATE items SET filename=? WHERE id=?", (filename, old['id']))
                     self._index(db, old['id'], text)
                 return old['id'], False
-            if data is not None: (self.root / 'files' / item_id).write_bytes(data)
+            if data is not None: bundles.copy_data(data,self.root / 'files' / item_id)
             state = 'pending' if text.strip() else 'needs_content'
             db.execute('INSERT INTO items(id,title,kind,url,filename,digest,text,state,error,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                        (item_id, title or filename or url or '未命名笔记', 'file' if filename else ('link' if url else 'note'), url, filename, digest, text, state, warning, now, now))

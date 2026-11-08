@@ -121,7 +121,7 @@ $('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterfa
 
 function toast(message){const host=[...document.querySelectorAll('dialog[open]')].at(-1)||document.body;host.append($('#toast'));$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),4200)}
 async function api(path,body,retry=true,companyRetry=true){
- const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/model-api/test','/api/model-connection/test','/api/update/check'].includes(path)?300000:path==='/api/ingest'?90000:12000);
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/model-api/test','/api/model-connection/test','/api/update/check'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/backups/')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
  let response;
  try{response=await fetch(path,body===undefined?{signal:controller.signal}:{method:'POST',headers:{'Content-Type':'application/json','X-Knowledge-Token':token},body:JSON.stringify(body),signal:controller.signal})}
  catch(e){throw Error(e.name==='AbortError'?t('本地服务响应超时，请检查程序是否仍在运行。'):e.message)}
@@ -274,8 +274,8 @@ function renderAttachments(){
  $('#attachments').querySelectorAll('[data-remove]').forEach(button=>button.onclick=()=>{const [removed]=attachedFiles.splice(Number(button.dataset.remove),1);releaseAttachment(removed);renderAttachments()});updateSend();
 }
 function attach(files){for(const file of files){
- if(file.size>50*1024*1024){toast(file.name+t(' 超过 50 MB'));continue}
- if(attachedFiles.length>=20||attachedFiles.reduce((sum,item)=>sum+item.size,0)+file.size>50*1024*1024){toast(t('每次最多 20 个附件，总计不超过 50 MB'));continue}
+ if(file.size>1024**3){toast(file.name+t(' 超过 1 GB'));continue}
+ if(attachedFiles.length>=20||attachedFiles.reduce((sum,item)=>sum+item.size,0)+file.size>2*1024**3){toast(t('每次最多 20 个附件，单个 1 GB，总计 2 GB'));continue}
  if(isImageFile(file)&&attachedFiles.filter(isImageFile).length>=8){toast(t('每次最多 8 张图片'));continue}
  attachedFiles.push(file)
 }renderAttachments();$('#message-input').focus()}
@@ -398,13 +398,13 @@ $('#composer-form').onsubmit=async event=>{
  const results=[],errors=[];
  try{
   const groupLinks=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
-  const grouped=mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
+  const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
   if(grouped){
    const groupQuestion=groupLinks.reduce((value,url)=>value.replace(url,''),text).trim();
    const asking=!archiveOnly&&(mode==='ask'||mode==='auto'&&!!groupQuestion&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(groupQuestion));
    updateMessage(chat,response,{text:t('正在保存这组资料…')});
-   const attachments=[];for(const file of files)attachments.push({name:file.name,data:await readFile(file)});
-   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id);
+   const attachments=[];for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{$('#composer-status').textContent=t('正在上传：')+name+' '+percent+'%'}));
+   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup();results.push(result);response.items.push(result.item.id);
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
@@ -429,7 +429,7 @@ $('#composer-form').onsubmit=async event=>{
 };
 async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.isFlushing()&&!await StellarDrafts.flush())return;const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;if(recordView)void api('/api/items/'+id+'/view',{}).catch(()=>{});selectedId=id;detailVersion=item.updated;
  $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="open">默认程序打开</button>`:""}${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="reveal">在文件夹中显示</button>${item.file_editing?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="save" ${item.append_busy?'disabled':''}>保存修改回归档</button>`:''}`:''}<button class="secondary" id="append-material" ${item.append_busy?'disabled':''}>追加资料</button><button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.can_open_file&&item.file_editing?ui`<p class="muted">先在外部程序保存，再点击保存修改回归档。修改前版本保留在本机，摘要不会自动重跑。</p>`:''}${StellarBundles.renderAll(item)}${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render({...item,attachments:[]}):''}${item.user_context?ui`<h3>你的链接说明</h3><div id="link-context" class="detail-text">${esc(item.user_context)}</div>`:''}${StellarNotes.render(item)}${globalThis.StellarCompanyAI?StellarCompanyAI.render(item):''}<div id="detail-summary-progress" class="summary-progress">${summaryProgress(item)}</div><h3>资料摘要</h3><div class="detail-text">${esc(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><div class="detail-text">${esc(item.vision_text)}</div>`:''}${renderArchivedBody(item)}${globalThis.StellarAdditions?StellarAdditions.render(item):''}`;
- const cancelTitle=()=>{StellarDrafts.cancel($('#title-editor'));$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
+ const cancelTitle=()=>{if(typeof titleSaving!=='undefined'&&titleSaving)return;StellarDrafts.cancel($('#title-editor'));$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  globalThis.StellarLocalPaths?.bind($('.archived-body'),item,{api,toast});
  globalThis.StellarCompanyAI?.bind(item,{api,toast,onSaved:()=>detail(id)});
  StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''}});
@@ -465,11 +465,11 @@ async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.is
   $('#edit-title').disabled=true;const editor=document.createElement('section');editor.id='body-editor';editor.dataset.draftForm='true';
   editor.innerHTML=t('<label>标题<input id="detail-title"></label><label>正文<textarea class="edit-text" id="detail-edit"></textarea></label><button class="primary" id="save-content">保存并重新整理</button><button class="secondary" id="save-body-only">保存正文</button><button class="secondary" id="cancel-body">取消</button>');$('#detail-content').append(editor);
   const title=editor.querySelector('#detail-title'),text=editor.querySelector('#detail-edit');title.value=item.title;text.value=item.text;StellarDrafts.track(title,id+':body-title');StellarDrafts.track(text,id+':body');text.focus();$('#edit-content').disabled=true;let saving=null;
-  const saveBody=()=>saving??=(async()=>{StellarDrafts.status(editor,'正在保存…');try{await api('/api/items/'+id,{title:title.value,text:text.value,expected_text:StellarDrafts.base(text),defer_summary:true});StellarDrafts.saved(editor);return true}catch(error){StellarDrafts.status(editor,'保存失败：'+error.message,true);toast(error.message);return false}finally{saving=null}})();
+  const saveBody=()=>saving??=(async()=>{StellarDrafts.status(editor,'正在保存…');for(const control of editor.querySelectorAll('input,textarea,button'))control.disabled=true;try{await api('/api/items/'+id,{title:title.value,text:text.value,expected_text:StellarDrafts.base(text),expected_title:StellarDrafts.base(title),defer_summary:true});StellarDrafts.saved(editor);return true}catch(error){StellarDrafts.status(editor,'保存失败：'+error.message,true);toast(error.message);return false}finally{for(const control of editor.querySelectorAll('input,textarea,button'))control.disabled=false;saving=null}})();
   StellarDrafts.register(editor,saveBody);
   editor.querySelector('#save-body-only').onclick=()=>void saveBody();
   editor.querySelector('#save-content').onclick=()=>busy($('#save-content'),async()=>{if(await saveBody()){await api('/api/items/'+id,{});await detail(id);await refresh();toast(t('正文已保存并重新索引'))}});
-  const cancel=()=>{StellarDrafts.cancel(editor);editor.remove();$('#edit-title').disabled=false;$('#edit-content').disabled=false};editor.querySelector('#cancel-body').onclick=cancel;
+  const cancel=()=>{if(saving)return;StellarDrafts.cancel(editor);editor.remove();$('#edit-title').disabled=false;$('#edit-content').disabled=false};editor.querySelector('#cancel-body').onclick=cancel;
   editor.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancel()}});
  };
 
@@ -568,7 +568,7 @@ $('#backup-input').onchange=async()=>{
  importingBackup=true;$('#import-backup').disabled=$('#library-import').disabled=true;
  $('#import-status').textContent=t('正在导入备份，请稍候…');toast(t('正在导入知识库备份…'));
  try{
-  if(file.size>256*1024*1024)throw Error(t('备份不能超过 256 MB'));
+  if(file.size>8*1024**3)throw Error(t('备份不能超过 8 GB'));
   const send=()=>fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/zip','X-Knowledge-Token':token},body:file,signal:AbortSignal.timeout(300000)});
   let response=await send();
   if(response.status===403){token=(await api('/api/status')).token;response=await send()}
@@ -586,3 +586,12 @@ globalThis.StellarBundles?.bind({api,toast,nativeVideo:()=>latestStatus?.desktop
 globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});
 
 globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),link:originalLink,describe:libraryPresentation,onSaved:refresh});
+
+async function localBackupList(){
+ const result=await api('/api/backups');$('#backup-error').textContent=result.error||'';const target=$('#backup-entries');target.innerHTML='';
+ for(const entry of result.items){const row=document.createElement('p');row.textContent=new Date(entry.created).toLocaleString()+' · '+t(({daily:'每日备份',upgrade:'升级前备份',manual:'手动备份','before-restore':'恢复前备份'})[entry.reason]||entry.reason)+' · '+(entry.size/1048576).toFixed(1)+' MB ';const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent=t('恢复此备份');button.onclick=async()=>{if(!confirm(t('恢复会将资料、速记和对话恢复到此备份的时间点。恢复前会自动保存当前资料。继续？')))return;button.disabled=true;try{if(!await StellarDrafts.flush())return;await api('/api/backups/restore',{id:entry.id,confirmed:true});await StellarDrafts.clearAll();location.reload()}catch(error){$('#backup-error').textContent=error.message}finally{button.disabled=false}};row.append(button);target.append(row)}
+}
+$('#backup-list').onclick=()=>busy($('#backup-list'),localBackupList);
+$('#backup-create').onclick=()=>busy($('#backup-create'),async()=>{await api('/api/backups/create',{});await localBackupList();toast(t('本机备份已完成'))});
+
+if(globalThis.StellarUploads)StellarUploads.bind(api);

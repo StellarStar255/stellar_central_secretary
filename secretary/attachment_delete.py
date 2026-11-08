@@ -1,5 +1,5 @@
 """Remove one owned attachment while retaining the item and a local recovery copy."""
-import io,json,re,sqlite3,zipfile
+import io,json,re,sqlite3,zipfile,tempfile,shutil
 from datetime import datetime,timezone
 from pathlib import Path
 from . import additions,bundles
@@ -20,17 +20,19 @@ def remove_bundle(data,key,link_values):
         before=bundles.assemble(manifest)
         removed=next((f for f in manifest['files'] if f['id']==key),None)
         if removed is None:raise KeyError('附件不存在或已删除')
-        content=original.read(removed['path'])
+        content=bundles.Member(data,dict(removed)) if isinstance(data,Path) else original.read(removed['path'])
         remaining=[file for file in manifest['files'] if file['id']!=key]
-        contents={file['id']:original.read(file['path']) for file in remaining}
+        contents={file['id']:file['path'] for file in remaining}
         # IDs remain stable; bundle paths use consecutive indices.
         for index,file in enumerate(remaining,1):file['path']=f'files/{index:02d}-'+file['name']
         manifest['files']=remaining
         if not remaining and not manifest['text'].strip() and not manifest.get('links'):manifest['text']=EMPTY
-        output=io.BytesIO()
+        output=tempfile.NamedTemporaryFile(suffix='.stellar.zip',delete=False) if isinstance(data,Path) else io.BytesIO()
         with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED,compresslevel=3) as result:
             result.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False))
-            for file in remaining:result.writestr(file['path'],contents[file['id']])
+            for file in remaining:
+                with original.open(contents[file['id']]) as src,result.open(file['path'],'w',force_zip64=True) as dst:shutil.copyfileobj(src,dst,1024*1024)
+        if isinstance(data,Path):target=Path(output.name);output.close();return target,before,bundles.assemble(manifest),removed,content
         return output.getvalue(),before,bundles.assemble(manifest),removed,content
 
 def remove(archive,item_id,batch_id,key,body):
@@ -45,14 +47,14 @@ def remove(archive,item_id,batch_id,key,body):
         if batch_id and batch is None:raise KeyError('追加资料不存在')
         path=archive.root/'files'/(batch_id or item_id)
         if not path.is_file() or path.is_symlink():raise KeyError('附件原文件不存在')
-        original=path.read_bytes()
+        original=path
         if key:
             if not batch_id and not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
             updated,before,after,file,content=remove_bundle(original,key,batch.get('links',[]) if batch else item['group_links'])
         else:
             if not item['filename'] or bundles.is_bundle(item['filename']):raise KeyError('请选择单个附件')
             file={'name':item['filename'],'id':'original'};content=original;updated=None;after=''
-            try:before,_=extract(item['filename'],content)
+            try:before,_=extract(item['filename'],content.read_bytes() if content.stat().st_size<=bundles.INLINE_MAX else b'')
             except Exception:before=''
         folder=directory(archive,item_id,batch_id,key)
         history=folder/'history'
@@ -64,6 +66,7 @@ def remove(archive,item_id,batch_id,key,body):
         if not backup_name or backup_name in ('.','..'):raise ValueError('附件文件名无效')
         atomic(recovery/backup_name,content)
         atomic(recovery/'state/metadata.json',json.dumps({'kind':'attachment-deletion','item_id':item_id,'batch_id':batch_id,'attachment':file,'summary':batch['summary'] if batch else item['base_summary']},ensure_ascii=False).encode())
+        container=recovery/'state'/'container';atomic(container,original)
         now=datetime.now(timezone.utc).isoformat();replaced=False
         try:
             with archive.db() as db:
@@ -85,7 +88,8 @@ def remove(archive,item_id,batch_id,key,body):
                 else:atomic(path,updated)
                 replaced=True
         except BaseException as error:
-            if replaced:atomic(path,original)
+            if replaced:atomic(path,container)
             if isinstance(error,sqlite3.IntegrityError):raise ValueError('删除后的资料与另一份归档冲突，原附件未删除。') from error
             raise
+        bundles.cleanup(updated)
         return {'ok':True,'deleted_attachment':file['id'],'name':file['name'],'recovery_saved':True}

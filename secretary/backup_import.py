@@ -6,21 +6,27 @@ import re
 import stat
 import uuid
 import zipfile
+import tempfile,shutil
+from pathlib import Path
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from .notes import image_bytes,MAX_IMAGE,MAX_IMAGES
 from . import additions,bundles,links
 
-MAX_BACKUP = 256 * 1024 * 1024
-MAX_EXPANDED = 512 * 1024 * 1024
+MAX_BACKUP = 8 * 1024**3
+MAX_EXPANDED = 16 * 1024**3
 
 
-def import_backup(archive, data):
-    if len(data) > MAX_BACKUP:
-        raise ValueError('备份不能超过 256 MB')
+def import_backup(archive,data):
+    with tempfile.TemporaryDirectory(prefix='stellar-import-') as temp:return _import_backup(archive,data,Path(temp))
+
+def _import_backup(archive, data,stage):
+    size=data.stat().st_size if isinstance(data,Path) else len(data)
+    if size > MAX_BACKUP:
+        raise ValueError('备份不能超过 8 GB')
     try:
-        z = zipfile.ZipFile(io.BytesIO(data))
+        z = zipfile.ZipFile(data if isinstance(data,Path) else io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError('请选择知识秘书导出的 ZIP 备份') from exc
     with z:
@@ -43,6 +49,10 @@ def import_backup(archive, data):
             raise ValueError('备份资料清单无法读取') from exc
         if not isinstance(records, list) or len(records) > 10000:
             raise ValueError('备份资料清单格式无效')
+        def payload(name):
+            target=stage/(str(len(list(stage.iterdir()))))
+            with z.open(name) as src,target.open('wb') as dst:shutil.copyfileobj(src,dst,1024*1024)
+            return target
         prepared = []
         for item in records:
             if not isinstance(item, dict) or not re.fullmatch(r'[a-f0-9]{32}', str(item.get('id', ''))):
@@ -76,9 +86,11 @@ def import_backup(archive, data):
             if original and (original not in names or z.getinfo(original).is_dir()):
                 raise ValueError('备份缺少资料原文件，未导入任何内容')
             # Read every original before mutation so corrupt ZIP entries fail atomically.
-            content = z.read(original) if original else None
+            content = payload(original) if original else None
             url, text = item.get('url', ''), item.get('text', '')
-            digest = hashlib.sha256(content if content is not None else (url or text).encode()).hexdigest()
+            if content is not None:
+                with content.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+            else:digest=hashlib.sha256((url or text).encode()).hexdigest()
             if len(item.get('note',''))>20000:raise ValueError('速记文字不能超过 20000 个字符。')
             note_images=item.get('note_images',[])
             if not isinstance(note_images,list) or len(note_images)>MAX_IMAGES:raise ValueError('备份中的速记图片无效')
@@ -94,7 +106,7 @@ def import_backup(archive, data):
             for batch in batches:
                 name='files/'+batch['id']
                 if name not in names or z.getinfo(name).file_size>bundles.MAX_BYTES:raise ValueError('备份缺少追加资料或文件过大')
-                raw=z.read(name);bundles.metadata(raw);batch_files.append(raw)
+                raw=payload(name);bundles.metadata(raw);batch_files.append(raw)
             if not isinstance(item.get('base_summary',item.get('summary','')),str):raise ValueError('备份摘要字段无效')
             prepared.append((item, content, digest,attachments,batches,batch_files))
         imported = skipped = 0
@@ -113,7 +125,7 @@ def import_backup(archive, data):
                         path = archive.root/'files'/item_id
                         with path.open('xb') as f:
                             created_files.append(path)
-                            f.write(content)
+                            with content.open('rb') as src:shutil.copyfileobj(src,f,1024*1024)
                     note_images=[]
                     for name,media,image_data in attachments:
                         image_id=uuid.uuid4().hex;path=archive.root/'files'/image_id
@@ -122,7 +134,9 @@ def import_backup(archive, data):
                     now = datetime.now(timezone.utc).isoformat()
                     for batch,raw in zip(batches,batch_files):
                         batch['id']=uuid.uuid4().hex;path=archive.root/'files'/batch['id']
-                        with path.open('xb') as stream:created_files.append(path);stream.write(raw)
+                        with path.open('xb') as stream:
+                            created_files.append(path)
+                            with raw.open('rb') as src:shutil.copyfileobj(src,stream,1024*1024)
                         if batch['state']=='processing':batch.update(state='error',error='上次追加整理被中断，可重新生成补充摘要')
                     state = item.get('state', 'pending')
                     if state not in ('ready', 'pending', 'error', 'needs_content'):

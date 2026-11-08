@@ -35,5 +35,6 @@
  },true);
  document.addEventListener('cancel',event=>{if(!event.target.matches?.('#detail-dialog,#library-dialog')||flushing)return;if([...forms].some(dirty)||globalThis.StellarNotes?.hasDirty?.()){event.preventDefault();void flush().then(ok=>{if(ok)event.target.close()})}},true);
  globalThis.addEventListener?.('beforeunload',event=>{if([...forms].some(dirty)||pending.size){event.preventDefault();event.returnValue=''}});
- globalThis.StellarDrafts={track,register,saved,cancel,dirty,flush,cache,read,discard,status,base:input=>input?._draft?.base,isFlushing:()=>Boolean(flushing)};
+ async function clearAll(){await Promise.all([...pending]);for(let index=localStorage.length-1;index>=0;index--){const key=localStorage.key(index);if(key?.startsWith(prefix)||key?.startsWith('stellar-note-draft:'))localStorage.removeItem(key)}const db=await database();if(db)await new Promise(resolve=>{const tx=db.transaction('drafts','readwrite');tx.objectStore('drafts').clear();tx.oncomplete=tx.onerror=()=>resolve()})}
+ globalThis.StellarDrafts={clearAll,track,register,saved,cancel,dirty,flush,cache,read,discard,status,base:input=>input?._draft?.base,isFlushing:()=>Boolean(flushing)};
 })();
