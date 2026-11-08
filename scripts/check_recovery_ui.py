@@ -38,10 +38,10 @@ with tempfile.TemporaryDirectory() as root:
     assert service.item_detail(uploaded['id'])['attachments'][0]['size']==55*1024*1024
     page.wait_for_function('()=>!sending',timeout=30000)
     assert not list(service.uploads.folder.iterdir()),'Completed upload staging was not removed'
-    page.locator('#settings-open').click();page.locator('#backup-create').click();expect(page.locator('#backup-entries button')).to_have_count(1,timeout=15000)
+    page.locator('#settings-open').click();page.locator('#backup-create').click();expect(page.locator('#backup-entries').get_by_role('button',name='Restore this backup',exact=True)).to_have_count(1,timeout=15000)
     service.archive.update(ident,title='Later change')
     page.once('dialog',lambda dialog:dialog.accept());
-    with page.expect_response(lambda response:response.url.endswith('/api/backups/restore'),timeout=30000) as restoration:page.locator('#backup-entries button').click()
+    with page.expect_response(lambda response:response.url.endswith('/api/backups/restore'),timeout=30000) as restoration:page.locator('#backup-entries').get_by_role('button',name='Restore this backup',exact=True).click()
     assert restoration.value.ok,restoration.value.status
     page.wait_for_load_state('load');page.wait_for_function('()=>document.querySelector("#model-label").textContent.includes("Codex")')
     assert service.archive.get(ident)['title']==item['title'];assert not errors,errors
