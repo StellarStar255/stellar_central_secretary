@@ -39,8 +39,11 @@ def save(archive,item_id,text,files,expected,urls=None):
     if len(source)>200000:batch['text']+='\n【追加索引仅保留前部文字；完整原件已保存。】';batch['text']=batch['text'][:199940]+'\n【追加索引仅保留前部文字；完整原件已保存。】'
     with archive.lock:
         item=archive.get(item_id)
-        if expected!=item['updated']:raise ValueError('资料已更新，请重新打开后再追加；本次草稿仍保留')
-        batches=item['additions']+[batch];records(batches)
+        if expected!=item['updated']:
+            bundles.cleanup(data);raise ValueError('资料已更新，请重新打开后再追加；本次草稿仍保留')
+        batches=item['additions']+[batch]
+        try:records(batches)
+        except BaseException:bundles.cleanup(data);raise
         target=archive.root/'files'/batch['id'];created=False
         try:
             target.touch(exist_ok=False);created=True;bundles.copy_data(data,target)

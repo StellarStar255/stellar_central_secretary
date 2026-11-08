@@ -853,7 +853,9 @@ def handler(service):
             policy=policy or ("default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'" if media=='application/pdf' else "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
             self.send_header('Content-Security-Policy',policy)
             for key, value in (extra or {}).items(): self.send_header(key, value)
-            self.end_headers(); self.wfile.write(data)
+            self.end_headers()
+            try:self.wfile.write(data)
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass
         def trusted(self):
             host = self.headers.get('Host', '')
             return host in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
@@ -1150,10 +1152,10 @@ def handler(service):
                             current=service.archive.get(item_id)
                             if 'expected_title' in body and current['title']!=body['expected_title']:raise ValueError('标题已在其他窗口更新，草稿已保留，请核对后保存。')
                             if 'expected_text' in body and current['text']!=body['expected_text']:raise ValueError('正文已在其他窗口更新，草稿已保留，请核对后保存。')
-                            if body.get('defer_summary'):
-                                service.archive.update(item_id,text=text,state='ready' if current['summary'] else 'saved',error='正文已修改，已有摘要可能过期；可手动重新整理。')
-                            else:service.archive.update(item_id, text=text, summary='', tags=[], category='未分类', state='pending' if text.strip() else 'needs_content', error='')
-                    if 'title' in body: service.archive.update(item_id, title=str(body['title'])[:300])
+                            fields={'text':text,'state':'ready' if current['summary'] else 'saved','error':'正文已修改，已有摘要可能过期；可手动重新整理。'} if body.get('defer_summary') else {'text':text,'summary':'','tags':[],'category':'未分类','state':'pending' if text.strip() else 'needs_content','error':''}
+                            if 'title' in body:fields['title']=str(body['title'])[:300]
+                            service.archive.update(item_id,**fields)
+                    elif 'title' in body: service.archive.update(item_id, title=str(body['title'])[:300])
                     if body.get('defer_summary'):return self.send(200,{'ok':True,'item':service.archive.get(item_id)})
                     service.queue(item_id, force=True, full_pdf=body.get('full_pdf') is True); return self.send(200, {'ok':True})
                 self.send(404, {'error':'不存在'})

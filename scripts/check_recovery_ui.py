@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory() as root:
     service.archive.update(ident,title='Later change')
     page.once('dialog',lambda dialog:dialog.accept());
     with page.expect_response(lambda response:response.url.endswith('/api/backups/restore'),timeout=30000) as restoration:page.locator('#backup-entries button').click()
-    restored=restoration.value.json();assert restoration.value.ok,restored
+    assert restoration.value.ok,restoration.value.status
     page.wait_for_load_state('load');page.wait_for_function('()=>document.querySelector("#model-label").textContent.includes("Codex")')
     assert service.archive.get(ident)['title']==item['title'];assert not errors,errors
     print('PASS: actual video cover/duration and resumed playback, body saved on close, 55 MB chunked UI upload, staging cleanup, disk snapshot and exact local restore')

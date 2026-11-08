@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as root:
     service=Service(root);service.archive.configure('codex',False);service.archive.set_language('en')
     original=picture((1600,800),'blue');extra=picture((900,600),'orange')
     item=service.ingest({'text':'Synthetic attachment overview','attachments':[file('diagram.png',original),file('report.pdf',pdf_bytes()),file('broken.pdf',b'invalid PDF'),file('readme.txt',b'Synthetic reference')],'archive_only':True})['item']
-    for _ in range(2):item=service.append_material(item['id'],{'text':'Supplemental evidence','attachments':[file('diagram.png',extra)],'expected_updated':item['updated'],'summarize':False})['item']
+    for index in range(2):item=service.append_material(item['id'],{'text':'Supplemental evidence','attachments':[file('diagram.png',extra if index==0 else extra+b'\x01')],'expected_updated':item['updated'],'summarize':False})['item']
     ident=item['id'];before=service.archive.get(ident)
     server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
     try:
@@ -71,6 +71,6 @@ with tempfile.TemporaryDirectory() as root:
                 page.screenshot(path='/tmp/secretary-attachment-delete-preview.png')
                 # Trashed sources cannot be read from the thumbnail cache.
                 service.trash_item(ident,service.archive.get(ident)['updated']);assert page.request.get(base+metadata[0]['thumbnail_url']).status==404
-                print('PASS: original and added attachments in one top section and library preview, PDF/image thumbnails, damaged-file type card, full-resolution gallery across batches, PDF quick open, history retained, single duplicate deletion with cancel/token/confirmation checks and local recovery, no model/external image call, no source changes, trashed thumbnail rejected')
+                print('PASS: original and added attachments in one top section and library preview, PDF/image thumbnails, damaged-file type card, full-resolution gallery across batches, PDF quick open, history retained, single same-name attachment deletion with cancel/token/confirmation checks and local recovery, no model/external image call, no source changes, trashed thumbnail rejected')
             finally:browser.close()
     finally:server.shutdown();server.server_close();service.close()
