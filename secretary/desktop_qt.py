@@ -28,7 +28,7 @@ def run(address,service=None,server=None,open_browser=True):
     from PySide6.QtWebEngineCore import QWebEnginePage,QWebEngineProfile,QWebEngineSettings
     from PySide6.QtWebEngineWidgets import QWebEngineView
     try:
-        from .desktop_video import VideoWindow
+        from .desktop_video import VideoWindow,VideoProbe
     except ImportError as error:
         VideoWindow=None
         print('Native video unavailable; using the inline player:',error,flush=True)
@@ -42,7 +42,7 @@ def run(address,service=None,server=None,open_browser=True):
     icons=Path(__file__).parent/'static'/'icons';app.setWindowIcon(QIcon(str(icons/('app.png' if linux else 'app.ico'))))
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     state={'value':{},'desktop':{},'errors':0,'exit':False};stopped=threading.Event();owner=uuid.uuid4().hex
-    mode={'value':'desktop','handled':None,'started':False,'browser_opens':0,'panel':None,'video_id':None,'video':None}
+    mode={'value':'desktop','handled':None,'started':False,'browser_opens':0,'panel':None,'video_id':None,'video':None,'probe':None,'probed':set()}
     worker=None
     # Publish/claim ownership before exposing HTTP or opening the shared Chromium
     # profile. A rejected peer must never keep running as another tray host.
@@ -178,9 +178,29 @@ def run(address,service=None,server=None,open_browser=True):
         metadata['video_player']=VideoWindow is not None
         if mode['video'] is not None:metadata['video_status']=mode['video'].status()
         if service is not None:service.desktop=metadata
+    def save_video(path,body):
+        if service is not None:
+            from .video_state import save
+            try:
+                save(service.archive.root,service.video_identity(path),body)
+                if body.get('probe_complete'):service.video_probes.pop(path,None)
+            except Exception as error:print('Video state save failed:',error,flush=True)
+        else:
+            def save_remote():
+                try:post(path+'/video-state',body)
+                except Exception as error:print('Video state save failed:',error,flush=True)
+            threading.Thread(target=save_remote,daemon=True).start()
     def tick():
         if state['exit'] or worker is not None and not worker.is_alive():window.exiting=True;app.quit();return
         value=state['value']
+        if VideoWindow is not None:
+            for probe in value.get('video_probes',[]):
+                if probe.get('id') in mode['probed']:continue
+                import re
+                if not re.fullmatch(r'/api/items/[a-f0-9]{32}(?:/(?:additions/[a-f0-9]{32}/)?attachments/[a-f0-9]{32})?/preview',probe.get('url','')):continue
+                mode['probed'].add(probe['id'])
+                if mode['probe'] is None:mode['probe']=VideoProbe(window,save_video)
+                mode['probe'].enqueue(address+probe['url'])
         video_request=value.get('video_request',{})
         if video_request.get('id') and video_request['id']!=mode['video_id']:
             mode['video_id']=video_request['id']
@@ -192,16 +212,6 @@ def run(address,service=None,server=None,open_browser=True):
                             try:post(path+'/editor/open',{})
                             except Exception as error:print('Video external open failed:',error,flush=True)
                         threading.Thread(target=launch,daemon=True).start()
-                    def save_video(path,body):
-                        if service is not None:
-                            from .video_state import save
-                            try:save(service.archive.root,service.video_identity(path),body)
-                            except Exception as error:print('Video state save failed:',error,flush=True)
-                        else:
-                            def save_remote():
-                                try:post(path+'/video-state',body)
-                                except Exception as error:print('Video state save failed:',error,flush=True)
-                            threading.Thread(target=save_remote,daemon=True).start()
                     mode['video']=VideoWindow(window,tr,open_external,save_video)
                 mode['video'].open_video(address+video_request['url'],video_request.get('name',tr('视频播放器')),video_request.get('state',{}))
         if value and not mode['started']:

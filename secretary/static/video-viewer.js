@@ -44,6 +44,8 @@
    if(!Number.isFinite(player.duration)||!player.duration)return;await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('frame timeout')),5000);player.onseeked=()=>{clearTimeout(timer);resolve()};player.currentTime=Math.min(.5,player.duration/4)});
    const canvas=document.createElement('canvas'),ratio=Math.min(480/player.videoWidth,320/player.videoHeight,1);canvas.width=Math.max(1,Math.round(player.videoWidth*ratio));canvas.height=Math.max(1,Math.round(player.videoHeight*ratio));canvas.getContext('2d').drawImage(player,0,0,canvas.width,canvas.height);
    paint(await options.api(base+'/video-state',{duration:player.duration,poster:canvas.toDataURL('image/jpeg',.82).split(',')[1]}));
+  }catch(error){
+   if(options?.nativeVideo?.()){await options.api(base+'/video-player',{probe:true});for(let attempt=0;attempt<20&&trigger.isConnected;attempt++){await new Promise(resolve=>setTimeout(resolve,500));const saved=await options.api(base+'/video-state');paint(saved);if(saved.poster)break}}
   }finally{player.removeAttribute('src');player.load()}
  }
  function scan(){for(const trigger of document.querySelectorAll('.material-thumb[data-video-src]'))if(!seen.has(trigger)){seen.add(trigger);observer.observe(trigger)}}

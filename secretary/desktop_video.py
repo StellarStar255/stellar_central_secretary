@@ -1,6 +1,6 @@
 """In-app Qt Multimedia player, independent of Qt WebEngine's codec build."""
-from PySide6.QtCore import Qt,QUrl,QBuffer,QIODevice,QByteArray
-from PySide6.QtMultimedia import QAudioOutput,QMediaPlayer
+from PySide6.QtCore import Qt,QUrl,QBuffer,QIODevice,QByteArray,QObject,Slot
+from PySide6.QtMultimedia import QAudioOutput,QMediaPlayer,QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QApplication,QDialog,QHBoxLayout,QLabel,QPushButton,QSlider,QVBoxLayout
 
@@ -37,6 +37,7 @@ class VideoWindow(QDialog):
     def persist(self):
         if self.active and self.on_state and self.source_path and self.player.duration()>0:
             self.on_state(self.source_path,{'position':self.player.position()/1000,'duration':self.player.duration()/1000})
+    @Slot(QVideoFrame)
     def frame(self,frame):
         if not self.active or self.poster_saved or not self.on_state or not self.source_path or not frame.isValid():return
         image=frame.toImage()
@@ -69,3 +70,41 @@ class VideoWindow(QDialog):
     def status(self):
         return {'visible':self.isVisible(),'window_id':int(self.winId()),'position':self.player.position(),'duration':self.player.duration(),
                 'playing':self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState,'error':self.player.errorString()}
+
+
+class VideoProbe(QObject):
+    """Decode covers silently through Qt when the embedded browser lacks the codec."""
+    def __init__(self,parent,on_state):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtMultimedia import QVideoSink
+        super().__init__(parent)
+        self.on_state=on_state;self.jobs=[];self.current=None;self.busy=False
+        self.player=QMediaPlayer(parent);self.audio=QAudioOutput(parent);self.audio.setMuted(True)
+        self.player.setAudioOutput(self.audio);self.sink=QVideoSink(parent);self.player.setVideoSink(self.sink)
+        self.timer=QTimer(parent);self.timer.setSingleShot(True);self.timer.timeout.connect(self.finish)
+        self.sink.videoFrameChanged.connect(self.frame);self.player.errorOccurred.connect(lambda *_:self.finish())
+        self.timer_type=QTimer
+        QApplication.instance().aboutToQuit.connect(self.stop)
+    def enqueue(self,url):
+        if url!=self.current and url not in self.jobs:self.jobs.append(url)
+        self.next()
+    def next(self):
+        if self.busy or not self.jobs:return
+        self.current=self.jobs.pop(0);self.busy=True;self.player.setSource(QUrl(self.current));self.timer.start(8000);self.player.play()
+    @Slot(QVideoFrame)
+    def frame(self,frame):
+        if not self.busy or not frame.isValid():return
+        image=frame.toImage()
+        if image.isNull():return
+        image=image.scaled(480,320,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        raw=QByteArray();buffer=QBuffer(raw);buffer.open(QIODevice.OpenModeFlag.WriteOnly);image.save(buffer,'JPEG',82)
+        import base64
+        self.finish(base64.b64encode(bytes(raw)).decode())
+    def finish(self,poster=None):
+        if not self.busy:return
+        value={'probe_complete':True,'duration':max(0,self.player.duration()/1000)}
+        if poster:value['poster']=poster
+        path=QUrl(self.current).path().removesuffix('/preview');self.busy=False;self.timer.stop();self.player.stop();self.player.setSource(QUrl())
+        self.on_state(path,value);self.current=None;self.timer_type.singleShot(0,self.next)
+    def stop(self):
+        self.jobs.clear();self.busy=False;self.timer.stop();self.player.stop();self.player.setSource(QUrl())

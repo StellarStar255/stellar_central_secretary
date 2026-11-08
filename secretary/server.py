@@ -88,7 +88,7 @@ class Service:
         self.questions = 0
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
-        self.video_request={}
+        self.video_request={};self.video_probes={}
         self.uploads=uploads.Uploads(self.archive.root);self.backups=local_backups.Backups(self.archive)
         self.desktop_peer=None;self.desktop_heartbeat_at=0
     def chat_history(self,body=None):
@@ -898,7 +898,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 if path.endswith(('/video-state','/video-poster')):
                     base=path.rsplit('/',1)[0];key=service.video_identity(base)
                     if path.endswith('/video-poster'):return self.send(200,(service.archive.root/'video-cache'/(key+'.jpg')).read_bytes(),'image/jpeg')
@@ -1018,7 +1018,9 @@ def handler(service):
                 cancel_upload=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/cancel',path)
                 if cancel_upload:service.uploads.discard(cancel_upload[1]);return self.send(200,{'ok':True})
                 if path.endswith('/video-state'):
-                    return self.send(200,video_state.save(service.archive.root,service.video_identity(path.rsplit('/',1)[0]),body))
+                    base=path.rsplit('/',1)[0];value=video_state.save(service.archive.root,service.video_identity(base),body)
+                    if body.get('probe_complete'):service.video_probes.pop(base,None)
+                    return self.send(200,value)
                 trash_match=re.fullmatch(r'/api/trash/([a-f0-9]{32})/(restore|purge)',path)
                 if trash_match:
                     item=service.archive.get(trash_match[1],include_trashed=True)
@@ -1045,6 +1047,9 @@ def handler(service):
                     file=next((f for f in item['all_attachments'] if f['id']==(key or 'original') and f['batch_id']==(batch_id or '')),None)
                     if not file or not local_media.video_type(file['name']):raise ValueError('请选择视频附件')
                     native=bool(service.desktop_status().get('video_player'))
+                    if native and body.get('probe') is True:
+                        if len(service.video_probes)<64 and file['path'] not in service.video_probes:service.video_probes[file['path']]={'id':secrets.token_hex(16),'url':file['preview_url']}
+                        return self.send(200,{'native':True})
                     if native:service.video_request={'id':secrets.token_hex(16),'url':file['preview_url'],'name':file['name'],'state':video_state.read(service.archive.root,service.video_identity(file['path']))}
                     return self.send(200,{'native':native})
                 if path=='/api/backups/create':return self.send(200,service.backups.create())

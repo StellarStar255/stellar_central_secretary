@@ -106,6 +106,8 @@ def main():
                 assert request('/api/status')['desktop']['window_id']==window and request('/api/items')[0]['id']==item
                 clip=(Path(__file__).resolve().parent.parent/'tests/fixtures/video.mp4').read_bytes()
                 video_id,_=archive.add('Synthetic H.264 native player',filename='clip.mp4',data=clip)
+                assert request('/api/items/'+video_id+'/video-player',{'probe':True})['native']
+                wait(lambda:request('/api/items/'+video_id+'/video-state').get('poster'))
                 assert request('/api/items/'+video_id+'/video-player',{})['native']
                 video_state=wait(lambda:(lambda value:value if value.get('visible') and value.get('duration',0)>0 and value.get('position',0)>100 else None)(request('/api/status')['desktop'].get('video_status',{})))
                 assert not video_state['error'],video_state

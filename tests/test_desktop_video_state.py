@@ -25,3 +25,15 @@ class NativeVideoStateTest(unittest.TestCase):
         window.resume=42000;window.player=Mock();window.duration(120000)
         window.player.setPosition.assert_called_once_with(42000)
         window.close()
+
+    def test_silent_probe_decodes_cover_without_opening_a_window(self):
+        import time
+        from pathlib import Path
+        from PySide6.QtCore import QObject
+        from secretary.desktop_video import VideoProbe
+        writes=[];parent=QObject();probe=VideoProbe(parent,lambda path,body:writes.append(body))
+        probe.enqueue((Path(__file__).parent/'fixtures/video.mp4').resolve().as_uri())
+        deadline=time.monotonic()+10
+        while not writes and time.monotonic()<deadline:self.app.processEvents();time.sleep(.01)
+        probe.stop();self.assertTrue(writes,'Silent decoder did not finish')
+        self.assertTrue(writes[0].get('poster'),writes);self.assertGreater(writes[0]['duration'],0)
