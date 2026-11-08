@@ -25,6 +25,13 @@ with tempfile.TemporaryDirectory() as temp:
     page.locator('[data-pdf-close]').click();assert service.archive.list(q='PAGETOKEN9');page.locator('#search').fill('PAGETOKEN9');hit=page.locator('[data-origin-item]').filter(has_text='p.9').first;hit.click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN9');page.locator('[data-pdf-close]').click();page.locator('#library-dialog .dialog-head button').click()
     with patch('secretary.ai.run',return_value='Synthetic answer [1]'):
      page.locator('#input-mode').select_option('ask');page.locator('#message-input').fill('PAGETOKEN9?');page.locator('#send-button').click();source=page.locator('.source-list .source').first;expect(source).to_contain_text('p.9');source.click();expect(page.locator('[data-pdf-text]')).to_contain_text('PAGETOKEN9')
+    before=service.archive.get(ident)['pdf_reads'];entered=threading.Event();release=threading.Event()
+    def slow_ocr(image):entered.set();release.wait(10);return 'CANCELLED OCR RESULT'
+    with patch('secretary.local_ocr.recognize',side_effect=slow_ocr):
+     page.locator('[data-pdf-start]').fill('1');page.locator('[data-pdf-end]').fill('2');page.locator('[data-pdf-ocr]').check();page.locator('#pdf-reader form button[type=submit]').click();expect(page.locator('[data-pdf-progress]')).to_be_visible()
+     page.locator('[data-pdf-close]').click();expect(page.locator('#pdf-reader')).not_to_be_visible();assert entered.wait(5)
+     page.evaluate("StellarPDF.open('/api/items/"+ident+"/attachments/"+service.item_detail(ident)['attachments'][0]['id']+"','pages.pdf',3)")
+     expect(page.locator('[data-pdf-image]')).to_have_attribute('src',__import__('re').compile('/pdf-page/3$'));page.locator('[data-pdf-stop]').click();release.set();expect(page.locator('[data-pdf-progress]')).not_to_be_visible();assert service.archive.get(ident)['pdf_reads']==before
     assert not errors,errors
     print('PASS: PDF range controls, continuation to pages 6-9, local page image/text, searchable retained selections, zero model calls')
    finally:browser.close()

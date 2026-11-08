@@ -25,7 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
+from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -108,7 +108,7 @@ class Service:
         self.interface_request={}
         self.video_request={};self.video_probes={}
         self.uploads=uploads.Uploads(self.archive.root);self.backups=local_backups.Backups(self.archive)
-        self.desktop_peer=None;self.desktop_heartbeat_at=0
+        self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self)
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
         with self.lock:
@@ -852,6 +852,7 @@ class Service:
             with self.lock: self.questions -= 1
         return {'answer':answer, 'sources':[dict(p, number=i+1) for i,p in enumerate(passages)]}
     def close(self):
+        self.pdf_jobs.close()
         with self.lock:
             self.stopping=True
             ids=list(self.captures)
@@ -947,6 +948,10 @@ def handler(service):
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
                 if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
+                if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
+                pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
+                if pdf_info:return self.send(200,pdf_reading.info(service.archive,*pdf_info.groups()))
                 page_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-page/(\d+)',path)
                 if page_match:
                     _,source,_,_,_=pdf_reading.owned(service.archive,*page_match.groups()[:3]);return self.send(200,pdf_preview.page_image(source,int(page_match[4])),'image/png')
@@ -1102,6 +1107,10 @@ def handler(service):
                     with service.lock:
                         if recovery[1] in service.busy or recovery[1] in service.captures:raise ValueError('资料正在处理，请稍后恢复附件')
                         return self.send(200,attachment_recovery.restore(service.archive,*recovery.groups()))
+                pdf_cancel=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})/cancel',path)
+                if pdf_cancel:return self.send(200,service.pdf_jobs.cancel(pdf_cancel[1]))
+                pdf_start=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-jobs',path)
+                if pdf_start:return self.send(200,service.pdf_jobs.start(*pdf_start.groups(),body))
                 pdf_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-read',path)
                 if pdf_match:
                     item_id,batch_id,key=pdf_match.groups()

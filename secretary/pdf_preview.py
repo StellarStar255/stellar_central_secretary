@@ -35,30 +35,42 @@ def read(source):
     except (OSError,ValueError):return '', 'PDF 文件损坏或结构无法读取，请确认原文件能正常打开后重试。'
 
 
-def inspect(source,start=1,end=5,ocr=False,cancel=None):
-    """Explicit page selection, bounded text and optional local-only raster OCR."""
+def info(source):
+    import pypdfium2 as pdfium
+    with LOCK,ExitStack() as stack:
+        input=source if isinstance(source,(Path,bytes)) else stack.enter_context(source.open('rb'))
+        doc=stack.enter_context(pdfium.PdfDocument(input));return len(doc)
+
+
+def inspect(source,start=1,end=5,ocr=False,cancel=None,progress=None):
+    """Release PDFium between pages and during OCR so browsing stays responsive."""
     import pypdfium2 as pdfium
     from . import local_ocr
     if type(start) is not int or type(end) is not int or start<1 or end<start or end-start>=10:raise ValueError('每次请选择连续 1–10 页')
-    with LOCK,ExitStack() as stack:
+    with ExitStack() as stack:
         input=source if isinstance(source,(Path,bytes)) else stack.enter_context(source.open('rb'))
-        doc=stack.enter_context(pdfium.PdfDocument(input));total=len(doc)
-        if start>total:raise ValueError('起始页超过文件总页数')
-        result=[]
-        for number in range(start,min(end,total)+1):
-            if cancel and cancel():raise ValueError('页面读取已停止')
-            with closing(doc[number-1]) as page:
+        with LOCK:doc=pdfium.PdfDocument(input);total=len(doc)
+        try:
+            if start>total:raise ValueError('起始页超过文件总页数')
+            result=[];end=min(end,total)
+            for number in range(start,end+1):
+                if cancel and cancel():raise ValueError('页面读取已停止')
+                if progress:progress(number-start,end-start+1,number)
+                with LOCK,closing(doc[number-1]) as page:
+                    if ocr:
+                        width,height=page.get_size();scale=min(2,2000/max(width,height))
+                        with closing(page.render(scale=scale)) as bitmap:image=bitmap.to_pil().copy()
+                    else:
+                        with closing(page.get_textpage()) as textpage:
+                            count=textpage.count_chars();text=textpage.get_text_range(count=min(count,CHARS_PER_PAGE)) if count else ''
                 if ocr:
-                    width,height=page.get_size();scale=min(2,2000/max(width,height))
-                    with closing(page.render(scale=scale)) as bitmap:
-                        with bitmap.to_pil().copy() as image:text=local_ocr.recognize(image)
-                    method='ocr'
-                else:
-                    with closing(page.get_textpage()) as textpage:
-                        count=textpage.count_chars();text=textpage.get_text_range(count=min(count,CHARS_PER_PAGE)) if count else ''
-                    method='text'
-                result.append({'page':number,'text':text[:CHARS_PER_PAGE].strip(),'method':method})
-        return {'total':total,'start':start,'end':min(end,total),'pages':result,'ocr':bool(ocr)}
+                    with image:text=local_ocr.recognize(image)
+                if cancel and cancel():raise ValueError('页面读取已停止')
+                result.append({'page':number,'text':text[:CHARS_PER_PAGE].strip(),'method':'ocr' if ocr else 'text'})
+                if progress:progress(number-start+1,end-start+1,number)
+            return {'total':total,'start':start,'end':end,'pages':result,'ocr':bool(ocr)}
+        finally:
+            with LOCK:doc.close()
 
 
 def page_image(source,number):

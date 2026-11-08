@@ -31,9 +31,9 @@ def owned(archive,item_id,batch_id='',attachment_id=''):
     if not name.lower().endswith('.pdf'):raise ValueError('请选择 PDF 附件')
     return item,source,name,digest,initial
 
-def read(archive,item_id,batch_id,attachment_id,body,cancel=None):
+def read(archive,item_id,batch_id,attachment_id,body,cancel=None,progress=None):
     item,source,name,digest,initial=owned(archive,item_id,batch_id,attachment_id)
-    result=pdf_preview.inspect(source,body.get('start',1),body.get('end',5),body.get('ocr') is True,cancel)
+    result=pdf_preview.inspect(source,body.get('start',1),body.get('end',5),body.get('ocr') is True,cancel,progress)
     with archive.lock:
         current,_,_,now_digest,_=owned(archive,item_id,batch_id,attachment_id)
         if digest!=now_digest:raise ValueError('附件已更新，请重新读取')
@@ -54,3 +54,16 @@ def text(entry):
     scope='【PDF 选读：'+entry['name']+'；已读取第 '+','.join(map(str,numbers))+' 页 / 共 '+str(entry['total'])+' 页】'
     return scope+'\n'+'\n\n'.join(f'[第 {number} 页]'+('【本机 OCR，请核对原件】' if entry['pages'][str(number)]['method']=='ocr' else '')+'\n'+entry['pages'][str(number)]['text'] for number in numbers)
 def index_text(value):return '\n\n'.join(text(entry) for entry in records(value).values())
+
+
+def info(archive,item_id,batch_id='',attachment_id=''):
+    item,source,name,digest,initial=owned(archive,item_id,batch_id,attachment_id)
+    entry=item.get('pdf_reads',{}).get(key(batch_id,attachment_id),{})
+    if entry.get('digest')!=digest:entry={}
+    total=entry.get('total') or pdf_preview.info(source)
+    pages=entry.get('pages',{}).copy()
+    if not pages:
+        for match in re.finditer(r'^\[第 (\d+) 页\]\n(.*?)(?=^\[第 \d+ 页\]|\Z)',initial,re.M|re.S):
+            number=int(match[1])
+            if number<=5:pages[str(number)]={'text':match[2].strip()[:8000],'method':'text'}
+    return {'name':name,'total':total,'pages':[{'page':int(number),**value} for number,value in pages.items()],'read_pages':sorted(map(int,pages))}
