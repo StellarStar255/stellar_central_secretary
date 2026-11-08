@@ -168,7 +168,8 @@ def run(config):
                     shutil.copytree(old_root or backup,restored,symlinks=True)
                     if root.exists():root.rename(root.with_name(root.name+'.failed-'+uuid.uuid4().hex))
                     restored.rename(root)
-                child=launch();wait_health(config['old_version'],legacy=True)
+                child=launch()
+                if not wait_health(config['old_version'],legacy=True):raise RuntimeError('旧版程序已恢复，但启动健康检查失败。')
                 report('rolled_back',message+' 已恢复旧版程序，资料保留。');threading.Thread(target=child.wait,daemon=True).start();return False
             except Exception as recovery:message+=' 恢复未完成：'+str(recovery)+'；程序备份：'+str(old_root or backup)
         report('error',message)
