@@ -997,5 +997,10 @@
   "上传失败": "Upload failed",
   "备份不能超过 8 GB": "Backups cannot exceed 8 GB",
   "请选择不超过 8 GB 的 ZIP 备份": "Choose a ZIP backup up to 8 GB",
-  "备份上传中断": "Backup upload interrupted"
+  "备份上传中断": "Backup upload interrupted",
+  "大 PDF 仅概览前 5 页可读取文字，未覆盖后续页面；原件完整保留。": "Large PDF preview covers readable text from the first 5 pages only. Later pages are not covered; the complete original is retained.",
+  "PDF 前部页面没有可读取文字，可能是扫描件；可补充文字或使用 OCR。": "The first PDF pages contain no readable text and may be scanned. Add text or use OCR.",
+  "这份大 PDF 仅提取了前 5 页，无法生成全文摘要；可补充所需页面的文字。": "Only the first 5 pages were extracted from this large PDF. A full-document summary is unavailable; add text from the pages you need.",
+  " 每页最多提取 8000 个字符，部分文字已截断。": " Up to 8,000 characters are extracted per page; some text was truncated.",
+  " 部分预览页面无法读取。": " Some preview pages could not be read."
 }

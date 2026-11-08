@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.71** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.71.md)
+Version **v0.1.72** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.72.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -55,7 +55,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 
 - Send a link, attach a file with **+**, or drop files into the composer. Multiple links in one message become one archive by default, along with any text and attachments. **Group into one archive** also allows explicit grouping.
 - Grouped links are saved first, then accessible public text is read in the background. Source statuses distinguish read and unread pages. Sign-in-only or unavailable pages retain their links and annotations; append their content manually when needed. Up to 20 links per group, with bounded text overviews.
-- Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected image-capable model. Limits: 20 attachments and 8 images per submission, up to 1 GB per file and 2 GB total. Files above 8 MB use streamed 4 MB upload chunks; automatic text extraction remains bounded to 50 MB. Repeated attachment contents are skipped within a submission and across later additions to the same archive. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
+- Paste an image directly, then add text and files before sending. They become one grouped archive with original attachments, previews and downloads. Select **Ask about these materials** to answer from this submission; ordinary annotations respect the automatic-summary setting. PNG/JPEG/GIF/WebP images can be analyzed by your selected image-capable model. Limits: 20 attachments and 8 images per submission, up to 1 GB per file and 2 GB total. Files above 8 MB use streamed 4 MB upload chunks; automatic extraction for other formats remains bounded to 50 MB, while larger PDFs read only the first 5 pages from disk (up to 8,000 characters per page), explicitly marked as partial. Repeated attachment contents are skipped within a submission and across later additions to the same archive. Analysis uses resized images and bounded document excerpts; grouped PDFs use the first five pages. Original files remain intact.
 - Text submitted alongside links is saved as a searchable link annotation. If webpage text cannot be read, the annotation still provides the title and material for a clearly labeled summary. Later webpage capture retains it.
 - **Auto detect** archives commands and ordinary knowledge text by default; clear questions search the library. Choose **Archive text / commands** to force archiving, or **Ask about this material** to force a question. Command text, indentation and embedded URLs are retained as material; commands are never executed.
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.

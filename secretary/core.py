@@ -40,6 +40,9 @@ def extract(name, data):
         with archive:return assemble(manifest),''
     suffix = Path(name).suffix.lower()
     if suffix == '.pdf':
+        if isinstance(data,Path):
+            from .pdf_preview import read
+            return read(data)
         try:
             from pypdf import PdfReader
             from pypdf.errors import DependencyError, FileNotDecryptedError, PdfReadError

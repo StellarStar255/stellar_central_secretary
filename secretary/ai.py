@@ -313,13 +313,15 @@ def summary_fields(item, backend, full_pdf=False):
         scope_note=item['text'].splitlines()[0]
         scope_tag='网页片段' if item['text'].startswith('【') else 'Loaded webpage'
     is_pdf=str(item.get('filename','')).lower().endswith('.pdf')
+    partial_pdf=is_pdf and item['text'].startswith('【大 PDF 前部概览')
+    if partial_pdf and full_pdf:raise ValueError('这份大 PDF 仅提取了前 5 页，无法生成全文摘要；可补充所需页面的文字。')
     if is_pdf and not full_pdf:
         source=item['text']
         pages=list(re.finditer(r'^\[第 (\d+) 页\]$',source,re.M))
         if pages:
             end=next((page.start() for page in pages if int(page.group(1))>5),len(source))
             source=source[:end]
-            scope_note='【PDF 前 5 页概览】仅基于文件前 5 页可读取文字，未总结后续页面。'
+            scope_note=item['text'].splitlines()[0]+'\n大 PDF 仅概览前 5 页可读取文字，未覆盖后续页面；原件完整保留。' if partial_pdf else '【PDF 前 5 页概览】仅基于文件前 5 页可读取文字，未总结后续页面。'
         else:
             source=source[:24000]
             scope_note='【PDF 开头概览】未取得页码信息，仅基于正文开头最多 2.4 万字符。'

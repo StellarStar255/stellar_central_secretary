@@ -64,6 +64,8 @@ jobs:
           python scripts/check_attachment_overview_ui.py
           python scripts/check_extension_install_ui.py
           python scripts/check_video_title_ui.py
+          python scripts/check_recovery_ui.py
+          python scripts/check_large_pdf_ui.py
       - name: Windows native source UI
         if: runner.os == 'Windows'
         run: python packaging/smoke_windows_desktop.py --source

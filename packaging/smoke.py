@@ -30,11 +30,11 @@ opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with tempfile.TemporaryDirectory() as data:
     proc = subprocess.Popen([str(binary), '--no-browser', '--port', str(port), '--data-dir', data],
                             env={**os.environ, 'SECRETARY_DATA_DIR': data})
-    def request(path, body=None, token=None):
+    def request(path, body=None, token=None, headers=None):
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
-                                     headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or ''})
-        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test','/api/ask') else 3) as response:
+                                     headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or '',**(headers or {})})
+        with opener.open(req, timeout=30 if path in ('/api/update/check','/api/model-api/test','/api/ask','/api/ingest') else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as data:
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
         assert status['settings']['company_mode'] is False
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
             assert request(path), path
         extension=json.loads(request('/api/browser-extension/prepare',{},status['token']))
         extension_path=Path(extension['path'])
@@ -217,6 +217,19 @@ with tempfile.TemporaryDirectory() as data:
         assert json.loads(request('/api/items?q=NewFrozenEditorKeyword'))[0]['id']==editable['id']
         assert b'data-editor-action' in request('/bundle-ui.js')
         print('PASS: frozen external-edit save-back, updated original bytes, searchable text and editor controls')
+        from test_large_pdf_preview import fixture as large_pdf_fixture
+        source=Path(data)/'large-preview.pdf';large_pdf_fixture(source,padding=51*1024*1024)
+        upload=json.loads(request('/api/uploads/start',{'name':'large-preview.pdf','size':source.stat().st_size},status['token']))
+        with source.open('rb') as stream:
+            offset=0
+            while chunk:=stream.read(4*1024*1024):
+                value=json.loads(request('/api/uploads/'+upload['id']+'/chunk',chunk,status['token'],{'X-Upload-Offset':str(offset)}));offset=value['offset']
+        large=json.loads(request('/api/ingest',{'attachments':[{'name':'large-preview.pdf','upload_id':upload['id']}],'archive_only':True},status['token']))['item']
+        assert 'PAGETOKEN5' in large['text'] and 'PAGETOKEN6' not in large['text'] and '共 6 页' in large['text']
+        leaf=large['all_attachments'][0];assert request(leaf['thumbnail_url']).startswith(b'\x89PNG')
+        assert request(leaf['preview_url'],headers={'Range':'bytes=0-4'})==b'%PDF-'
+        request('/api/uploads/'+upload['id']+'/cancel',{},status['token'])
+        print('PASS: frozen 51 MB chunked PDF, disk-backed first-five-page extraction, native PDFium thumbnail, original byte range, partial scope and no sixth-page indexing')
         request('/api/shutdown', {}, status['token'])
         assert proc.wait(timeout=15) == 0
     finally:

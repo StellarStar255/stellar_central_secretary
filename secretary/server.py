@@ -651,8 +651,8 @@ class Service:
         try:
             self.archive.update(item_id,state='processing',error='正在重新解析原文件…')
             original=self.archive.root/'files'/item_id
-            if not bundles.is_bundle(item['filename']) and original.stat().st_size>bundles.INLINE_MAX:raise ValueError('大附件原件已完整保存；自动正文解析限 50 MB，可手动补充正文。')
-            text,warning=extract(item['filename'],original if bundles.is_bundle(item['filename']) else original.read_bytes())
+            if not bundles.is_bundle(item['filename']) and not item['filename'].lower().endswith('.pdf') and original.stat().st_size>bundles.INLINE_MAX:raise ValueError('大附件原件已完整保存；自动正文解析限 50 MB，可手动补充正文。')
+            text,warning=extract(item['filename'],original if bundles.is_bundle(item['filename']) or original.stat().st_size>bundles.INLINE_MAX else original.read_bytes())
             if text.strip():
                 self.archive.replace_capture(item_id,item['title'],text)
                 self.archive.update(item_id,state='ready' if self.archive.get(item_id)['summary'] else 'pending',error=warning)
@@ -860,12 +860,21 @@ def handler(service):
             host = self.headers.get('Host', '')
             return host in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
         def stream_file(self,source,name,media='application/octet-stream',inline=False):
-            size=source.stat().st_size
-            self.send_response(200);self.send_header('Content-Type',media);self.send_header('Content-Length',str(size));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Cache-Control','no-store')
+            size=source.stat().st_size;bounds=self.headers.get('Range');start,end=0,size-1
+            if bounds:
+                try:start,end=local_media.byte_range(bounds,size)
+                except ValueError:return self.send(416,b'',extra={'Content-Range':f'bytes */{size}','Accept-Ranges':'bytes'})
+            self.send_response(206 if bounds else 200);self.send_header('Content-Type',media);self.send_header('Content-Length',str(max(0,end-start+1)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Cache-Control','no-store');self.send_header('Accept-Ranges','bytes')
+            if bounds:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
             self.send_header('Content-Security-Policy',"default-src 'none'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'")
             self.send_header('Content-Disposition',('inline' if inline else 'attachment')+"; filename*=UTF-8''"+urllib.parse.quote(name,safe=''));self.end_headers()
             try:
-                with source.open('rb') as stream:shutil.copyfileobj(stream,self.wfile,65536)
+                with source.open('rb') as stream:
+                    stream.seek(start);remaining=end-start+1
+                    while remaining>0:
+                        chunk=stream.read(min(65536,remaining))
+                        if not chunk:break
+                        self.wfile.write(chunk);remaining-=len(chunk)
             except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass
         def video(self,source,name):
             size=len(source) if isinstance(source,bytes) else source.stat().st_size
@@ -917,10 +926,10 @@ def handler(service):
                     if key:
                         if not batch_id and not bundles.is_bundle(item['filename']):raise KeyError('组合附件不存在')
                         file,source=bundles.member(data,key);name=file['name']
-                        data=source.read_bytes() if file['size']<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
+                        data=source if name.lower().endswith('.pdf') else source.read_bytes() if file['size']<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
                     else:
                         if not item['filename'] or bundles.is_bundle(item['filename']):raise KeyError('附件不存在')
-                        name=item['filename'];data=data.read_bytes() if data.stat().st_size<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
+                        name=item['filename'];data=data if name.lower().endswith('.pdf') else data.read_bytes() if data.stat().st_size<=bundles.INLINE_MAX and not local_media.video_type(name) else b''
                     image,media=thumbnails.render(name,data)
                     return self.send(200,image,media)
                 bundle_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/additions/([a-f0-9]{32}))?/attachments/([a-f0-9]{32})(/preview)?',path)
@@ -977,7 +986,7 @@ def handler(service):
                             if not media:raise ValueError('不支持的图片格式')
                             return self.send(200,data,media)
                         item,original=service.pdf_original(item['id'])
-                        return self.send(200,original.read_bytes(),'application/pdf',{'Content-Disposition':"inline; filename*=UTF-8''"+urllib.parse.quote(item['filename'],safe='')})
+                        return self.stream_file(original,item['filename'],'application/pdf',True)
                     if len(parts)==5 and parts[4]=='file':
                         if not item['filename']: raise KeyError('没有原文件')
                         return self.stream_file(service.archive.root/'files'/item['id'],item['filename'])

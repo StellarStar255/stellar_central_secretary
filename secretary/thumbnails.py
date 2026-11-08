@@ -1,15 +1,20 @@
 """Small, local first-page/image previews; originals are never rewritten."""
-import hashlib,io,re,threading
+import hashlib,io,re
+from contextlib import ExitStack
+from .pdf_preview import LOCK
 from collections import OrderedDict
 from pathlib import Path
 from PIL import Image,ImageOps
 
-_lock=threading.Lock()
+_lock=LOCK
 _cache=OrderedDict()
 
 def render(name,data):
     suffix=Path(name).suffix.lower()
-    key=(suffix,hashlib.sha256(data).digest())
+    if isinstance(data,bytes):key=(suffix,hashlib.sha256(data).digest())
+    else:
+        path=data if isinstance(data,Path) else data.path;info=path.stat()
+        key=(suffix,str(path.resolve()),info.st_size,info.st_mtime_ns,getattr(data,'file',{}).get('id',''))
     # PDFium calls must be serialized even for separate documents.
     with _lock:
         if key in _cache:
@@ -18,7 +23,9 @@ def render(name,data):
         try:
             if suffix=='.pdf':
                 import pypdfium2 as pdfium
-                with pdfium.PdfDocument(data) as doc:
+                with ExitStack() as stack:
+                    source=data if isinstance(data,(bytes,Path)) else stack.enter_context(data.open('rb'))
+                    doc=stack.enter_context(pdfium.PdfDocument(source))
                     page=doc[0]
                     width,height=page.get_size()
                     if min(width,height)<=0:raise ValueError('Invalid page size')

@@ -56,6 +56,9 @@ def create(text,files,urls=None,existing=None):
             if not media.startswith('image/'):
                 try:source,warning=extract(name,raw)
                 except Exception:warning='附件文字解析失败，原件已完整保存。'
+        elif name.lower().endswith('.pdf'):
+            from .pdf_preview import read
+            source,warning=read(data)
         else:warning='大附件原件已完整保存；自动正文解析限 50 MB，可手动补充正文。'
         if media.startswith('image/'):
             images+=1
@@ -155,6 +158,9 @@ class Member:
                                 value=offset if whence==0 else self.position+offset if whence==1 else info.file_size+offset
                                 if value<0:raise ValueError('Invalid seek')
                                 self.position=min(value,info.file_size);raw.seek(start+self.position);return self.position
+                            def tell(self):return self.position
+                            def readinto(self,buffer):
+                                data=self.read(len(buffer));buffer[:len(data)]=data;return len(data)
                             def read(self,size=-1):
                                 length=info.file_size-self.position
                                 value=raw.read(length if size<0 else min(length,size));self.position+=len(value);return value
@@ -173,12 +179,13 @@ def member(data,key):
         return file,Member(data,file)
 
 def model_material(data,current_text,link_values=None):
-    archive,value=load(data);images=[];parts=[];limited=False
+    archive,value=load(data);images=[];parts=[];limited=False;pdf_scopes=[]
     allowance=max(1000,100000//max(1,len(value['files'])))
     with archive:
         for file in value['files']:
             source=file['text']
             if file['name'].lower().endswith('.pdf'):
+                if file['size']>INLINE_MAX:pdf_scopes.append(file['name']+'：'+file['warning'])
                 later=re.search(r'^\[第 (?:[6-9]|[1-9][0-9]+) 页\]$',source,re.M)
                 if later:source=source[:later.start()];limited=True
             if len(source)>allowance:source=source[:allowance];limited=True
@@ -203,6 +210,7 @@ def model_material(data,current_text,link_values=None):
         source+='\n\n'+links.source(selected)
         limited=limited or any(len(link['text'])>budget for link in link_values)
     scope='【组合资料概览】图片以分析用缩略图读取，原件完整保留。' if images else '【组合资料概览】'
+    if pdf_scopes:scope+='\n'+'\n'.join(pdf_scopes)
     if limited or len(current_text)>20000:scope+=' 附件长文仅分析有界片段，PDF 默认仅概览前 5 页；未覆盖全部文字。'
     if link_values:scope+=' 本组 '+str(len(link_values))+' 个链接，已读取 '+str(sum(link['state']=='read' for link in link_values))+' 个；未读取来源仅保存链接，不推断正文。'
     return source,images,scope
