@@ -65,7 +65,7 @@ def remove(archive,item_id,batch_id,key,body):
         backup_name=Path(file['name'].replace('\\','/')).name
         if not backup_name or backup_name in ('.','..'):raise ValueError('附件文件名无效')
         atomic(recovery/backup_name,content)
-        atomic(recovery/'state/metadata.json',json.dumps({'kind':'attachment-deletion','item_id':item_id,'batch_id':batch_id,'attachment':file,'summary':batch['summary'] if batch else item['base_summary']},ensure_ascii=False).encode())
+        atomic(recovery/'state/metadata.json',json.dumps({'kind':'attachment-deletion','item_id':item_id,'batch_id':batch_id,'attachment':file,'pdf_read':item.get('pdf_reads',{}).get((batch_id or 'original')+':'+(key or 'original')),'summary':batch['summary'] if batch else item['base_summary']},ensure_ascii=False).encode())
         container=recovery/'state'/'container';atomic(container,original)
         now=datetime.now(timezone.utc).isoformat();replaced=False
         try:
@@ -92,4 +92,6 @@ def remove(archive,item_id,batch_id,key,body):
             if isinstance(error,sqlite3.IntegrityError):raise ValueError('删除后的资料与另一份归档冲突，原附件未删除。') from error
             raise
         bundles.cleanup(updated)
-        return {'ok':True,'deleted_attachment':file['id'],'name':file['name'],'recovery_saved':True}
+        from .attachment_recovery import entries
+        recovery_id=next(entry['id'] for entry in entries(archive,item_id) if entry['_path']==recovery/'state/metadata.json')
+        return {'recovery_id':recovery_id,'ok':True,'deleted_attachment':file['id'],'name':file['name'],'recovery_saved':True}

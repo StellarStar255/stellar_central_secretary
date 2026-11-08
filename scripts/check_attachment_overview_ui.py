@@ -69,6 +69,9 @@ with tempfile.TemporaryDirectory() as root:
                 assert saved['title']==before['title'] and saved['text']==before['text'] and saved['note']==before['note'] and len(saved['additions'])==2
                 assert not model.called and not launch.called
                 page.screenshot(path='/tmp/secretary-attachment-delete-preview.png')
+                page.locator('#attachment-undo button').first.click();expect(cards).to_have_count(6)
+                assert page.request.get(base+last['preview_url']).body()==extra+b'\x01'
+                assert service.archive.get(ident)['title']==before['title']
                 # Trashed sources cannot be read from the thumbnail cache.
                 service.trash_item(ident,service.archive.get(ident)['updated']);assert page.request.get(base+metadata[0]['thumbnail_url']).status==404
                 print('PASS: original and added attachments in one top section and library preview, PDF/image thumbnails, damaged-file type card, full-resolution gallery across batches, PDF quick open, history retained, single same-name attachment deletion with cancel/token/confirmation checks and local recovery, no model/external image call, no source changes, trashed thumbnail rejected')

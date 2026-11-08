@@ -101,3 +101,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .video-duration{position:absolute;bottom:5px;right:5px;background:#111c;color:white;padding:2px 5px;border-radius:4px;font-size:12px}
 
 .pdf-reader{width:min(1100px,95vw)}.pdf-reader form{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.pdf-reader input[type=number]{width:90px}.pdf-page-navigation{display:flex;gap:6px;margin:12px 0}.pdf-page-view{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-height:65vh;overflow:auto}.pdf-page-view img{max-width:100%;height:auto}.pdf-page-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}@media(max-width:650px){.pdf-page-view{grid-template-columns:1fr}}
+
+#attachment-undo{position:fixed;bottom:25px;right:25px;z-index:10000;background:var(--panel);border:1px solid var(--line);padding:14px;border-radius:10px;display:flex;gap:12px;align-items:center}#attachment-recovery-dialog{width:min(650px,90vw)}

@@ -3,8 +3,8 @@
  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const valid=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
  function renderAll(item,compact=false){
-  const files=item.all_attachments||[];if(!files.length)return '';
-  return '<section class="material-attachments"'+(compact?'':' id="detail-attachments"')+'><h3>'+StellarI18n.t('全部附件')+' <span class="muted">('+files.length+')</span></h3><div class="material-grid">'+files.map(file=>{
+  const files=item.all_attachments||[];if(!files.length&&!item.deleted_attachment_count)return '';
+  return '<section class="material-attachments"'+(compact?'':' id="detail-attachments"')+'><h3>'+StellarI18n.t('全部附件')+' <span class="muted">('+files.length+')</span></h3>'+(item.deleted_attachment_count?'<button type="button" class="secondary" data-attachment-history="'+item.id+'">'+StellarI18n.t('恢复已删附件')+' ('+item.deleted_attachment_count+')</button>':'')+'<div class="material-grid">'+files.map(file=>{
    const path=file.path;if(!/^\/api\/items\/[a-f0-9]{32}(?:\/(?:additions\/[a-f0-9]{32}\/)?attachments\/[a-f0-9]{32})?$/.test(path))return '';
    const video=/\.(mp4|m4v|mov|webm|ogv|mkv|avi|wmv|mpeg|mpg)$/i.test(file.name),image=file.media.startsWith('image/'),pdf=/\.pdf$/i.test(file.name),name=esc(file.name);
    const thumb='<img loading="lazy" src="'+esc(file.thumbnail_url)+'" alt="'+name+'">';
@@ -39,7 +39,7 @@
    deleteDialog.querySelector('#attachment-delete-confirm').onclick=async()=>{
     if(!pendingDelete||deleting)return;const target=pendingDelete;deleting=true;
     for(const control of deleteDialog.querySelectorAll('button'))control.disabled=true;
-    try{await options.api(target.path+'/delete-attachment',{confirmed:true,expected_updated:target.updated});deleteDialog.close();options.toast(StellarI18n.t('附件已删除，原件备份保存在本机。'));await options.onSaved(target.path.split('/')[3])}
+    try{const deleted=await options.api(target.path+'/delete-attachment',{confirmed:true,expected_updated:target.updated});deleteDialog.close();options.toast(StellarI18n.t('附件已删除，原件备份保存在本机。'));await options.onSaved(target.path.split('/')[3]);globalThis.StellarAttachmentRecovery?.undo(target.path.split('/')[3],deleted.recovery_id)}
     catch(error){if(deleteDialog.open)deleteDialog.querySelector('#attachment-delete-error').textContent=StellarI18n.message(error.message);else options.toast(error.message)}
     finally{deleting=false;for(const control of deleteDialog.querySelectorAll('button'))control.disabled=false}
    };
@@ -50,7 +50,7 @@
   deleteDialog.showModal();deleteDialog.querySelector('#attachment-delete-cancel').focus();
  }
  let options=null,bound=false;
- function bind(config){options=config;globalThis.StellarPDF?.bind(config);globalThis.StellarVideoViewer?.bind(config);if(bound)return;bound=true;document.addEventListener('click',async event=>{
+ function bind(config){options=config;globalThis.StellarPDF?.bind(config);globalThis.StellarAttachmentRecovery?.bind(config);globalThis.StellarVideoViewer?.bind(config);if(bound)return;bound=true;document.addEventListener('click',async event=>{
   const remove=event.target.closest('[data-attachment-delete]');if(remove&&!remove.disabled){event.preventDefault();showDelete(remove);return}
   const button=event.target.closest('[data-editor-action]');if(!button||button.disabled||!options)return;
   const path=button.dataset.editorPath,action=button.dataset.editorAction;

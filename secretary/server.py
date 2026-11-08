@@ -25,7 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, origins, pdf_reading, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
+from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -799,6 +799,7 @@ class Service:
             if file['name'].lower().endswith('.pdf'):
                 entry=item.get('pdf_reads',{}).get(pdf_reading.key(file['batch_id'],'' if file['id']=='original' else file['id']),{})
                 file['read_pages']=sorted(map(int,entry.get('pages',{})));file['pdf_total']=entry.get('total')
+        item['deleted_attachment_count']=len(attachment_recovery.public(self.archive,item_id))
         item['all_attachments']=catalog
         return item
 
@@ -992,6 +993,8 @@ def handler(service):
                 if path=='/api/browser-extension/download':return self.send(200,extension_install.download(),'application/zip',{'Content-Disposition':'attachment; filename="Stellar-Capture-Extension.zip"'})
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/trash':return self.send(200,{'items':service.archive.trash_items()})
+                recovery=re.fullmatch(r'/api/items/([a-f0-9]{32})/deleted-attachments',path)
+                if recovery:return self.send(200,{'items':attachment_recovery.public(service.archive,recovery[1])})
                 if path=='/api/backups':return self.send(200,{'items':service.backups.entries(),'error':service.backups.error})
                 if path=='/api/tasks':return self.send(200,service.task_status())
                 if path=='/api/update': return self.send(200, updater.status())
@@ -1012,7 +1015,7 @@ def handler(service):
                 if preview_match:
                     from .rich_text import searchable_text
                     item=service.material_attachments(service.archive.get(preview_match[1]));text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments']})
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'all_attachments':item['all_attachments'],'deleted_attachment_count':item['deleted_attachment_count']})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
@@ -1034,7 +1037,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1088,6 +1091,11 @@ def handler(service):
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
                     return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
+                recovery=re.fullmatch(r'/api/items/([a-f0-9]{32})/deleted-attachments/([a-f0-9]{32})/restore',path)
+                if recovery:
+                    with service.lock:
+                        if recovery[1] in service.busy or recovery[1] in service.captures:raise ValueError('资料正在处理，请稍后恢复附件')
+                        return self.send(200,attachment_recovery.restore(service.archive,*recovery.groups()))
                 pdf_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-read',path)
                 if pdf_match:
                     item_id,batch_id,key=pdf_match.groups()
