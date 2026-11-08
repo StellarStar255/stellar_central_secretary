@@ -99,3 +99,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .video-open{position:relative}.video-play{position:absolute;inset:0;display:grid;place-items:center;font-size:2.5rem;color:white;text-shadow:0 2px 8px #000;pointer-events:none}.video-viewer{width:min(960px,94vw);max-height:94vh}.video-viewer h2{font-size:1rem;overflow-wrap:anywhere}.video-viewer video{display:block;width:100%;max-height:68vh;background:#000}.video-viewer .detail-actions{margin-top:14px}
 
 .video-duration{position:absolute;bottom:5px;right:5px;background:#111c;color:white;padding:2px 5px;border-radius:4px;font-size:12px}
+
+.pdf-reader{width:min(1100px,95vw)}.pdf-reader form{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.pdf-reader input[type=number]{width:90px}.pdf-page-navigation{display:flex;gap:6px;margin:12px 0}.pdf-page-view{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-height:65vh;overflow:auto}.pdf-page-view img{max-width:100%;height:auto}.pdf-page-view pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}@media(max-width:650px){.pdf-page-view{grid-template-columns:1fr}}

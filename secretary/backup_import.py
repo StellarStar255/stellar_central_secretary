@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from .notes import image_bytes,MAX_IMAGE,MAX_IMAGES
-from . import additions,bundles,links
+from . import additions,bundles,links,pdf_reading
 
 MAX_BACKUP = 8 * 1024**3
 MAX_EXPANDED = 16 * 1024**3
@@ -102,6 +102,7 @@ def _import_backup(archive, data,stage):
                 image_data=z.read(name);media=image_bytes(image_data)
                 attachments.append((image['name'][:180],media,image_data))
             links.records(item.get('group_links',[]))
+            pdf_reading.records(item.get('pdf_reads',{}))
             batches=additions.records(item.get('additions',[]));batch_files=[]
             for batch in batches:
                 name='files/'+batch['id']
@@ -132,8 +133,9 @@ def _import_backup(archive, data,stage):
                         with path.open('xb') as stream:created_files.append(path);stream.write(image_data)
                         note_images.append({'id':image_id,'name':name,'media':media})
                     now = datetime.now(timezone.utc).isoformat()
+                    batch_map={}
                     for batch,raw in zip(batches,batch_files):
-                        batch['id']=uuid.uuid4().hex;path=archive.root/'files'/batch['id']
+                        old_batch=batch['id'];batch['id']=uuid.uuid4().hex;batch_map[old_batch]=batch['id'];path=archive.root/'files'/batch['id']
                         with path.open('xb') as stream:
                             created_files.append(path)
                             with raw.open('rb') as src:shutil.copyfileobj(src,stream,1024*1024)
@@ -152,6 +154,8 @@ def _import_backup(archive, data,stage):
                     db.execute('UPDATE items SET additions=?,group_links=? WHERE id=?',(json.dumps(batches,ensure_ascii=False),json.dumps(item.get('group_links',[]),ensure_ascii=False),item_id))
                     db.execute('UPDATE items SET favorite=?,pinned=?,last_viewed=?,trashed_at=? WHERE id=?',(int(item.get('favorite',False)),int(item.get('pinned',False)),item.get('last_viewed',''),item.get('trashed_at',''),item_id))
                     db.execute('UPDATE items SET company_data=? WHERE id=?',(int(bool(item.get('company_data',bool(item.get('url'))))),item_id))
+                    selected={((batch_map.get(token.split(':')[0],token.split(':')[0]))+':'+token.split(':')[1]):entry for token,entry in item.get('pdf_reads',{}).items()}
+                    db.execute('UPDATE items SET pdf_reads=? WHERE id=?',(json.dumps(selected,ensure_ascii=False),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
-from . import additions,links,bundles
+from . import additions,links,bundles,pdf_reading
 
 
 class PageText(HTMLParser):
@@ -127,7 +127,7 @@ class Archive:
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
+            for name,definition in [('pdf_reads',"TEXT NOT NULL DEFAULT '{}'"),('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:
                     db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
                     if name=='company_data':db.execute("UPDATE items SET company_data=1 WHERE url!=''")
@@ -205,7 +205,8 @@ class Archive:
         state=db.execute('SELECT trashed_at FROM items WHERE id=?',(item_id,)).fetchone()
         if state and state['trashed_at']:
             db.execute('DELETE FROM search WHERE item_id=?',(item_id,));db.execute('DELETE FROM chunks WHERE item_id=?',(item_id,));return
-        visual=db.execute('SELECT vision_text,user_context,additions,group_links FROM items WHERE id=?',(item_id,)).fetchone()
+        visual=db.execute('SELECT vision_text,user_context,additions,group_links,pdf_reads FROM items WHERE id=?',(item_id,)).fetchone()
+        if visual and visual[4]:text+='\n\n'+pdf_reading.index_text(visual[4])
         if visual and visual[0]:text+='\n\n【AI 图片解读，需核对原图】\n'+visual[0]
         if visual and visual[1]:text+='\n\n【用户提供的说明，非网页正文】\n'+visual[1]
         batch_text=additions.index_text(additions.records(visual[2])) if visual else ''
@@ -245,7 +246,7 @@ class Archive:
     def get(self, item_id, include_trashed=False):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row or row['trashed_at'] and not include_trashed: raise KeyError('资料不存在')
-        item = dict(row);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
+        item = dict(row);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -328,8 +329,9 @@ class Archive:
             try:shutil.rmtree(stage)
             except OSError as error:raise ValueError('归档已移除，但部分文件仍被占用。请关闭原文件后重启程序完成清理。') from error
     def update(self, item_id, **values):
-        allowed = {'title','text','summary','tags','category','state','error','vision_text','group_links'}
+        allowed = {'title','text','summary','tags','category','state','error','vision_text','group_links','pdf_reads'}
         if not values or not set(values) <= allowed: raise ValueError('无效更新')
+        if 'pdf_reads' in values:values['pdf_reads']=json.dumps(pdf_reading.records(values['pdf_reads']),ensure_ascii=False)
         if 'group_links' in values:values['group_links']=json.dumps(links.records(values['group_links']),ensure_ascii=False)
         values['updated'] = datetime.now(timezone.utc).isoformat()
         if 'text' in values:values.setdefault('vision_text','')
@@ -340,7 +342,7 @@ class Archive:
                 if current['tags_manual']:values.pop('tags')
                 else:values['tags']=json.dumps(values['tags'],ensure_ascii=False)
             db.execute('UPDATE items SET '+','.join(k+'=?' for k in values)+' WHERE id=?', (*values.values(), item_id))
-            if {'text','title','tags','vision_text','group_links'} & values.keys():
+            if {'text','title','tags','vision_text','group_links','pdf_reads'} & values.keys():
                 row=db.execute('SELECT text FROM items WHERE id=?',(item_id,)).fetchone()
                 if row:self._index(db,item_id,row['text'])
     def set_tags(self,item_id,tags,expected=None):
@@ -403,9 +405,10 @@ class Archive:
         keywords=list(dict.fromkeys(q.casefold().split()))
         columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
+            rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links,pdf_reads' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
         result=[]
         for row in rows:
+            selected=pdf_reading.index_text(row.pop('pdf_reads','{}'))
             body=row.pop('text','')
             visual=row.pop('vision_text','');group_values=links.records(json.loads(row.pop('group_links','[]')))
             row['favorite']=bool(row['favorite']);row['pinned']=bool(row['pinned']);row['tags']=json.loads(row['tags'])
@@ -413,11 +416,11 @@ class Archive:
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]
-                fields.extend(row['tags']);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches));fields.append(links.source(group_values))
+                fields.extend(row['tags']);fields.append(selected);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches));fields.append(links.source(group_values))
                 source='\n'.join(fields)
                 haystack=(source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue
-                readable=searchable_text(body)+'\n'+visual+'\n'+row.get('note','')+'\n'+additions.index_text(batches)
+                readable=searchable_text(body)+'\n'+selected+'\n'+visual+'\n'+row.get('note','')+'\n'+additions.index_text(batches)
                 hits=[readable.casefold().find(word) for word in keywords if word in readable.casefold()]
                 if hits:
                     start=max(0,min(hits)-65);row['search_snippet']=('…' if start else '')+readable[start:start+240]+('…' if len(readable)>start+240 else '')

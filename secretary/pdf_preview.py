@@ -33,3 +33,43 @@ def read(source):
         if error.err_code==4:return '', '此 PDF 需要打开密码，请先使用密码打开并导出可读取版本，再重新导入。'
         return '', 'PDF 文件损坏或结构无法读取，请确认原文件能正常打开后重试。'
     except (OSError,ValueError):return '', 'PDF 文件损坏或结构无法读取，请确认原文件能正常打开后重试。'
+
+
+def inspect(source,start=1,end=5,ocr=False,cancel=None):
+    """Explicit page selection, bounded text and optional local-only raster OCR."""
+    import pypdfium2 as pdfium
+    from . import local_ocr
+    if type(start) is not int or type(end) is not int or start<1 or end<start or end-start>=10:raise ValueError('每次请选择连续 1–10 页')
+    with LOCK,ExitStack() as stack:
+        input=source if isinstance(source,(Path,bytes)) else stack.enter_context(source.open('rb'))
+        doc=stack.enter_context(pdfium.PdfDocument(input));total=len(doc)
+        if start>total:raise ValueError('起始页超过文件总页数')
+        result=[]
+        for number in range(start,min(end,total)+1):
+            if cancel and cancel():raise ValueError('页面读取已停止')
+            with closing(doc[number-1]) as page:
+                if ocr:
+                    width,height=page.get_size();scale=min(2,2000/max(width,height))
+                    with closing(page.render(scale=scale)) as bitmap:
+                        with bitmap.to_pil().copy() as image:text=local_ocr.recognize(image)
+                    method='ocr'
+                else:
+                    with closing(page.get_textpage()) as textpage:
+                        count=textpage.count_chars();text=textpage.get_text_range(count=min(count,CHARS_PER_PAGE)) if count else ''
+                    method='text'
+                result.append({'page':number,'text':text[:CHARS_PER_PAGE].strip(),'method':method})
+        return {'total':total,'start':start,'end':min(end,total),'pages':result,'ocr':bool(ocr)}
+
+
+def page_image(source,number):
+    import pypdfium2 as pdfium
+    import io
+    if type(number) is not int or number<1:raise ValueError('页码无效')
+    with LOCK,ExitStack() as stack:
+        input=source if isinstance(source,(Path,bytes)) else stack.enter_context(source.open('rb'))
+        doc=stack.enter_context(pdfium.PdfDocument(input))
+        if number>len(doc):raise ValueError('页码超过文件范围')
+        with closing(doc[number-1]) as page:
+            width,height=page.get_size()
+            with closing(page.render(scale=min(2,1600/max(width,height)))) as bitmap:
+                output=io.BytesIO();bitmap.to_pil().save(output,'PNG');return output.getvalue()

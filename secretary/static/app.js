@@ -121,7 +121,7 @@ $('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterfa
 
 function toast(message){const host=[...document.querySelectorAll('dialog[open]')].at(-1)||document.body;host.append($('#toast'));$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),4200)}
 async function api(path,body,retry=true,companyRetry=true){
- const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/model-api/test','/api/model-connection/test','/api/update/check'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/backups/')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/model-api/test','/api/model-connection/test','/api/update/check'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/backups/')||path.endsWith('/pdf-read')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
  let response;
  try{response=await fetch(path,body===undefined?{signal:controller.signal}:{method:'POST',headers:{'Content-Type':'application/json','X-Knowledge-Token':token},body:JSON.stringify(body),signal:controller.signal})}
  catch(e){throw Error(e.name==='AbortError'?t('本地服务响应超时，请检查程序是否仍在运行。'):e.message)}

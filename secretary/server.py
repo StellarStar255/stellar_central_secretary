@@ -25,7 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, uploads, local_backups, video_state, media as local_media
+from . import __version__, local_paths, company_ai, thumbnails, attachment_delete, extension_install, pdf_reading, pdf_preview, local_ocr, uploads, local_backups, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
 
@@ -73,6 +73,24 @@ def fetch_page(url):
         text = PageText.parse(text) if media=='text/html' else text
         if len(text)<100: return '', '正文不足或页面需要登录，请使用浏览器采集或粘贴正文。'
         return text, ''
+
+
+def service_pdf_material(archive,item,source,scope):
+    selected=[]
+    for token,entry in item.get('pdf_reads',{}).items():
+        batch,key=token.split(':')
+        try:
+            _,_,_,digest,_=pdf_reading.owned(archive,item['id'],'' if batch=='original' else batch,'' if key=='original' else key)
+            if digest==entry['digest']:selected.append(pdf_reading.text(entry))
+        except (KeyError,ValueError):continue
+    if selected:
+        if item['filename'].lower().endswith('.pdf'):source=''
+        selected_text='\n\n'.join(selected)
+        truncated=len(selected_text)>100000
+        source+='\n\n【按页补充读取，以下页码也在本次范围内】\n'+selected_text[:100000]
+        scope='【资料概览；包含原有文字与以下 PDF 选读页，未读取页面不作推断】\n'+'\n'.join(value.splitlines()[0] for value in selected)
+        if truncated:scope+='\n选读文字过长，本次概览仅使用前 10 万字符；完整选读文字保留在本机。'
+    return source,scope
 
 
 class Service:
@@ -360,6 +378,7 @@ class Service:
                 source,images,scope=bundles.model_material((self.archive.root/'files'/batch_id),batch['text'],batch.get('links',[]))
                 new_source=source;context_limit=1000 if not images and len(source)<=4000 else 8000
                 source='本次仅总结新追加资料，不重述旧摘要；旧摘要仅供理解背景。\n旧摘要：\n'+item['summary'][:context_limit]+'\n\n本次新增：\n'+source
+                source,scope=service_pdf_material(self.archive,item,source,scope)
                 fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,'【追加资料概览】'+scope,summary_text=new_source)
                 with self.lock:
                     self.summary_jobs.check(item_id)
@@ -403,8 +422,12 @@ class Service:
                     self.archive.update(item_id, state='processing', error='')
                 if bundles.is_bundle(item['filename']):
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
+                    source,scope=service_pdf_material(self.archive,item,source,scope)
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
-                else:fields=ai.summary_fields(item, self.model_backend(item_ids=[item_id]), full_pdf=full_pdf)
+                else:
+                    selected,scope=service_pdf_material(self.archive,item,item['text'],'')
+                    if scope:fields,_=ai.analyze_material(selected,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
+                    else:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=full_pdf)
                 with self.lock:
                     self.summary_jobs.check(item_id)
                     self.archive.update(item_id, **fields);self.summary_jobs.commit(item_id)
@@ -764,6 +787,10 @@ class Service:
             for file in files:
                 path=base+('/additions/'+batch_id if batch_id else '')+'/attachments/'+file['id']
                 catalog.append({**file,'path':path,'batch_id':batch_id,'created':created,'download_url':path,'preview_url':path+'/preview','thumbnail_url':path+'/thumbnail'})
+        for file in catalog:
+            if file['name'].lower().endswith('.pdf'):
+                entry=item.get('pdf_reads',{}).get(pdf_reading.key(file['batch_id'],'' if file['id']=='original' else file['id']),{})
+                file['read_pages']=sorted(map(int,entry.get('pages',{})));file['pdf_total']=entry.get('total')
         item['all_attachments']=catalog
         return item
 
@@ -788,6 +815,7 @@ class Service:
             with self.summary_jobs.session(item_id,len(item["text"]),short=True):
                 self.archive.update(item_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
+                source,scope=service_pdf_material(self.archive,item,source,scope)
                 fields,answer=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope,question=question)
                 with self.lock:
                     self.summary_jobs.check(item_id)
@@ -907,7 +935,10 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                page_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-page/(\d+)',path)
+                if page_match:
+                    _,source,_,_,_=pdf_reading.owned(service.archive,*page_match.groups()[:3]);return self.send(200,pdf_preview.page_image(source,int(page_match[4])),'image/png')
                 if path.endswith(('/video-state','/video-poster')):
                     base=path.rsplit('/',1)[0];key=service.video_identity(base)
                     if path.endswith('/video-poster'):return self.send(200,(service.archive.root/'video-cache'/(key+'.jpg')).read_bytes(),'image/jpeg')
@@ -995,7 +1026,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1049,6 +1080,15 @@ def handler(service):
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
                     return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
+                pdf_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-read',path)
+                if pdf_match:
+                    item_id,batch_id,key=pdf_match.groups()
+                    with service.lock:
+                        if item_id in service.busy or item_id in service.captures:raise ValueError('资料正在处理，请稍后读取')
+                        service.busy.add(item_id)
+                    try:return self.send(200,pdf_reading.read(service.archive,item_id,batch_id,key,body,lambda:service.stopping))
+                    finally:
+                        with service.lock:service.busy.discard(item_id)
                 player_match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/video-player',path)
                 if player_match:
                     item_id,batch_id,key=player_match.groups()
