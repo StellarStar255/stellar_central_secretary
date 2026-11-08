@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
-from . import additions,links,bundles,pdf_reading
+from . import additions,links,bundles,pdf_reading,origins
 
 
 class PageText(HTMLParser):
@@ -126,6 +126,9 @@ class Archive:
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
+            chunk_columns={row[1] for row in db.execute('PRAGMA table_info(chunks)')}
+            source_migration='origin' not in chunk_columns
+            if source_migration:db.execute("ALTER TABLE chunks ADD COLUMN origin TEXT NOT NULL DEFAULT '{}'")
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
             for name,definition in [('pdf_reads',"TEXT NOT NULL DEFAULT '{}'"),('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:
@@ -133,6 +136,8 @@ class Archive:
                     if name=='company_data':db.execute("UPDATE items SET company_data=1 WHERE url!=''")
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
+                for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
+            if source_migration:
                 for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
             if recover:
                 for row in db.execute('SELECT id,additions FROM items').fetchall():
@@ -221,6 +226,11 @@ class Archive:
             chunk = text[offset:offset+1200]
             cursor = db.execute('INSERT INTO chunks(item_id,position,text) VALUES (?,?,?)', (item_id, pos, chunk))
             db.execute('INSERT INTO search VALUES (?,?,?)', (' '.join(terms(keywords+' '+chunk)), cursor.lastrowid, item_id))
+        for content,origin in origins.material(self,db,item_id):
+            for offset in range(0,len(content),1000):
+                chunk=content[offset:offset+1200]
+                cursor=db.execute('INSERT INTO chunks(item_id,position,text,origin) VALUES (?,?,?,?)',(item_id,-1,chunk,json.dumps(origin,ensure_ascii=False)))
+                db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
     def add(self, title='', text='', url='', filename='', data=None, warning=''):
         if isinstance(data,Path):
             with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
@@ -424,6 +434,8 @@ class Archive:
                 hits=[readable.casefold().find(word) for word in keywords if word in readable.casefold()]
                 if hits:
                     start=max(0,min(hits)-65);row['search_snippet']=('…' if start else '')+readable[start:start+240]+('…' if len(readable)>start+240 else '')
+            if keywords:
+                row['source_matches']=[{'text':hit['text'][:240],'origin':hit['origin']} for hit in self.retrieve(q,30) if hit['item_id']==row['id'] and hit.get('origin')][:3]
             result.append(row)
         return result
     def retrieve(self, query, limit=8):
@@ -431,8 +443,15 @@ class Archive:
         if not tokens: return []
         match = ' OR '.join('"'+t+'"' for t in tokens)
         with self.db() as db:
-            return [dict(r) for r in db.execute('''SELECT c.id,c.item_id,c.position,c.text,i.title,i.url,i.filename,bm25(search) AS score
+            rows=[dict(r) for r in db.execute('''SELECT c.id,c.item_id,c.position,c.text,c.origin,i.title,i.url,i.filename,bm25(search) AS score
             FROM search JOIN chunks c ON c.id=search.chunk_id JOIN items i ON i.id=c.item_id
-            WHERE search MATCH ? AND i.trashed_at='' ORDER BY score LIMIT ?''', (match, limit))]
+            WHERE search MATCH ? AND i.trashed_at='' ORDER BY (c.origin!='{}') DESC,score LIMIT ?''', (match,limit*5))]
+            result=[];seen=set()
+            for row in rows:
+                row['origin']=json.loads(row['origin']);o=row['origin'];identity=(row['item_id'],o.get('batch_id'),o.get('attachment_id'),o.get('page'))
+                if identity in seen:continue
+                seen.add(identity);result.append(row)
+                if len(result)>=limit:break
+            return result
     def export(self):
         with self.db() as db: return [self.get(r['id'],include_trashed=True) for r in db.execute('SELECT id FROM items')]

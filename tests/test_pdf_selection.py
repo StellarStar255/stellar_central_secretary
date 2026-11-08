@@ -15,7 +15,7 @@ class PdfSelectionTest(unittest.TestCase):
     item=service.item_detail(item_id);key=item['attachments'][0]['id'];original=(service.archive.root/'files'/item_id).read_bytes()
     result=pdf_reading.read(service.archive,item_id,None,key,{'start':6,'end':9})
     self.assertEqual(result['read_pages'],list(range(1,10)));self.assertIn('PAGETOKEN9',result['pages'][-1]['text'])
-    self.assertTrue(service.archive.list(q='PAGETOKEN9'));self.assertTrue(service.archive.retrieve('PAGETOKEN9'))
+    self.assertTrue(service.archive.list(q='PAGETOKEN9'));self.assertTrue(service.archive.retrieve('PAGETOKEN9'));self.assertEqual(service.archive.retrieve('PAGETOKEN9')[0]['origin']['page'],9)
     source,scope=service_pdf_material(service.archive,service.archive.get(item_id),'original','default')
     self.assertIn('PAGETOKEN9',source);self.assertIn('1,2,3,4,5,6,7,8,9',scope)
     self.assertEqual(original,(service.archive.root/'files'/item_id).read_bytes())
