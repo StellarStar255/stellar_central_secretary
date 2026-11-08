@@ -1,5 +1,5 @@
 """Pause/reload/resume verified chunks and cancel using a real browser and isolated files."""
-import os,sys,tempfile,threading,json
+import os,sys,tempfile,threading,json,re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT))
 from secretary.server import Service,handler
@@ -33,7 +33,17 @@ with tempfile.TemporaryDirectory() as temp:
     page.wait_for_function('()=>!sending');assert len(service.archive.list())==1 and not list(service.uploads.folder.glob('*.json'))
     preview=result['item']['all_attachments'][0]['preview_url'];response=page.request.get(base+preview.removesuffix('/preview'),headers={'Range':'bytes=-4'});assert response.status==206 and response.body()==b'TAIL'
     cancel_source=Path(temp)/'cancel.bin';cancel_source.write_bytes(source.read_bytes());blocked=[]
-    page.route('**/api/uploads/*/chunk',lambda route:blocked.append(route));page.locator('#file-input').set_input_files(cancel_source);page.locator('#send-button').click();expect(page.locator('.upload-progress-row')).to_have_count(1)
+    starts=[]
+    def hold_start(route):starts.append(route)
+    page.route('**/api/uploads/start',hold_start);page.locator('#file-input').set_input_files(cancel_source)
+    with page.expect_request('**/api/uploads/start'):page.locator('#send-button').click()
+    expect(page.locator('.upload-progress-row')).to_have_count(1);page.locator('.upload-progress-row button').nth(1).click()
+    for route in starts:route.continue_()
+    expect(page.locator('#attachments')).to_contain_text('cancel.bin');page.wait_for_function('()=>!sending');assert len(service.archive.list())==1
+    page.unroute('**/api/uploads/start',hold_start);page.locator('.upload-progress-row button').nth(1).click()
+    page.route('**/api/uploads/*/chunk',lambda route:blocked.append(route))
+    with page.expect_request(re.compile(r'/api/uploads/[^/]+/chunk$')):page.locator('#send-button').click()
+    expect(page.locator('.upload-progress-row')).to_have_count(1)
     page.locator('.upload-progress-row button').nth(1).click();expect(page.locator('#attachments')).to_contain_text('cancel.bin');assert len(service.archive.list())==1
     for route in blocked:
      try:route.abort()
