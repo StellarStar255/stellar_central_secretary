@@ -17,9 +17,9 @@ class Backups:
         self.error=self.state.get('last_error','')
         if self.state.get('state')=='creating':self.error='上次备份未完成，请重新备份。';self.state.update(state='error',last_error=self.error)
     def _save_state(self,**values):
-        self.state={**self.state,**values};temporary=self.state_path.with_suffix('.tmp');temporary.write_text(json.dumps(self.state));temporary.replace(self.state_path)
+        self.state={**self.state,**values,'revision':self.state.get('revision',0)+1};temporary=self.state_path.with_suffix('.tmp');temporary.write_text(json.dumps(self.state));temporary.replace(self.state_path)
     def status(self):
-        return {**self.state,'folder':str(self.folder),'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,'last_error':self.error}
+        return {**self.state,'folder':str(self.folder),'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,'last_error':self.error,'config_revision':self.config.get('revision',0),'state_revision':self.state.get('revision',0)}
     def configure(self,body):
         limit=body.get('max_bytes',self.limit);daily=body.get('daily_keep',self.daily_keep);other=body.get('other_keep',self.other_keep)
         if type(limit) is not int or not 100*1024**2<=limit<=2000*1024**3 or type(daily) is not int or not 1<=daily<=30 or type(other) is not int or not 1<=other<=10:raise ValueError('备份容量或保留份数无效')
@@ -35,7 +35,7 @@ class Backups:
             try:probe.write_bytes(b'');probe.unlink()
             except OSError as error:raise ValueError('备份目录不可写') from error
             known=list(dict.fromkeys([*self.config.get('previous_folders',[]),str(self.folder)]))[-5:]
-            value={'folder':str(folder),'max_bytes':limit,'daily_keep':daily,'other_keep':other,'previous_folders':known}
+            value={'revision':self.config.get('revision',0)+1,'folder':str(folder),'max_bytes':limit,'daily_keep':daily,'other_keep':other,'previous_folders':known}
             temporary=self.config_path.with_suffix('.tmp');temporary.write_text(json.dumps(value));temporary.replace(self.config_path)
             self.config=value;self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
             return self.status()
