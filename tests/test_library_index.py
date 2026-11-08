@@ -1,4 +1,5 @@
 import tempfile,time,unittest,json
+from contextlib import closing
 from unittest.mock import patch
 from secretary.core import Archive
 from secretary.library import query,dashboard
@@ -26,3 +27,13 @@ class LibraryIndexTest(unittest.TestCase):
    archive.update(ident,text='changed');self.assertEqual(query(archive,q='origin')['total'],0)
    with archive.db() as db:db.execute('UPDATE items SET trashed_at=? WHERE id=?',('now',ident))
    self.assertEqual(query(archive,q='summary')['total'],0)
+
+ def test_old_program_connection_can_write_after_index_migration(self):
+  import sqlite3
+  with tempfile.TemporaryDirectory() as temp:
+   archive=Archive(temp);ident,_=archive.add('Before','original body')
+   # This connection has none of the new Python SQL functions, like v0.1.73.
+   with closing(sqlite3.connect(archive.root/'archive.sqlite3')) as db,db:db.execute('UPDATE items SET text=? WHERE id=?',('written by an older program',ident))
+   self.assertEqual(query(archive,q='older program')['total'],1)
+   with closing(sqlite3.connect(archive.root/'archive.sqlite3')) as db,db:db.execute('DELETE FROM items WHERE id=?',(ident,))
+   self.assertEqual(query(archive,q='older program')['total'],0)

@@ -25,12 +25,20 @@ def document(*values):
 def initialize(db):
     exists=db.execute("SELECT 1 FROM sqlite_master WHERE name='library_search'").fetchone()
     db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS library_search USING fts5(content,tokenize='trigram')")
-    args=','.join('new.'+name for name in FIELDS)
-    db.executescript('CREATE TRIGGER IF NOT EXISTS library_insert AFTER INSERT ON items BEGIN INSERT INTO library_search(rowid,content) VALUES(new.rowid,library_document('+args+')); END;'+
-        'CREATE TRIGGER IF NOT EXISTS library_update AFTER UPDATE OF '+','.join(FIELDS)+' ON items BEGIN DELETE FROM library_search WHERE rowid=old.rowid; INSERT INTO library_search(rowid,content) VALUES(new.rowid,library_document('+args+')); END;'+
-        'CREATE TRIGGER IF NOT EXISTS library_delete AFTER DELETE ON items BEGIN DELETE FROM library_search WHERE rowid=old.rowid; END;'+
+    db.executescript('CREATE TABLE IF NOT EXISTS library_dirty(item_id TEXT PRIMARY KEY);'+
+        'DROP TRIGGER IF EXISTS library_insert; DROP TRIGGER IF EXISTS library_update; DROP TRIGGER IF EXISTS library_delete;'+
+        'CREATE TRIGGER library_insert AFTER INSERT ON items BEGIN INSERT OR IGNORE INTO library_dirty VALUES(new.id); END;'+
+        'CREATE TRIGGER library_update AFTER UPDATE OF '+','.join(FIELDS)+' ON items BEGIN INSERT OR IGNORE INTO library_dirty VALUES(new.id); END;'+
+        'CREATE TRIGGER library_delete AFTER DELETE ON items BEGIN DELETE FROM library_search WHERE rowid=old.rowid; DELETE FROM library_dirty WHERE item_id=old.id; END;'+
         'CREATE INDEX IF NOT EXISTS library_created ON items(trashed_at,created DESC);')
     if not exists:db.execute('INSERT INTO library_search(rowid,content) SELECT rowid,library_document('+','.join(FIELDS)+') FROM items')
+    sync(db)
+
+def sync(db):
+    # Stored triggers use only standard SQL. Older app versions can keep writing
+    # after a program rollback; this version catches up before indexed queries.
+    db.execute('INSERT OR REPLACE INTO library_search(rowid,content) SELECT items.rowid,library_document('+','.join('items.'+name for name in FIELDS)+') FROM items JOIN library_dirty ON library_dirty.item_id=items.id')
+    db.execute('DELETE FROM library_dirty')
 
 def decode(row):
     import json
@@ -70,7 +78,8 @@ def query(archive,q='',category='',kind='',state='',days='',sort='',favorite='',
     if sort in ('updated','viewed'):order=('updated' if sort=='updated' else 'last_viewed')+' DESC,created DESC'
     elif q.strip() and sort in ('','relevance'):order='library_rank(title,tags,filename,summary,additions,?) DESC,created DESC'
     elif not q.strip() and sort in ('','created'):order='pinned DESC,created DESC'
-    with archive.db() as db:
+    with archive.lock,archive.db() as db:
+        sync(db)
         total=db.execute('SELECT count(*)'+sql,params).fetchone()[0]
         rank_params=[q] if order.startswith('library_rank') else []
         rows=db.execute('SELECT '+COLUMNS+sql+' ORDER BY '+order+' LIMIT ? OFFSET ?',params+rank_params+[limit,offset]).fetchall()
