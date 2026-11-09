@@ -803,8 +803,23 @@ class Service:
                 entry=item.get('pdf_reads',{}).get(pdf_reading.key(file['batch_id'],'' if file['id']=='original' else file['id']),{})
                 file['read_pages']=sorted(map(int,entry.get('pages',{})));file['pdf_total']=entry.get('total')
         item['deleted_attachment_count']=len(attachment_recovery.public(self.archive,item_id))
-        item['all_attachments']=catalog
+        from . import attachment_order
+        item['all_attachments']=attachment_order.ordered(catalog,item['attachment_order'])
         return item
+
+    def save_attachment_order(self,item_id,body):
+        from . import attachment_order
+        from datetime import datetime,timezone
+        order=attachment_order.records(body.get('order'));expected=attachment_order.records(body.get('expected_order'))
+        with self.archive.lock:
+            item=self.material_attachments(self.archive.get(item_id))
+            current=[attachment_order.key(file) for file in item['all_attachments']]
+            if len(order)!=len(current) or set(order)!=set(current):raise ValueError('附件列表已变化，请重新查看后排序。')
+            if order!=current:
+                if expected!=current:raise ValueError('附件顺序已在其他窗口更新，请重新查看后排序。')
+                now=datetime.now(timezone.utc).isoformat()
+                with self.archive.db() as db:db.execute('UPDATE items SET attachment_order=?,updated=? WHERE id=?',(json.dumps(order),now,item_id))
+            return {'ok':True,'order':order,'updated':self.archive.get(item_id)['updated']}
 
     def video_identity(self,path):
         match=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?',path)
@@ -1049,7 +1064,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/attachment-order-ui.js':'attachment-order-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1205,6 +1220,8 @@ def handler(service):
                         service.archive.get(company_mark[1]);company_ai.mark(service.archive,company_mark[1]);return self.send(200,{'ok':True})
                     local_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/open-local-path',path)
                     if local_open:return self.send(200,local_paths.open_location(service.archive,local_open[1],body.get('path')))
+                    order_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/attachment-order',path)
+                    if order_match:return self.send(200,service.save_attachment_order(order_match[1],body))
                     attachment_remove=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/delete-attachment',path)
                     if attachment_remove:return self.send(200,service.delete_attachment(*attachment_remove.groups(),body))
                     editor=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/editor/(open|reveal|save)',path)

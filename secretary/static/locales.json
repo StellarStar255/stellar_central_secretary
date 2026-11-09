@@ -1158,5 +1158,14 @@
   "重试追加": "Retry append",
   "移除待追加附件": "Remove pending attachments",
   "正在追加附件…": "Appending attachments…",
-  "附件已追加到全部附件": "Attachments added to all attachments"
+  "附件已追加到全部附件": "Attachments added to all attachments",
+  "附件排序格式无效": "Invalid attachment order",
+  "附件列表已变化，请重新查看后排序。": "The attachment list changed. Reopen it before reordering.",
+  "附件顺序已在其他窗口更新，请重新查看后排序。": "The attachment order changed in another window. Reopen it before reordering.",
+  "拖动附件可调整顺序，自动保存。": "Drag attachments to reorder. Changes are saved automatically.",
+  "拖动排序；方向键调整": "Drag to reorder; use arrow keys to adjust",
+  "调整附件顺序：": "Reorder attachment: ",
+  "正在保存附件顺序…": "Saving attachment order…",
+  "附件顺序已保存": "Attachment order saved",
+  "附件排序未保存：": "Attachment order was not saved: "
 }

@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 from .rich_text import searchable_text
-from . import additions,links,bundles,pdf_reading,origins
+from . import additions,links,bundles,pdf_reading,origins,attachment_order
 
 
 class PageText(HTMLParser):
@@ -130,7 +130,7 @@ class Archive:
             source_migration='origin' not in chunk_columns
             if source_migration:db.execute("ALTER TABLE chunks ADD COLUMN origin TEXT NOT NULL DEFAULT '{}'")
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
-            for name,definition in [('pdf_reads',"TEXT NOT NULL DEFAULT '{}'"),('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
+            for name,definition in [('attachment_order',"TEXT NOT NULL DEFAULT '[]'"),('pdf_reads',"TEXT NOT NULL DEFAULT '{}'"),('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:
                     db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
                     if name=='company_data':db.execute("UPDATE items SET company_data=1 WHERE url!=''")
@@ -260,7 +260,7 @@ class Archive:
     def get(self, item_id, include_trashed=False):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row or row['trashed_at'] and not include_trashed: raise KeyError('资料不存在')
-        item = dict(row);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
+        item = dict(row);item['attachment_order']=attachment_order.records(item['attachment_order']);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')

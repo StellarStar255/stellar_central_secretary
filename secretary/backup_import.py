@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from .notes import image_bytes,MAX_IMAGE,MAX_IMAGES
-from . import additions,bundles,links,pdf_reading
+from . import additions,bundles,links,pdf_reading,attachment_order
 
 MAX_BACKUP = 8 * 1024**3
 MAX_EXPANDED = 16 * 1024**3
@@ -102,6 +102,7 @@ def _import_backup(archive, data,stage):
                 image_data=z.read(name);media=image_bytes(image_data)
                 attachments.append((image['name'][:180],media,image_data))
             links.records(item.get('group_links',[]))
+            item['attachment_order']=attachment_order.records(item.get('attachment_order',[]))
             item['pdf_reads']=pdf_reading.records(item.get('pdf_reads',{}))
             batches=additions.records(item.get('additions',[]));batch_files=[]
             for batch in batches:
@@ -156,6 +157,7 @@ def _import_backup(archive, data,stage):
                     db.execute('UPDATE items SET company_data=? WHERE id=?',(int(bool(item.get('company_data',bool(item.get('url'))))),item_id))
                     selected={((batch_map.get(token.split(':')[0],token.split(':')[0]))+':'+token.split(':')[1]):entry for token,entry in item.get('pdf_reads',{}).items()}
                     db.execute('UPDATE items SET pdf_reads=? WHERE id=?',(json.dumps(selected,ensure_ascii=False),item_id))
+                    db.execute('UPDATE items SET attachment_order=? WHERE id=?',(json.dumps(attachment_order.remap(item['attachment_order'],batch_map)),item_id))
                     archive._index(db, item_id, text)
                     imported += 1
         except BaseException:

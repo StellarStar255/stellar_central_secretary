@@ -199,7 +199,7 @@ async function refreshNow(){
  $('#count').textContent=libraryTotal;renderSidebar();renderChat(false);
  const progress=$('#detail-content').querySelector('#detail-summary-progress');if(progress&&selectedId)progress.innerHTML=summaryProgress(allItems.find(i=>i.id===selectedId));
  if($('#library-dialog').open)await renderLibrary();
- if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
+ if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
 }
 function libraryPresentation(item){
  let summary=(item.summary||'').trim(),scope='';
@@ -313,7 +313,7 @@ function webCaptureControls(item){
  if(isReading(item))return ui`<div class="capture-actions">${feedback}<span>${item.state==='waiting_login'?t('请在浏览器完成登录并展开目标内容，然后确认读取；只保存已加载的内容。'):esc(StellarI18n.message(item.error||t('正在读取网页…')))}</span>${item.state==='waiting_login'?`<button data-confirm-login="${item.id}" ${disabled}>${t('页面已打开，开始读取')}</button>`:''}<button data-cancel-capture="${item.id}" ${disabled}>停止读取</button></div>`;
  return ui`<div class="capture-actions">${feedback}${item.error?`<span class="capture-error">${esc(StellarI18n.message(item.error.slice(0,450)))}</span>`:''}${summaryButton}<button data-capture="${item.id}" ${disabled}>浏览器读取网页</button><button data-extension-help>使用常用浏览器采集</button></div>`;
 }
-function refreshCaptureUI(){renderChat(false);if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId))detail(selectedId).catch(()=>{})}
+function refreshCaptureUI(){renderChat(false);if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId))detail(selectedId).catch(()=>{})}
 async function performCaptureAction(id,action){
  if(captureActions.get(id)?.pending)return;
  captureActions.set(id,{pending:true,text:action==='confirm'?t('正在提交登录确认…'):action==='cancel'?t('正在停止读取…'):action==='summary'?t('正在提交摘要任务…'):t('正在提交读取请求…')});refreshCaptureUI();
@@ -480,7 +480,7 @@ async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.is
 async function applyUILanguage(language){
  const changed=StellarI18n.language!==language;StellarI18n.setLanguage(language);$('#ui-language').value=language;$('#tutorial-open').href='/tutorial?lang='+language;
  $('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');
- if(changed){lastMessageMarkup='';renderAttachments();if(sending)$('#composer-status').textContent=t('正在处理…');if(latestStatus){$('#backend-status').textContent=latestStatus.settings.backend==='api'?t(latestStatus.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(latestStatus.backends).map(([key,value])=>key+': '+t(value?'已找到 CLI（登录状态需调用验证）':'未找到')).join(' · ');$('#data-dir').textContent=t('本机资料目录：')+latestStatus.data_dir}if(lastUpdateState)renderUpdate(lastUpdateState);globalThis.StellarLibraryPreview?.refresh();if($('#tasks-dialog').open)void globalThis.StellarTasks?.refresh();renderSidebar();renderChat(false);updateModelLabel();if($('#library-dialog').open)await renderLibrary();if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId))await detail(selectedId);}
+ if(changed){lastMessageMarkup='';renderAttachments();if(sending)$('#composer-status').textContent=t('正在处理…');if(latestStatus){$('#backend-status').textContent=latestStatus.settings.backend==='api'?t(latestStatus.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(latestStatus.backends).map(([key,value])=>key+': '+t(value?'已找到 CLI（登录状态需调用验证）':'未找到')).join(' · ');$('#data-dir').textContent=t('本机资料目录：')+latestStatus.data_dir}if(lastUpdateState)renderUpdate(lastUpdateState);globalThis.StellarLibraryPreview?.refresh();if($('#tasks-dialog').open)void globalThis.StellarTasks?.refresh();renderSidebar();renderChat(false);updateModelLabel();if($('#library-dialog').open)await renderLibrary();if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId))await detail(selectedId);}
 }
 let fontSizeRevision=0,fontSizeChanging=false,fontSaveQueue=Promise.resolve();
 function applyUIFontSize(size){
@@ -616,3 +616,5 @@ document.addEventListener('stellar-download',event=>{
  if(!parent){toast(message);return}
  let line=parent.querySelector('[data-desktop-download-status]');if(!line){line=document.createElement('p');line.dataset.desktopDownloadStatus='';line.setAttribute('role','status');line.className='muted';parent.append(line)}line.textContent=message;
 });
+
+globalThis.StellarAttachmentOrder?.bind({api,toast});
