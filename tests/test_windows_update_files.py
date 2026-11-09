@@ -23,6 +23,9 @@ class Holder {static void Main(string[] args) {using(var stream=new FileStream(a
      time.sleep(.05)
     # Reproduce the exact user failure: snapshot replacement denied with error 32.
     with self.assertRaises(PermissionError):snapshot.unlink()
+    api=windows_update_files.kernel();handle=api.OpenProcess(0x1000,False,owned.pid)
+    try:self.assertEqual(windows_update_files.image(api,handle),target.resolve())
+    finally:api.CloseHandle(handle)
     windows_update_files.release(root,grace=.1,timeout=2)
     owned.wait(timeout=5);self.assertIsNone(unrelated.poll());snapshot.unlink();snapshot.write_bytes(b'new snapshot')
     self.assertEqual(snapshot.read_bytes(),b'new snapshot')

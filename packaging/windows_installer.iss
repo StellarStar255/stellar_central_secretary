@@ -61,6 +61,17 @@ function UpdateTerminate(Handle: LongWord; ExitCode: LongWord): Boolean;
 function UpdateImage(Handle: LongWord; Flags: LongWord; Buffer: String; var Size: LongWord): Boolean;
   external 'QueryFullProcessImageNameW@kernel32.dll stdcall';
 
+function UpdateLongPathName(Source: String; Destination: String; Capacity: LongWord): LongWord;
+  external 'GetLongPathNameW@kernel32.dll stdcall';
+
+function UpdateNormalPath(Value: String): String;
+var Buffer: String; Size: LongWord;
+begin
+  Buffer := StringOfChar(#0, 32768);
+  Size := UpdateLongPathName(Value, Buffer, 32768);
+  if (Size > 0) and (Size < 32768) then Result := Copy(Buffer, 1, Size) else Result := Value;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Locator, Service, Processes, Process: Variant;
@@ -73,7 +84,7 @@ begin
   Result := '';
   Count := 0;
   MainRunning := False;
-  Root := AddBackslash(ExpandConstant('{app}'));
+  Root := AddBackslash(UpdateNormalPath(ExpandConstant('{app}')));
   EngineRoot := Root + '_internal\';
   try
     try
@@ -87,7 +98,7 @@ begin
           Size := 32768;
           Buffer := StringOfChar(#0, Size);
           Image := '';
-          if UpdateImage(Handle, 0, Buffer, Size) then Image := Copy(Buffer, 1, Size);
+          if UpdateImage(Handle, 0, Buffer, Size) then Image := UpdateNormalPath(Copy(Buffer, 1, Size));
           if (CompareText(Image, Root + '{#AppExe}') = 0) and (UpdateWait(Handle, 0) = 258) then MainRunning := True;
           if (CompareText(ExtractFileName(Image), 'QtWebEngineProcess.exe') = 0) and
              (CompareText(Copy(Image, 1, Length(EngineRoot)), EngineRoot) = 0) then begin

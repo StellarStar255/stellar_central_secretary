@@ -23,7 +23,7 @@ def kernel():
 
 def image(api,handle):
     buffer=ctypes.create_unicode_buffer(32768);size=wintypes.DWORD(len(buffer))
-    return Path(buffer.value) if api.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else None
+    return Path(buffer.value).resolve() if api.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else None
 
 def processes(api,root):
     handles=[];snapshot=api.CreateToolhelp32Snapshot(2,0)
