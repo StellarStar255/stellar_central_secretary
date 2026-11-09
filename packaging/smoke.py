@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as data:
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
         assert status['settings']['company_mode'] is False
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/note-attachments.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/additions-ui.js','/model-proxy-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
             assert request(path), path
         extension=json.loads(request('/api/browser-extension/prepare',{},status['token']))
         extension_path=Path(extension['path'])

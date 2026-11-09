@@ -433,7 +433,9 @@ async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.is
  const cancelTitle=()=>{if(typeof titleSaving!=='undefined'&&titleSaving)return;StellarDrafts.cancel($('#title-editor'));$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  globalThis.StellarLocalPaths?.bind($('.archived-body'),item,{api,toast});
  globalThis.StellarCompanyAI?.bind(item,{api,toast,onSaved:()=>detail(id)});
- StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''}});
+ StellarNotes.bind(item,{api,toast,onSaved:()=>{detailVersion=''},onAttachmentsSaved:async()=>{
+  if(selectedId===id&&$('#detail-dialog').open&&!$('#detail-edit')&&$('#title-editor').hidden&&$('#tag-editor').hidden){const note=$('#note-text'),focused=document.activeElement===note,start=note.selectionStart,end=note.selectionEnd,scroll=$('#detail-dialog').scrollTop;await detail(id);if(focused){$('#note-text').focus({preventScroll:true});$('#note-text').setSelectionRange(start,end)}$('#detail-dialog').scrollTop=scroll}await refresh()
+ }});
  if(item.group_links?.length){const readButton=document.createElement('button');readButton.id='read-group-links';readButton.className='secondary';readButton.textContent=t('重新读取本组链接');readButton.disabled=item.append_busy;readButton.onclick=()=>busy(readButton,async()=>{await api('/api/items/'+id+'/group-links',{});await detail(id);await refresh()});$('#append-material').parentElement.append(readButton)}
  if(globalThis.StellarAdditions){const options={api,toast,onSaved:async()=>{await detail(id);await refresh()}};$('#append-material').onclick=()=>StellarAdditions.open(item,{...options,autoAI:$('#auto-ai').checked});StellarAdditions.bind(item,options)}
  $('#add-tag').onclick=()=>{$('#tag-editor').hidden=false;$('#add-tag').hidden=true;$('#tag-input').focus()};

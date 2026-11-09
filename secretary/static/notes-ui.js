@@ -14,8 +14,8 @@
   return draft;
  }
  function imageMarkup(draft){return draft.images.map((image,index)=>{const src=image.id?`/api/items/${draft.id}/note-images/${image.id}`:`data:${image.media};base64,${image.data}`;return `<div class="note-image"><button type="button" class="note-image-open" data-note-open="${index}" data-image-view title="${esc(t('查看图片：')+image.name)}" aria-label="${esc(t('查看图片：')+image.name)}"><img src="${esc(src)}" alt="${esc(image.name)}"></button><button type="button" data-note-remove="${index}" aria-label="${esc(t('删除图片：')+image.name)}">×</button></div>`}).join('')}
- function render(item){const draft=state(item);return ui`<section class="quick-note"><div class="note-heading"><h3>我的速记</h3><span id="note-status" role="status"></span></div><textarea id="note-text" maxlength="20000" rows="3" placeholder="记下自己的想法，也可以直接粘贴图片…">${esc(draft.text)}</textarea><div id="note-images" class="note-images">${imageMarkup(draft)}</div><div class="note-tools"><button type="button" id="note-add-image" class="secondary">＋ 添加图片</button><button type="button" id="note-save" class="secondary">保存速记</button><small>自动保存在本机，不参与 AI 摘要</small></div><input id="note-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden></section>`}
- function bind(item,{api,toast,onSaved}){
+ function render(item){const draft=state(item);return ui`<section class="quick-note"><div class="note-heading"><h3>我的速记</h3><span id="note-status" role="status"></span></div><textarea id="note-text" maxlength="20000" rows="3" placeholder="记下自己的想法，也可以粘贴图片、视频或文件…">${esc(draft.text)}</textarea><div id="note-images" class="note-images">${imageMarkup(draft)}</div><div id="note-attachment-status" role="status"></div><div class="note-tools"><button type="button" id="note-add-image" class="secondary">＋ 添加附件</button><button type="button" id="note-save" class="secondary">保存速记</button><small>文字自动保存；粘贴文件直接追加到全部附件，不参与 AI 摘要</small></div><input id="note-file" type="file" multiple hidden></section>`}
+ function bind(item,{api,toast,onSaved,onAttachmentsSaved}){
   const draft=state(item),container=document.querySelector('.quick-note');if(!container)return;
   const text=container.querySelector('#note-text'),status=container.querySelector('#note-status'),saveButton=container.querySelector('#note-save');
   const active=()=>document.querySelector('.quick-note')===container;
@@ -33,36 +33,22 @@
     snapshot.forEach((image,index)=>{const current=draft.images.findIndex(value=>value.key===image.key);if(current>=0)draft.images[current]={...result.item.note_images[index],key:image.key}});
     draft.dirty=draft.revision!==revision;
     if(!draft.dirty){void globalThis.StellarDrafts?.discard('note:'+item.id);try{localStorage.removeItem(storageKey(item.id))}catch{}}else cache();
-    images();onSaved?.(result.item);
+    draft.renderImages?.();onSaved?.(result.item);
    }catch(error){draft.error=error.message}
-   finally{draft.busy=false;if(!draft.deleted){paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500)}}
+   finally{draft.busy=false;if(!draft.deleted){draft.paint?.();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500)}}
   }
-  async function addFiles(files){
-   try{
-    if(draft.images.length+files.length>8)throw Error(t('每份速记最多添加 8 张图片。'));
-    for(const file of files){
-     if(file.size>5*1024*1024)throw Error(t('每张速记图片不能超过 5 MB。'));
-     if(!['image/png','image/jpeg','image/gif','image/webp'].includes(file.type))throw Error(t('速记仅支持 PNG、JPEG、GIF 和 WebP 图片。'));
-     const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error(t('无法读取图片')));reader.readAsDataURL(file)});
-     draft.images.push({key:crypto.randomUUID(),name:file.name||'image.png',media:file.type,data});images();changed();
-    }
-   }catch(error){toast(error.message)}
-  }
-  draft.save=save;draft.onRestore=()=>{if(active()){text.value=draft.text;images();paint();draft.timer=setTimeout(save,500)}};
+  const addFiles=StellarNoteAttachments.bind(item.id,{api,toast,onSaved:onAttachmentsSaved});
+  draft.paint=paint;draft.renderImages=images;draft.save=save;draft.onRestore=()=>{if(active()){text.value=draft.text;images();paint();draft.timer=setTimeout(save,500)}};
   text.onblur=()=>void save();
   text.oninput=()=>{draft.text=text.value;changed()};
   text.onkeydown=event=>{if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();void save()}if(event.key==='Escape'&&(draft.busy||draft.dirty)){event.preventDefault();event.stopPropagation();void save()}};
-  text.onpaste=event=>{const files=Array.from(event.clipboardData?.items||[]).filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();const plain=event.clipboardData.getData('text/plain');if(plain){text.setRangeText(plain,text.selectionStart,text.selectionEnd,'end');draft.text=text.value;changed()}void addFiles(files)}};
-  container.ondragover=event=>{if(Array.from(event.dataTransfer.types).includes('Files'))event.preventDefault()};
-  container.ondrop=event=>{if(event.dataTransfer.files.length){event.preventDefault();event.stopPropagation();void addFiles(Array.from(event.dataTransfer.files))}};
-  container.querySelector('#note-add-image').onclick=()=>container.querySelector('#note-file').click();
-  container.querySelector('#note-file').onchange=event=>{void addFiles(Array.from(event.target.files));event.target.value=''};
+  text.onpaste=event=>{const clipboard=event.clipboardData;if(!clipboard)return;const files=clipboard.files?.length?[...clipboard.files]:Array.from(clipboard.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();event.stopPropagation();const plain=clipboard.getData('text/plain');if(plain){text.setRangeText(plain,text.selectionStart,text.selectionEnd,'end');draft.text=text.value;changed()}addFiles(files)}};
   saveButton.onclick=()=>void save();images();paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500);
  }
  addEventListener('blur',()=>{for(const draft of drafts.values())if(draft.dirty)void draft.save?.()});
  addEventListener('beforeunload',event=>{if(Array.from(drafts.values()).some(draft=>draft.dirty||draft.busy)){event.preventDefault();event.returnValue=''}});
- function discard(id){void globalThis.StellarDrafts?.discard('note:'+id);const draft=drafts.get(id);if(draft){draft.deleted=true;draft.dirty=false;clearTimeout(draft.timer);drafts.delete(id)}try{localStorage.removeItem(storageKey(id))}catch{}}
+ function discard(id){StellarNoteAttachments.discard(id);void globalThis.StellarDrafts?.discard('note:'+id);const draft=drafts.get(id);if(draft){draft.deleted=true;draft.dirty=false;clearTimeout(draft.timer);drafts.delete(id)}try{localStorage.removeItem(storageKey(id))}catch{}}
  async function flushAll(){for(const draft of drafts.values()){const deadline=Date.now()+10000;while((draft.dirty||draft.busy)&&!draft.deleted){if(draft.error)return false;if(!draft.busy)await draft.save?.();else await new Promise(resolve=>setTimeout(resolve,25));if(Date.now()>deadline)return false}}return true}
  async function cacheAll(){for(const draft of drafts.values())if((draft.dirty||draft.busy)&&!draft.deleted&&!await StellarDrafts.cache('note:'+draft.id,{text:draft.text,images:draft.images,version:draft.version}))return false;return true}
- globalThis.StellarNotes={render,bind,discard,flushAll,cacheAll,hasDirty:()=>[...drafts.values()].some(d=>d.dirty||d.busy),isDirty:id=>{const draft=drafts.get(id);return !!draft&&(draft.dirty||draft.busy)}};
+ globalThis.StellarNotes={render,bind,discard,flushAll,cacheAll,hasDirty:()=>StellarNoteAttachments.hasPending()||[...drafts.values()].some(d=>d.dirty||d.busy),isDirty:id=>{const draft=drafts.get(id);return StellarNoteAttachments.pending(id)||!!draft&&(draft.dirty||draft.busy)}};
 })();

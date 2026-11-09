@@ -1150,5 +1150,13 @@
   "附件不存在或已经删除": "The attachment is missing or was deleted",
   "附件文件名无效": "Invalid attachment filename",
   "附件下载未完成": "The attachment download did not finish",
-  "附件下载不完整，原有文件已保留": "The download was incomplete; the existing file was preserved"
+  "附件下载不完整，原有文件已保留": "The download was incomplete; the existing file was preserved",
+  "记下自己的想法，也可以粘贴图片、视频或文件…": "Write your thoughts, or paste images, videos or files…",
+  "＋ 添加附件": "+ Add attachments",
+  "文字自动保存；粘贴文件直接追加到全部附件，不参与 AI 摘要": "Text is autosaved; pasted files go directly to all attachments, without AI summarization.",
+  "附件追加失败，待重试：": "Could not append attachments; retry: ",
+  "重试追加": "Retry append",
+  "移除待追加附件": "Remove pending attachments",
+  "正在追加附件…": "Appending attachments…",
+  "附件已追加到全部附件": "Attachments added to all attachments"
 }
