@@ -999,6 +999,9 @@ def handler(service):
                 if image_match:
                     image,source=notes.note_image(service.archive,*image_match.groups())
                     return self.send(200,source.read_bytes(),image['media'])
+                if path=='/api/download-info':
+                    from .desktop_downloads import info
+                    values=urllib.parse.parse_qs(parsed.query);return self.send(200,info(service.archive,values.get('path',[''])[0]))
                 if path=='/api/browser-extension/download':return self.send(200,extension_install.download(),'application/zip',{'Content-Disposition':'attachment; filename="Stellar-Capture-Extension.zip"'})
                 if path=='/api/conversations':return self.send(200,service.chat_history())
                 if path=='/api/trash':return self.send(200,{'items':service.archive.trash_items()})

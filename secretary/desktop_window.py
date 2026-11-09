@@ -7,7 +7,7 @@ import webbrowser
 from pathlib import Path
 
 
-def create_window(address,get_language=lambda:'zh'):
+def create_window(address,get_language=lambda:'zh',choose_download=None):
     from .i18n import translate
     tr=lambda text:translate(text,get_language())
     import objc
@@ -17,6 +17,7 @@ def create_window(address,get_language=lambda:'zh'):
     from Foundation import NSObject,NSURL,NSURLRequest
     from WebKit import WKWebView,WKWebViewConfiguration,WKWebsiteDataStore,WKUserScript
     origin=urllib.parse.urlsplit(address)
+    from . import desktop_downloads
 
     class WindowDelegate(NSObject):
         def webView_didFinishNavigation_(self,view,navigation):self.loaded=True
@@ -28,7 +29,7 @@ def create_window(address,get_language=lambda:'zh'):
         def webView_decidePolicyForNavigationAction_decisionHandler_(self,view,action,decide):
             url=str(action.request().URL().absoluteString());parsed=urllib.parse.urlsplit(url)
             local=(parsed.scheme,parsed.netloc)==(origin.scheme,origin.netloc)
-            if local and (parsed.path=='/api/backup' or parsed.path.endswith('/file')):
+            if desktop_downloads.route(address,url) is not None:
                 decide(0);self.save_download(url);return
             if not local or action.targetFrame() is None:
                 decide(0)
@@ -37,25 +38,52 @@ def create_window(address,get_language=lambda:'zh'):
             decide(1)
 
         @objc.python_method
+        def notify_download(self,value):
+            view.evaluateJavaScript_completionHandler_('document.dispatchEvent(new CustomEvent("stellar-download",{detail:'+json.dumps(value,ensure_ascii=False)+'}));',None)
+
+        @objc.python_method
         def save_download(self,url):
-            name='stellar-knowledge-backup.zip'
-            if not url.endswith('/api/backup'):
+            if url in self.downloads:return
+            self.downloads.add(url);self.notify_download({'url':url,'state':'preparing'})
+            def prepare():
                 try:
-                    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                    with opener.open(url[:-5],timeout=3) as response:name=json.load(response)['filename']
-                except Exception:name=tr('原文件')
-            panel=NSSavePanel.savePanel();panel.setNameFieldStringValue_(Path(name).name)
-            if panel.runModal()!=NSModalResponseOK:return
-            destination=Path(str(panel.URL().path()))
+                    name=desktop_downloads.filename(address,url)
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_('chooseDownload:',{'url':url,'name':name},False)
+                except Exception as error:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_('finishDownload:',{'url':url,'state':'error','message':str(error)},False)
+            threading.Thread(target=prepare,daemon=True).start()
+
+        def chooseDownload_(self,value):
+            url=str(value['url']);name=str(value['name'])
+            if choose_download is not None:
+                target=choose_download(name)
+            else:
+                panel=NSSavePanel.savePanel();panel.setNameFieldStringValue_(name);panel.setDirectoryURL_(NSURL.fileURLWithPath_(str(Path.home()/'Downloads')))
+                target=Path(str(panel.URL().path())) if panel.runModal()==NSModalResponseOK else None
+            if target is None:
+                self.finishDownload_({'url':url,'state':'cancelled'});return
+            destination=Path(target);self.notify_download({'url':url,'state':'saving','name':name})
             def download():
                 try:
-                    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                    with opener.open(url,timeout=60) as response:data=response.read()
-                    destination.write_bytes(data)
-                except Exception as exc:
-                    self.error=str(exc)
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_('showError:',None,False)
+                    last=[0]
+                    def progress(received,total):
+                        import time
+                        now=time.monotonic()
+                        if now-last[0]<.5:return
+                        last[0]=now
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_('downloadProgress:',{'url':url,'state':'saving','bytes':received,'total':total or 0},False)
+                    result=desktop_downloads.save(address,url,destination,progress)
+                    value={'url':url,'state':'complete',**result}
+                except Exception as error:value={'url':url,'state':'error','message':str(error)}
+                self.performSelectorOnMainThread_withObject_waitUntilDone_('finishDownload:',value,False)
             threading.Thread(target=download,daemon=True).start()
+
+        def downloadProgress_(self,value):self.notify_download(dict(value))
+
+        def finishDownload_(self,value):
+            value=dict(value);self.downloads.discard(value['url']);self.notify_download(value)
+            if value['state']=='error':
+                self.error=value['message'];self.showError_(None)
 
         def showError_(self,sender):
             alert=NSAlert.alloc().init();alert.setMessageText_(tr('下载未完成'));alert.setInformativeText_(self.error);alert.runModal()
@@ -75,7 +103,7 @@ def create_window(address,get_language=lambda:'zh'):
     configuration.userContentController().addUserScript_(script)
     configuration.setWebsiteDataStore_(WKWebsiteDataStore.defaultDataStore())
     view=WKWebView.alloc().initWithFrame_configuration_(((0,0),(1200,820)),configuration)
-    delegate=WindowDelegate.alloc().init();delegate.loaded=False;view.setNavigationDelegate_(delegate);view.setUIDelegate_(delegate)
+    delegate=WindowDelegate.alloc().init();delegate.loaded=False;delegate.downloads=set();view.setNavigationDelegate_(delegate);view.setUIDelegate_(delegate)
     style=NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable
     window=NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(((0,0),(1200,820)),style,NSBackingStoreBuffered,False)
     window.setTitle_(tr('Stellar Secretary · 知识秘书'));window.setMinSize_((760,560));window.setReleasedWhenClosed_(False)

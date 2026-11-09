@@ -27,7 +27,7 @@
   dialog.querySelector('[data-video-close]').setAttribute('aria-label',t('关闭'));
   const error=dialog.querySelector('p');error.textContent=t('当前播放器不支持此视频编码，或文件无法读取。可用默认程序打开，或下载原件。');error.hidden=true;
   const external=dialog.querySelector('[data-video-external]');external.textContent=t('默认程序打开');external.dataset.editorPath=url.slice(0,-8)+'/editor';external.dataset.editorAction='open';external.hidden=trigger.dataset.videoExternal!=='true';
-  const download=dialog.querySelector('[data-video-download]');download.textContent=t('下载附件');download.href=trigger.dataset.videoDownload||url.slice(0,-8);
+  const download=dialog.querySelector('[data-video-download]');download.textContent=t('下载附件');const base=url.slice(0,-8);download.href=trigger.dataset.videoDownload||(/\/attachments\/[a-f0-9]{32}$/.test(base)?base:base+'/file');
   try{const saved=await options.api(url.slice(0,-8)+'/video-state');localStorage.setItem('stellar-video:'+url,JSON.stringify(saved))}catch{}
   video.dataset.source=url;video.src=url;if(!dialog.open)dialog.showModal();video.play().catch(()=>{});dialog.querySelector('[data-video-close]').focus();
  }

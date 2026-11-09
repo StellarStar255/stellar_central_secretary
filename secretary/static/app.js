@@ -602,3 +602,15 @@ document.addEventListener('click',event=>{const button=event.target.closest('[da
 if(globalThis.StellarBackups)StellarBackups.bind({api,toast});
 
 globalThis.StellarStorage?.bind({api,toast});
+
+// Native desktop downloads report into the dialog that initiated them.
+const desktopDownloadContexts=new Map();
+document.addEventListener('click',event=>{const anchor=event.target.closest('a[href]');if(!anchor?.href)return;desktopDownloadContexts.set(anchor.href,anchor.closest('dialog')||document.querySelector('main'));if(desktopDownloadContexts.size>32)desktopDownloadContexts.delete(desktopDownloadContexts.keys().next().value)},true);
+document.addEventListener('stellar-download',event=>{
+ const value=event.detail;if(!value?.url)return;const context=desktopDownloadContexts.get(value.url),dialogs=[...document.querySelectorAll('dialog[open]')];
+ const parent=context?.isConnected&&context.tagName==='DIALOG'&&context.open?context:dialogs[dialogs.length-1];
+ const labels={preparing:'正在准备下载…',saving:'正在保存附件…',complete:'已保存：',cancelled:'已取消下载',error:'下载未完成：'};
+ const message=t(labels[value.state]||'正在保存附件…')+(value.state==='complete'?value.path:value.state==='error'?value.message:value.bytes?' '+(value.bytes/1048576).toFixed(1)+' MB'+(value.total?' / '+(value.total/1048576).toFixed(1)+' MB':''):'');
+ if(!parent){toast(message);return}
+ let line=parent.querySelector('[data-desktop-download-status]');if(!line){line=document.createElement('p');line.dataset.desktopDownloadStatus='';line.setAttribute('role','status');line.className='muted';parent.append(line)}line.textContent=message;
+});

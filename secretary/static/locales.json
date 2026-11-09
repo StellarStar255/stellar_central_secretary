@@ -1138,5 +1138,17 @@
   "备份原件与数据库校验值不一致：": "A backed-up original differs from its database checksum: ",
   "备份缺少附件或速记图片": "The backup is missing attachments or note images",
   "备份资料数量与清单不一致": "The backup record count differs from its manifest",
-  "恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。": "The state before restoration was preserved, but originals differ from the index; this copy is not marked verified."
+  "恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。": "The state before restoration was preserved, but originals differ from the index; this copy is not marked verified.",
+  "正在准备下载…": "Preparing download…",
+  "正在保存附件…": "Saving attachment…",
+  "已保存：": "Saved to: ",
+  "已取消下载": "Download cancelled",
+  "下载未完成：": "Download failed: ",
+  "下载跳转地址无效，未保存文件": "Invalid download redirect; no file was saved",
+  "下载地址无效": "Invalid download address",
+  "附件下载信息无效": "Invalid attachment download information",
+  "附件不存在或已经删除": "The attachment is missing or was deleted",
+  "附件文件名无效": "Invalid attachment filename",
+  "附件下载未完成": "The attachment download did not finish",
+  "附件下载不完整，原有文件已保留": "The download was incomplete; the existing file was preserved"
 }
