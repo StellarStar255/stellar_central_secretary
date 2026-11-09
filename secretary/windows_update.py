@@ -45,7 +45,7 @@ try {
         throw 'Installer checksum changed after download; installation canceled.'
     }
     # ArgumentList arrays are joined by PowerShell, so quote paths explicitly.
-    $installerArgs = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /RESTARTEXITCODE=3010 /DIR="' + (Split-Path $config.exe) + '" /LOG="' + $config.installer_log + '"'
+    $installerArgs = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /LOGCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /RESTARTEXITCODE=3010 /DIR="' + (Split-Path $config.exe) + '" /LOG="' + $config.installer_log + '"'
     $installer = Start-Process -FilePath $config.setup -ArgumentList $installerArgs -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -Wait
     if ($installer.ExitCode -ne 0) { throw ('Installer exit code: ' + $installer.ExitCode + '. See ' + $config.installer_log) }
     Relaunch

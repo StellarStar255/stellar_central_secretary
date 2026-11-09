@@ -120,13 +120,15 @@ def run(config):
         if sha.hexdigest()!=config['sha']:raise RuntimeError('安装包校验失败，未执行安装。')
         kind=config['kind']
         if kind=='windows':
+            from .windows_update_files import release
+            release(root)
             changed=True
-            process=spawn([config['package'],'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS','/RESTARTEXITCODE=3010','/DIR='+str(root),'/LOG='+str(work/'installer.log')],cwd=str(work),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            process=spawn([config['package'],'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/LOGCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS','/RESTARTEXITCODE=3010','/DIR='+str(root),'/LOG='+str(work/'installer.log')],cwd=str(work),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             try:code=process.wait(timeout=300)
             except subprocess.TimeoutExpired:
                 subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True,timeout=20);process.wait(timeout=20)
                 raise RuntimeError('安装程序超时，正在恢复旧版。')
-            if code:raise RuntimeError('安装程序失败，正在恢复旧版。')
+            if code:raise RuntimeError('安装程序失败（退出码 '+str(code)+'），正在恢复旧版。日志：'+str(work/'installer.log'))
         elif kind=='mac':
             mount=work/'mounted';mount.mkdir(exist_ok=True)
             subprocess.run(['hdiutil','attach','-readonly','-nobrowse','-mountpoint',str(mount),config['package']],check=True,capture_output=True)

@@ -113,6 +113,26 @@ def main():
             assert request('/api/items')[0]['id']==item_id
             request('/api/shutdown',{})
             wait(lambda:not listening(address))
+            # Reproduce the reported resource-only lock, with no app executable lock.
+            # Direct installer invocation also covers handoffs from older releases.
+            fixture_dir=install/'_internal'/'update-lock-fixture';fixture_dir.mkdir(exist_ok=True)
+            fixture_source=root/'Lock.cs';fixture_source.write_text('using System;using System.IO;using System.Threading;class Lock {static void Main(string[] a){using(var f=new FileStream(a[0],FileMode.Open,FileAccess.Read,FileShare.Read)){File.WriteAllText(a[1],"ready");Thread.Sleep(Timeout.Infinite);}}}')
+            fixture_exe=fixture_dir/'QtWebEngineProcess.exe';compiler=Path(os.environ['SystemRoot'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+            subprocess.run([str(compiler),'/nologo','/out:'+str(fixture_exe),str(fixture_source)],check=True,capture_output=True)
+            snapshot=install/'_internal/PySide6/resources/v8_context_snapshot.bin';ready=root/'locked-ready'
+            holder=subprocess.Popen([str(fixture_exe),str(snapshot),str(ready)])
+            try:
+                wait(lambda:ready.exists(),15)
+                try:snapshot.unlink()
+                except PermissionError:pass
+                else:raise AssertionError('Expected a real Windows sharing violation')
+                locked=subprocess.run([str(setup),'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/LOGCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',f'/DIR={install}',f'/LOG={logs.resolve()/"locked-resource.log"}'],timeout=180)
+                assert locked.returncode==0,locked.returncode
+                holder.wait(timeout=10);assert snapshot.exists()
+                print('PASS: real Inno installer releases orphan WebEngine v8 snapshot lock, including legacy handoff path')
+            finally:
+                if holder.poll() is None:holder.terminate();holder.wait(timeout=10)
+
             print('PASS: real Windows updater download/checksum, detached helper, clean desktop exit, Inno in-place install, native automatic restart, custom port/Unicode paths and every item column preserved')
         finally:
             for source in (data/'app.log',data/'update.log',data/'windows-update.json',data/'updates/99.0.0/installer.log',data/'updates/99.0.0/helper.log'):
