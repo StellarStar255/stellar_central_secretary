@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.73** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.73.md)
+Version **v0.1.74** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.74.md)
 
 A local knowledge library for links, AI conversations, PDFs, documents and notes. Save originals, generate summaries using your signed-in local model CLI or a configured model API, and find material again with search or source-backed answers.
 
@@ -158,7 +158,7 @@ Backup settings expose the folder, byte limit and retention counts, with last-su
 
 Large uploads support pause/resume, cancellation and resuming after restarting by reselecting the original file. Committed chunks are SHA256-checked before continuation, with at most 4 MB processed at a time. Independent consumer leases prevent one submission from deleting another submission's staging file. Unfinished staging expires after 24 hours and remains limited to 4 GB total.
 
-### Reading and maintenance improvements (current development code)
+### Reading and maintenance improvements (v0.1.74)
 
 PDF viewing displays original pages immediately; extraction is explicit. Local text/OCR jobs report page progress, continue after closing the viewer and support cancellation without committing partial results. Summary coverage records the actual page text submitted; older summaries have unknown coverage until regenerated. Later additions can be summarized separately while retaining the earlier summary.
 
