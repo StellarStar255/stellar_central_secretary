@@ -49,8 +49,9 @@ def release(root,grace=10,timeout=15):
     """Parent must already have exited. Never terminate another app or browser."""
     root=Path(root).resolve();api=kernel();handles=processes(api,root)
     try:
-        if any(path.name.casefold()=='stellar secretary.exe' and api.WaitForSingleObject(handle,0)==258 for handle,path in handles):raise RuntimeError('另一个知识秘书实例仍在运行，未修改程序文件。请退出后重试更新。')
         deadline=time.monotonic()+grace
+        for handle,path in handles:
+            if path.name.casefold()=='stellar secretary.exe' and api.WaitForSingleObject(handle,max(0,int((deadline-time.monotonic())*1000)))!=0:raise RuntimeError('另一个知识秘书实例仍在运行，未修改程序文件。请退出后重试更新。')
         for handle,path in handles:
             if path.name.casefold()!='qtwebengineprocess.exe':continue
             result=api.WaitForSingleObject(handle,max(0,int((deadline-time.monotonic())*1000)))

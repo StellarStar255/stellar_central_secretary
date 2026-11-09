@@ -10,7 +10,7 @@ class WindowsResourceLockTest(unittest.TestCase):
    snapshot=resources/'v8_context_snapshot.bin';snapshot.write_bytes(b'original snapshot')
    outside=base/'other application';outside.mkdir();otherfile=outside/'other.bin';otherfile.write_bytes(b'keep')
    source=base/'Holder.cs';source.write_text('''using System;using System.IO;using System.Threading;
-class Holder {static void Main(string[] args) {using(var stream=new FileStream(args[0],FileMode.Open,FileAccess.Read,FileShare.Read)){File.WriteAllText(args[1],"ready");Thread.Sleep(Timeout.Infinite);}}}''')
+class Holder {static void Main(string[] args) {using(var stream=new FileStream(args[0],FileMode.Open,FileAccess.Read,FileShare.Read)){File.WriteAllText(args[1],"ready");Thread.Sleep(args.Length>2?Int32.Parse(args[2]):Timeout.Infinite);}}}''')
    compiler=Path(os.environ['SystemRoot'])/'Microsoft.NET'/'Framework64'/'v4.0.30319'/'csc.exe'
    target=engine/'QtWebEngineProcess.exe';subprocess.run([str(compiler),'/nologo','/out:'+str(target),str(source)],check=True,capture_output=True)
    import shutil
@@ -26,7 +26,20 @@ class Holder {static void Main(string[] args) {using(var stream=new FileStream(a
     api=windows_update_files.kernel();handle=api.OpenProcess(0x1000,False,owned.pid)
     try:self.assertEqual(windows_update_files.image(api,handle),target.resolve())
     finally:api.CloseHandle(handle)
-    windows_update_files.release(root,grace=.1,timeout=2)
+    main=root/'Stellar Secretary.exe';shutil.copyfile(target,main);main_ready=base/'main-ready'
+    active=subprocess.Popen([str(main),str(otherfile),str(main_ready)])
+    try:
+     while not main_ready.exists():time.sleep(.02)
+     with self.assertRaisesRegex(RuntimeError,'另一个'):windows_update_files.release(root,grace=.05,timeout=2)
+     self.assertIsNone(owned.poll())
+    finally:active.terminate();active.wait(timeout=10)
+    main_ready.unlink();finishing=subprocess.Popen([str(main),str(otherfile),str(main_ready),'250'])
+    try:
+     while not main_ready.exists():time.sleep(.02)
+     windows_update_files.release(root,grace=1,timeout=2);finishing.wait(timeout=5)
+    finally:
+     if finishing.poll() is None:finishing.terminate();finishing.wait(timeout=10)
+
     owned.wait(timeout=5);self.assertIsNone(unrelated.poll());snapshot.unlink();snapshot.write_bytes(b'new snapshot')
     self.assertEqual(snapshot.read_bytes(),b'new snapshot')
     print('PASS: real Windows snapshot file-lock reproduced and cleared; unrelated same-named engine untouched')

@@ -135,7 +135,7 @@ def main():
 
             print('PASS: real Windows updater download/checksum, detached helper, clean desktop exit, Inno in-place install, native automatic restart, custom port/Unicode paths and every item column preserved')
         finally:
-            for source in (data/'app.log',data/'update.log',data/'windows-update.json',data/'updates/99.0.0/installer.log',data/'updates/99.0.0/helper.log'):
+            for source in (data/'app.log',data/'update.log',data/'windows-update.json',data/'updates/99.0.0/installer.log',data/'updates/99.0.0/helper.log',data/'updates/99.0.0/transaction.log'):
                 if source.exists():(logs/source.name).write_bytes(source.read_bytes())
             try:request('/api/shutdown',{'force':True})
             except OSError:pass
