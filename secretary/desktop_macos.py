@@ -91,6 +91,13 @@ def run(address, service=None, server=None, open_browser=True):
             app_menu = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('知识秘书', None, '')
             app_menu.setSubmenu_(self.menu)
             main_menu.addItem_(app_menu)
+            window_menu=NSMenu.alloc().initWithTitle_('窗口')
+            close_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('关闭窗口','performClose:','w')
+            window_menu.addItem_(close_item)
+            window_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('窗口',None,'')
+            window_item.setSubmenu_(window_menu);main_menu.addItem_(window_item)
+            self.localized_items.extend([(window_item,'窗口'),(close_item,'关闭窗口')])
+            self.localized_menus.append((window_menu,'窗口'))
             edit=NSMenu.alloc().initWithTitle_('编辑')
             for title,selector,key in [('撤销','undo:','z'),('剪切','cut:','x'),('复制','copy:','c'),('粘贴','paste:','v'),('全选','selectAll:','a')]:
                 edit_action=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title,selector,key);edit.addItem_(edit_action);self.localized_items.append((edit_action,title))

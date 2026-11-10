@@ -29,6 +29,11 @@ with tempfile.TemporaryDirectory() as root:
     page.wait_for_function("()=>document.querySelector('#image-viewer img').naturalWidth===12")
     assert len(browser.contexts[0].pages)==1 and launch.call_count==0
     page.locator('[data-viewer="in"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('125%')
+    frame=page.locator('#image-viewer').bounding_box()
+    assert frame['x']>=50 and frame['y']>=50 and frame['width']<=1100*.9 and frame['height']<=950*.86
+    page.mouse.click(frame['x']+frame['width']/2,frame['y']-20)
+    expect(page.locator('#image-viewer')).not_to_be_visible();expect(page.locator('#detail-dialog')).to_be_visible()
+    page.locator('[data-note-open]').click();expect(page.locator('#image-viewer')).to_be_visible()
     page.keyboard.press('Escape');expect(page.locator('#image-viewer')).not_to_be_visible();expect(page.locator('#detail-dialog')).to_be_visible()
     page.evaluate('''async ([id,data])=>{const item=await api('/api/items/'+id);await api('/api/items/'+id+'/notes',{text:item.note,images:[...item.note_images.map(image=>({id:image.id})),{name:'legacy2.png',data}],version:item.note_version});await detail(item.id)}''',[item,encoded])
     expect(page.locator('#note-images img')).to_have_count(2);expect(page.locator('#note-status')).to_have_text('已保存');assert page.locator('#drag-overlay').is_hidden();assert page.evaluate('attachedFiles.length')==0

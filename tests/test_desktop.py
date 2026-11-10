@@ -102,8 +102,15 @@ class NativeDesktopTest(unittest.TestCase):
                     self.assertTrue(evaluate("window.__stellarDesktop===true"))
                     evaluate("history.replaceState({},'', '/'); undefined")
                     self.assertTrue(evaluate("window.__stellarDesktop===true && !location.search"))
-                    # Closing the content window must not stop the local server.
-                    callAfter(lambda:delegate.window_controller[0].performClose_(None))
+                    # Route Command-W through the native menu and responder chain.
+                    def close_with_shortcut():
+                        from AppKit import NSEvent, NSEventTypeKeyDown, NSEventModifierFlagCommand
+                        app=NSApplication.sharedApplication()
+                        event=NSEvent.keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
+                            NSEventTypeKeyDown,(0,0),NSEventModifierFlagCommand,0,
+                            delegate.window_controller[0].windowNumber(),None,'w','w',False,13)
+                        self.assertTrue(app.mainMenu().performKeyEquivalent_(event))
+                    callAfter(close_with_shortcut)
                     wait_for(lambda:not service.desktop.get('window_visible'))
                     self.assertEqual(service.desktop['state'],'ready')
                     delegate.performSelectorOnMainThread_withObject_waitUntilDone_('openMain:',None,True)

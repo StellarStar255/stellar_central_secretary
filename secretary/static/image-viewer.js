@@ -29,6 +29,12 @@
   stage.onpointerdown=event=>{if(event.button!==0)return;drag={id:event.pointerId,x:event.clientX-x,y:event.clientY-y};stage.setPointerCapture(event.pointerId)};
   stage.onpointermove=event=>{if(drag&&drag.id===event.pointerId){x=event.clientX-drag.x;y=event.clientY-drag.y;paint()}};
   stage.onpointerup=stage.onpointercancel=()=>{drag=null};
+  // Only a press and release outside the frame dismisses the viewer; panning stays local.
+  const outside=event=>{const rect=dialog.getBoundingClientRect();return event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom};
+  let backdropPress=false;
+  dialog.addEventListener('pointerdown',event=>{backdropPress=event.button===0&&outside(event)});
+  dialog.addEventListener('pointerup',event=>{if(backdropPress&&outside(event))dialog.close();backdropPress=false});
+  dialog.addEventListener('pointercancel',()=>{backdropPress=false});
   dialog.addEventListener('keydown',event=>{
    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();dialog.close();return}
    const action={ArrowLeft:()=>show(-1),ArrowRight:()=>show(1),'+':()=>zoom(1.25),'=':()=>zoom(1.25),'-':()=>zoom(1/1.25),'0':reset}[event.key];
