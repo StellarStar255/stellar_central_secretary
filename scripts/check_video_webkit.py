@@ -64,6 +64,18 @@ with tempfile.TemporaryDirectory() as root:
             assert js('location.href')==expected_page
         js('document.querySelector("#video-viewer").close();true')
         wait(lambda:js('(()=>{const v=document.querySelector("#video-viewer video");return v.paused&&!v.hasAttribute("src")})()'))
+        fixtures=Path(__file__).resolve().parent.parent/'tests/fixtures'
+        live=service.ingest({'attachments':[{'name':name,'data':__import__('base64').b64encode((fixtures/source).read_bytes()).decode()} for name,source in [('live.HEIC','synthetic.heic'),('live.MOV','live-photo.mov')]],'defer_summary':True})['item']
+        photo=live['all_attachments'][0]
+        js('StellarImageViewer.open([{src:'+json.dumps(photo['preview_url'])+',name:"live.HEIC"}]);true')
+        wait(lambda:js('!document.querySelector("[data-viewer=motion]").hidden'))
+        js('document.querySelector("#video-viewer video").muted=true;document.querySelector("[data-viewer=motion]").click();true')
+        wait(lambda:js('(()=>{const v=document.querySelector("#video-viewer video");return document.querySelector("#video-viewer").open&&v.videoWidth>0&&v.currentTime>.1&&!v.paused})()'))
+        js('StellarCloseTopLayer();true')
+        wait(lambda:js('!document.querySelector("#video-viewer").open&&document.querySelector("#video-viewer video").paused'))
+        assert js('document.querySelector("#image-viewer").open')
+        js('StellarCloseTopLayer();true')
+        print('PASS: actual Mac HEIC-to-MOV pairing, decoded Live Photo motion and closing playback returns to still photo')
         print('PASS: actual Mac WKWebView playback, original/grouped/added video downloads, Unicode filenames, visible completion/cancel feedback, cancellation preserves files, no navigation away and stop on close')
     finally:
         window.orderOut_(None);view.stopLoading();server.shutdown();server.server_close();service.close()

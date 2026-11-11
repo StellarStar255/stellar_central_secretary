@@ -812,7 +812,8 @@ class Service:
                 file['read_pages']=sorted(map(int,entry.get('pages',{})));file['pdf_total']=entry.get('total')
         item['deleted_attachment_count']=len(attachment_recovery.public(self.archive,item_id))
         from . import attachment_order
-        item['all_attachments']=attachment_order.ordered(catalog,item['attachment_order'])
+        from . import live_photos
+        item['all_attachments']=live_photos.annotate(attachment_order.ordered(catalog,item['attachment_order']))
         return item
 
     def save_attachment_order(self,item_id,body):

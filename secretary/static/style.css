@@ -87,6 +87,7 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .image-viewer-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;cursor:grab;user-select:none}.image-viewer-stage:active{cursor:grabbing}
 #image-viewer .image-viewer-stage img{max-width:100%;max-height:100%;object-fit:contain;flex-shrink:0;transform-origin:center}
 .image-viewer-status{position:absolute;bottom:20px;background:#222b;padding:8px;pointer-events:none}.image-viewer-status:empty{display:none}
+.image-viewer-motion-hint{position:absolute;bottom:0;left:12px;right:12px;margin:8px auto;padding:6px 10px;width:fit-content;max-width:calc(100% - 24px);box-sizing:border-box;border-radius:6px;background:#222d;color:#eee;font-size:12px;line-height:1.5;pointer-events:none}.image-viewer-motion-hint:empty{display:none}
 #attachments img,#append-files img{cursor:zoom-in}
 @media(max-width:600px){#image-viewer{width:calc(100vw - 24px);height:88dvh}#image-viewer header{gap:4px;padding:6px}#image-viewer header button{min-width:30px;padding:4px}}
 

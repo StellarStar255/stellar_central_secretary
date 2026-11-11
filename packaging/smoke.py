@@ -95,13 +95,17 @@ with tempfile.TemporaryDirectory() as data:
         assert status['capabilities']['grouped_materials'] and len(group['attachments'])==2
         assert request('/api/items/'+group['id']+'/attachments/'+group['attachments'][0]['id']+'/preview')==image.getvalue()
         heic_original=(Path(__file__).resolve().parent.parent/'tests/fixtures/synthetic.heic').read_bytes()
-        heic=json.loads(request('/api/ingest',{'attachments':[{'name':'synthetic.HEIC','data':base64.b64encode(heic_original).decode()}],'defer_summary':True},status['token']))['item']
+        live_clip=(Path(__file__).resolve().parent.parent/'tests/fixtures/live-photo.mov').read_bytes()
+        heic=json.loads(request('/api/ingest',{'attachments':[{'name':'synthetic.HEIC','data':base64.b64encode(heic_original).decode()},{'name':'synthetic.MOV','data':base64.b64encode(live_clip).decode()}],'defer_summary':True},status['token']))['item']
         photo=heic['all_attachments'][0];assert photo['media']=='image/heic'
+        movie=heic['all_attachments'][1];assert photo['live_video']['preview_url']==movie['preview_url']
+        assert request(movie['download_url'])==live_clip
+        assert request(movie['preview_url'],headers={'Range':'bytes=0-63'})==live_clip[:64]
         assert request(photo['download_url'])==heic_original
         for url in (photo['preview_url'],photo['thumbnail_url']):
             with Image.open(io.BytesIO(request(url))) as decoded:
                 decoded.load();assert decoded.size==(64,96)
-        print('PASS: frozen HEIC native decoder, JPEG viewer preview, PNG thumbnail and exact original download')
+        print('PASS: frozen HEIC native decoder, JPEG viewer preview, PNG thumbnail, paired Live Photo MOV with byte ranges and exact original downloads')
         request('/api/items/'+heic['id']+'/delete',{'confirmed':True,'expected_updated':heic['updated']},status['token'])
         with zipfile.ZipFile(io.BytesIO(request('/api/items/'+group['id']+'/file'))) as original:
             assert original.read('files/01-sample.png')==image.getvalue()
