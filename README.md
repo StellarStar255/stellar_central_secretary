@@ -12,6 +12,36 @@ A local knowledge library for links, AI conversations, PDFs, documents and notes
 
 The demo uses fictional documents and a prewritten summary. Waiting is accelerated; it does not show actual model latency.
 
+## Example: turn a paper manual into searchable material
+
+Photograph both sides of a fitness-band manual and send the two HEIC photos together. Stellar Secretary keeps the originals in your local library and organizes their contents for later reference. These four screenshots follow the material from its first summary to finding it again.
+
+### 1. Submit the photos together and get an overview
+
+The two photos are organized into an item titled “智能运动手环使用说明与充电方法” (fitness-band instructions and charging). The overview covers button controls, step counting, time settings and USB charging, with an item card you can open. It also states that reduced images were used for analysis and that small, blurry or finger-obscured text could not be fully confirmed.
+
+![Overview and item card generated from two HEIC photos of a fitness-band manual](docs/examples/manual-summary.png)
+
+### 2. Open the details and add your own notes
+
+The details bring together the title, category, tags and both original attachments. Reorder the photos, download originals, append more material or add your own usage notes in **My quick notes**. You can also summarize the item again later.
+
+![Item details with title, tags, two HEIC attachments and the quick-notes area](docs/examples/manual-attachments.png)
+
+### 3. Enlarge a photo to check the manual
+
+Click a thumbnail to view the photo inside the app. Use the previous/next and zoom controls to compare the pictures and check the instructions directly when you need a specific detail.
+
+![In-app viewer showing a manual photo with gallery and zoom controls](docs/examples/manual-photo-viewer.png)
+
+### 4. Find the item and its photos with a keyword
+
+When you need the manual again, search the library for “手环” (fitness band). The preview keeps the attachments within reach: open a photo directly, or enter the full details to continue reading and editing.
+
+![Library search for “手环” finds the manual and shows its original photo attachments](docs/examples/manual-library-search.png)
+
+The same workflow works for appliance manuals, equipment instructions and other paper references you want to keep. The screenshots use the English interface; the saved title and summary remain in Chinese.
+
 ## Install and update
 
 Download the installer from [GitHub Releases](https://github.com/StellarStar255/stellar_central_secretary/releases/latest).
