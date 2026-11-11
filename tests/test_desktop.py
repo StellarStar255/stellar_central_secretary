@@ -110,6 +110,19 @@ class NativeDesktopTest(unittest.TestCase):
                             NSEventTypeKeyDown,(0,0),NSEventModifierFlagCommand,0,
                             delegate.window_controller[0].windowNumber(),None,'w','w',False,13)
                         self.assertTrue(app.mainMenu().performKeyEquivalent_(event))
+                    evaluate("document.querySelector('#library-dialog').showModal(); document.querySelector('#detail-dialog').showModal(); StellarImageViewer.open([{name:'photo.png',src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZV8AAAAASUVORK5CYII='}]); undefined")
+                    for closed,remaining in [('image-viewer',['detail-dialog','library-dialog']),('detail-dialog',['library-dialog']),('library-dialog',[])]:
+                        callAfter(close_with_shortcut)
+                        wait_for(lambda:not evaluate("document.getElementById("+repr(closed)+").open"))
+                        self.assertTrue(delegate.window_controller[0].isVisible())
+                        for name in remaining:self.assertTrue(evaluate("document.getElementById("+repr(name)+").open"))
+                    # Opening order, rather than DOM order, decides which dialog closes.
+                    evaluate("document.querySelector('#settings-dialog').showModal(); document.querySelector('#detail-dialog').showModal(); undefined")
+                    callAfter(close_with_shortcut)
+                    wait_for(lambda:not evaluate("document.querySelector('#detail-dialog').open"))
+                    self.assertTrue(evaluate("document.querySelector('#settings-dialog').open"))
+                    callAfter(close_with_shortcut)
+                    wait_for(lambda:not evaluate("document.querySelector('#settings-dialog').open"))
                     callAfter(close_with_shortcut)
                     wait_for(lambda:not service.desktop.get('window_visible'))
                     self.assertEqual(service.desktop['state'],'ready')

@@ -22,6 +22,15 @@ def create_window(address,get_language=lambda:'zh',choose_download=None):
     class WindowDelegate(NSObject):
         def webView_didFinishNavigation_(self,view,navigation):self.loaded=True
 
+        @objc.python_method
+        def close_current_layer(self,window):
+            if getattr(self,'closing_layer',False):return
+            self.closing_layer=True
+            def complete(handled,error):
+                self.closing_layer=False
+                if error is None and not handled:window.performClose_(None)
+            view.evaluateJavaScript_completionHandler_('Boolean(globalThis.StellarCloseTopLayer?.())',complete)
+
         def windowShouldClose_(self,window):
             window.orderOut_(None)
             return False

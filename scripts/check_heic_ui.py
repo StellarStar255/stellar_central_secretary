@@ -25,7 +25,20 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#detail-attachments [data-image-view]').click();expect(page.locator('#image-viewer')).to_be_visible()
     page.wait_for_function('()=>document.querySelector("#image-viewer img").naturalHeight===96')
     page.locator('[data-viewer="in"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('125%')
-    page.keyboard.press('Escape');expect(page.locator('#detail-dialog')).to_be_visible()
+    assert page.evaluate('StellarCloseTopLayer()')
+    expect(page.locator('#image-viewer')).not_to_be_visible();expect(page.locator('#detail-dialog')).to_be_visible()
+    page.locator('#edit-title').click();page.locator('#rename-title').fill('Title saved when closing one layer')
+    assert page.evaluate('StellarCloseTopLayer()')
+    expect(page.locator('#detail-dialog')).not_to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
+    assert service.archive.get(ident)['title']=='Title saved when closing one layer'
+    page.evaluate('(id)=>detail(id)',ident);expect(page.locator('#detail-dialog')).to_be_visible()
+    # A modal opened later closes first even when it appears earlier in the DOM.
+    page.evaluate('document.querySelector("#settings-dialog").showModal()')
+    assert page.evaluate('StellarCloseTopLayer()')
+    expect(page.locator('#settings-dialog')).not_to_be_visible();expect(page.locator('#detail-dialog')).to_be_visible()
+    page.evaluate('''()=>{const dialog=document.createElement('dialog');dialog.id='guarded-layer';document.body.append(dialog);dialog.addEventListener('cancel',event=>event.preventDefault());dialog.showModal()}''')
+    assert page.evaluate('StellarCloseTopLayer()');expect(page.locator('#guarded-layer')).to_be_visible()
+    page.evaluate('document.querySelector("#guarded-layer").remove()')
     file=service.item_detail(ident)['all_attachments'][0]
     for suffix,media in (('/preview','image/jpeg'),('/thumbnail','image/png')):
      response=page.request.get(base+file['path']+suffix);assert response.ok and response.headers['content-type'].startswith(media)

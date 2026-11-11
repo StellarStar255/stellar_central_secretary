@@ -1,5 +1,23 @@
 /* Local recovery drafts and save-before-navigation. Explicit Cancel/Escape discard edits. */
 (()=>{
+ // Native Command-W follows modal opening order, including reused dialogs.
+ const layers=[];
+ for(const method of ['show','showModal']){
+  const original=HTMLDialogElement.prototype[method];
+  HTMLDialogElement.prototype[method]=function(...args){
+   const wasOpen=this.open,result=original.apply(this,args);
+   if(!wasOpen){const old=layers.indexOf(this);if(old>=0)layers.splice(old,1);layers.push(this)}
+   return result;
+  };
+ }
+ globalThis.StellarCloseTopLayer=()=>{
+  for(let i=layers.length-1;i>=0;i--)if(!layers[i].open||!layers[i].isConnected)layers.splice(i,1);
+  const dialog=layers.at(-1);if(!dialog)return false;
+  if(dialog.matches('#detail-dialog,#library-dialog')&&globalThis.StellarDrafts?.isFlushing())return true;
+  // Use the existing cancel guards, draft saving and player cleanup paths.
+  if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
+  return true;
+ };
  const forms=new Set(),pending=new Set();let flushing=null,replaying=false,dbPromise=null;
  const t=value=>StellarI18n.t(value),prefix='stellar-edit-draft:';
  function database(){return dbPromise??=new Promise(resolve=>{try{const request=indexedDB.open('stellar-local-drafts',1);request.onupgradeneeded=()=>request.result.createObjectStore('drafts');request.onsuccess=()=>resolve(request.result);request.onerror=()=>resolve(null)}catch{resolve(null)}})}

@@ -92,7 +92,8 @@ def run(address, service=None, server=None, open_browser=True):
             app_menu.setSubmenu_(self.menu)
             main_menu.addItem_(app_menu)
             window_menu=NSMenu.alloc().initWithTitle_('窗口')
-            close_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('关闭窗口','performClose:','w')
+            close_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('关闭窗口','closeCurrentWindow:','w')
+            close_item.setTarget_(self)
             window_menu.addItem_(close_item)
             window_item=NSMenuItem.alloc().initWithTitle_action_keyEquivalent_('窗口',None,'')
             window_item.setSubmenu_(window_menu);main_menu.addItem_(window_item)
@@ -163,6 +164,12 @@ def run(address, service=None, server=None, open_browser=True):
         def openDesktop_(self,sender):self.set_mode('desktop')
         def openBrowser_(self,sender):self.set_mode('browser')
         def openMain_(self, sender):self.set_mode(self.mode)
+
+        def closeCurrentWindow_(self,sender):
+            window=app.keyWindow()
+            if self.window_controller and window==self.window_controller[0]:
+                self.window_controller[2].close_current_layer(window)
+            elif window is not None:app.sendAction_to_from_('performClose:',None,sender)
 
         def openFiles_(self, sender):
             directory = Path(state['value'].get('data_dir', paths.DATA_DIR))
