@@ -37,6 +37,9 @@ with tempfile.TemporaryDirectory() as folder:
     with page.expect_popup() as opened:row.dblclick(delay=60)
     popup=opened.value;popup.wait_for_load_state();assert popup.url==base+'/tutorial?lang=en#fixture';popup.close();expect(page.locator('#detail-dialog')).not_to_be_visible()
     row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source')
+    page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
+    expect(page.locator('#edit-title')).to_contain_text('Robot camera source');page.locator('#detail-dialog .dialog-head button').click()
+    page.locator('#preview-summary').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();page.locator('#detail-dialog .dialog-head button').click()
     before_rename=service.archive.get(linked)
     page.locator('#preview-title').dblclick();expect(page.locator('#preview-title-input')).to_have_value('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#preview-title-input').fill('Uncommitted draft');page.evaluate('refresh()');expect(page.locator('#preview-title-input')).to_have_value('Uncommitted draft')
@@ -47,6 +50,12 @@ with tempfile.TemporaryDirectory() as folder:
     expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>');expect(page.locator('#items .library-row').first).to_contain_text('Robot camera 新标题 <draft>')
     after_rename=service.archive.get(linked);assert after_rename['title']=='Robot camera 新标题 <draft>'
     for key in ('text','summary','tags','state','filename','url'):assert after_rename[key]==before_rename[key],key
+    page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera saved via double click')
+    page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible()
+    assert service.archive.get(linked)['title']=='Robot camera saved via double click'
+    expect(page.locator('#edit-title')).to_contain_text('Robot camera saved via double click');page.locator('#detail-dialog .dialog-head button').click()
+    # Restore the fixture title for subsequent persistence checks.
+    page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera 新标题 <draft>');page.locator('#preview-title-save').click();expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>')
     page.reload();page.locator('#library-open').click();page.locator('#search').fill('robot camera');page.locator('#items [data-id="'+linked+'"]').click();expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>')
     page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera source');page.locator('#preview-title-save').click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#items .library-row').first).to_contain_text('Robot camera source')
     row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible();page.locator('#preview-full').click();expect(page.locator('#detail-dialog')).to_be_visible();page.evaluate("document.querySelector('#detail-dialog').close()")

@@ -31,6 +31,13 @@
  }
  function sync(values){items=values;if(selected&&!items.some(item=>item.id===selected)){clear();return}markSelection();if(editing)return;const current=items.find(item=>item.id===selected);if(current&&((!cached&&loadingId!==selected)||(cached&&cached.updated!==current.updated))){cached=null;void select(selected,false)}}
  function bind(options){({api,toast,openDetails,link,describe,onSaved}=options);clear();$('#preview-close').onclick=()=>{clear();$('#search').focus()};$('#preview-trash').onclick=()=>selected&&StellarArchiveActions.trash(selected);$('#preview-full').onclick=()=>selected&&openDetails(selected);
+  $('#preview-content').ondblclick=event=>{
+   if(!selected||!cached||$('#preview-full').disabled)return;
+   if(event.target.closest('button,a,input,textarea,select,summary,details,[role="button"],[contenteditable]'))return;
+   event.preventDefault();event.stopPropagation();
+   // Follow the existing button path so unsaved drafts are handled before navigation.
+   $('#preview-full').click();
+  };
   $('#preview-title').ondblclick=editTitle;
   $('#preview-title').onkeydown=event=>{if(['Enter','F2',' '].includes(event.key)){event.preventDefault();event.stopPropagation();editTitle()}};
   $('#preview-title-editor').onsubmit=saveTitle;StellarDrafts.register($('#preview-title-editor'),()=>saveTitle({preventDefault(){}}));
