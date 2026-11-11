@@ -230,6 +230,14 @@ $('#library-prev').onclick=()=>{libraryOffset=Math.max(0,libraryOffset-100);void
 $('#library-next').onclick=()=>{libraryOffset+=100;void renderLibrary().catch(error=>toast(error.message))};
 for(const id of ['#state-filter','#date-filter','#sort-filter','#favorite-filter'])$(id).onchange=()=>renderLibrary().catch(error=>toast(error.message));
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
+async function toggleLibrary(){
+ const dialog=$('#library-dialog');
+ if(dialog.open){
+  // A child modal owns the keyboard until it is dismissed.
+  const active=document.activeElement?.closest('dialog[open]');if(active&&active!==dialog)return;
+  dialog.querySelector('.dialog-head button').click();
+ }else await openLibrary();
+}
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
 $('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>renderLibrary().catch(e=>toast(e.message)),180)};
 $('#kind-filter').onchange=$('#category-filter').onchange=()=>renderLibrary().catch(e=>toast(e.message));
@@ -259,7 +267,7 @@ document.querySelectorAll('dialog').forEach(dialog=>{
  });
  dialog.addEventListener('close',()=>{startedOutside=false});
 });
-document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&['k','j'].includes(e.key.toLowerCase())){e.preventDefault();e.key.toLowerCase()==='k'?openLibrary().catch(e=>toast(e.message)):newChat()}});
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&!e.altKey&&['k','j'].includes(e.key.toLowerCase())){e.preventDefault();if(e.repeat)return;e.key.toLowerCase()==='k'?toggleLibrary().catch(e=>toast(e.message)):newChat()}});
 function resizeInput(){const input=$('#message-input');input.style.height='auto';input.style.height=Math.min(input.scrollHeight,220)+'px';updateSend()}
 function updateSend(){$('#send-button').disabled=sending||(!$('#message-input').value.trim()&&!attachedFiles.length)}
 $('#message-input').oninput=resizeInput;
