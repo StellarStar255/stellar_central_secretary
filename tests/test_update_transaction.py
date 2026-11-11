@@ -2,6 +2,44 @@ import hashlib,json,os,shutil,signal,socket,sys,tarfile,tempfile,unittest
 from pathlib import Path
 from secretary.update_transaction import run
 
+class AtomicStatusTest(unittest.TestCase):
+    def test_windows_reader_lock_retries_and_publishes_complete_json(self):
+        from unittest.mock import patch
+        from secretary.update_transaction import atomic
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'state.json';path.write_text('{"phase":"old"}')
+            original=Path.replace;attempts=[]
+            def replace(source,target):
+                attempts.append(source)
+                if len(attempts)<3:
+                    self.assertEqual(json.loads(path.read_text())['phase'],'old')
+                    error=PermissionError('Synthetic Windows reader lock');error.winerror=5;raise error
+                return original(source,target)
+            with patch('secretary.update_transaction.sys.platform','win32'),patch.object(Path,'replace',replace),patch('secretary.update_transaction.time.sleep') as sleep:
+                atomic(path,{'phase':'complete','message':'资料保留'})
+            self.assertEqual(sleep.call_count,2);self.assertEqual(json.loads(path.read_text())['phase'],'complete')
+            self.assertEqual(list(Path(root).iterdir()),[path])
+            self.assertNotEqual(attempts[0].name,'state.json.tmp')
+
+    def test_persistent_windows_lock_is_bounded_and_keeps_previous_status(self):
+        from unittest.mock import patch
+        from secretary.update_transaction import atomic
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'state.json';path.write_text('{"phase":"old"}')
+            error=PermissionError('Synthetic persistent lock');error.winerror=32
+            with patch('secretary.update_transaction.sys.platform','win32'),patch.object(Path,'replace',side_effect=error) as replace,patch('secretary.update_transaction.time.sleep'):
+                with self.assertRaises(PermissionError):atomic(path,{'phase':'complete'})
+            self.assertEqual(replace.call_count,20);self.assertEqual(json.loads(path.read_text())['phase'],'old')
+            self.assertEqual(list(Path(root).iterdir()),[path])
+
+    def test_other_errors_are_not_retried(self):
+        from unittest.mock import patch
+        from secretary.update_transaction import atomic
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(Path,'replace',side_effect=OSError('Synthetic disk error')),patch('secretary.update_transaction.time.sleep') as sleep:
+                with self.assertRaises(OSError):atomic(Path(root)/'state.json',{})
+            sleep.assert_not_called();self.assertEqual(list(Path(root).iterdir()),[])
+
 @unittest.skipUnless(os.name=='posix','Real portable process transaction')
 class UpdateTransactionTest(unittest.TestCase):
     def exercise(self,broken=False,wrong_version=False,rollback_broken=False):

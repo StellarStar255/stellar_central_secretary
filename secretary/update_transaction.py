@@ -4,8 +4,18 @@ from pathlib import Path
 from . import paths,__version__
 
 def atomic(path,value):
-    path=Path(path);temp=path.with_name(path.name+'.tmp')
-    temp.write_text(json.dumps(value,ensure_ascii=False),encoding='utf-8');temp.replace(path)
+    path=Path(path);temp=path.with_name(path.name+'.tmp-'+uuid.uuid4().hex)
+    try:
+        temp.write_text(json.dumps(value,ensure_ascii=False),encoding='utf-8')
+        for attempt in range(20):
+            try:temp.replace(path);return
+            except OSError as error:
+                # Windows readers/antivirus may briefly deny atomic replacement.
+                if sys.platform!='win32' or getattr(error,'winerror',None) not in (5,32,33) or attempt==19:raise
+                time.sleep(min(.05*(attempt+1),.25))
+    finally:
+        try:temp.unlink(missing_ok=True)
+        except OSError:pass
 
 def clean_env():
     env=dict(os.environ,PYINSTALLER_RESET_ENVIRONMENT='1')
