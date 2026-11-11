@@ -2,7 +2,9 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.78** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.78.md)
+版本 **v0.1.79** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.79.md)
+
+HEIC/HEIF 照片支持本地缩略图、应用内查看和视觉总结（需支持图片输入的模型）。原件完整保留，预览和分析使用本地生成的兼容 JPEG；已入库附件无需重新上传，旧摘要可通过“重新总结”更新图片内容。
 
 本地个人知识管理器：投放网页、AI 对话、文件和笔记，自动生成摘要、主题和标签；通过全文搜索或带来源的问答重新取回。知识库搜索支持空格分隔多个关键词，全部包含、顺序不限，可跨标题、正文、标签和文件名匹配。参考 `stellar_little_red_book_search_and_reminder` 的本机 CLI 接入方式。
 

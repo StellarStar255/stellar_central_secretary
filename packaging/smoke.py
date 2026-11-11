@@ -94,6 +94,15 @@ with tempfile.TemporaryDirectory() as data:
         group=json.loads(request('/api/ingest',{'text':'Combined synthetic context','attachments':[{'name':'sample.png','data':base64.b64encode(image.getvalue()).decode()},{'name':'context.txt','data':base64.b64encode(b'Attachment context').decode()}],'defer_summary':True},status['token']))['item']
         assert status['capabilities']['grouped_materials'] and len(group['attachments'])==2
         assert request('/api/items/'+group['id']+'/attachments/'+group['attachments'][0]['id']+'/preview')==image.getvalue()
+        heic_original=(Path(__file__).resolve().parent.parent/'tests/fixtures/synthetic.heic').read_bytes()
+        heic=json.loads(request('/api/ingest',{'attachments':[{'name':'synthetic.HEIC','data':base64.b64encode(heic_original).decode()}],'defer_summary':True},status['token']))['item']
+        photo=heic['all_attachments'][0];assert photo['media']=='image/heic'
+        assert request(photo['download_url'])==heic_original
+        for url in (photo['preview_url'],photo['thumbnail_url']):
+            with Image.open(io.BytesIO(request(url))) as decoded:
+                decoded.load();assert decoded.size==(64,96)
+        print('PASS: frozen HEIC native decoder, JPEG viewer preview, PNG thumbnail and exact original download')
+        request('/api/items/'+heic['id']+'/delete',{'confirmed':True,'expected_updated':heic['updated']},status['token'])
         with zipfile.ZipFile(io.BytesIO(request('/api/items/'+group['id']+'/file'))) as original:
             assert original.read('files/01-sample.png')==image.getvalue()
         request('/api/items/'+group['id']+'/delete',{'confirmed':True,'expected_updated':group['updated']},status['token'])

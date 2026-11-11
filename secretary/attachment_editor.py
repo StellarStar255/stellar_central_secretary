@@ -5,7 +5,7 @@ from pathlib import Path
 from . import additions,bundles
 from .media import VIDEO_MEDIA
 
-OPEN_EXTENSIONS={'.pdf','.txt','.md','.csv','.tsv','.xlsx','.xls','.docx','.doc','.pptx','.ppt','.odt','.ods','.odp','.rtf','.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.json','.yaml','.yml','.log'}
+OPEN_EXTENSIONS={'.pdf','.txt','.md','.csv','.tsv','.xlsx','.xls','.docx','.doc','.pptx','.ppt','.odt','.ods','.odp','.rtf','.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic','.heif','.hif','.json','.yaml','.yml','.log'}
 STALE='附件已修改，以下为修改前摘要；请重新整理后再使用。'
 WARNING='文件修改已保存，已有摘要可能过期；可手动重新整理。'
 def can_open(name):return Path(name).suffix.lower() in OPEN_EXTENSIONS or Path(name).suffix.lower() in VIDEO_MEDIA
@@ -133,7 +133,7 @@ def save_file(archive,item_id,batch_id='',key=''):
         if key:
             updated,before,after,image=replace_bundle(original,key,changed,batch.get('links',[]) if batch else item['group_links'])
         else:
-            updated=changed;image=Path(name).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff')
+            updated=changed;image=Path(name).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp','.bmp','.tif','.tiff','.heic','.heif','.hif')
             try:before,_=extract(name,content.read_bytes() if isinstance(content,Path) else content)
             except Exception:before=''
             try:after,warning=extract(name,changed)

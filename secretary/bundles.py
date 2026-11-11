@@ -2,13 +2,13 @@
 import base64,hashlib,io,json,re,uuid,zipfile,tempfile,shutil
 from pathlib import Path
 from PIL import Image,ImageOps
-from . import links
+from . import links,image_formats
 from .media import video_type
 
 MAX_BYTES=2*1024**3
 INLINE_MAX=50*1024**2
 MAX_FILE=1024**3
-IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'image/webp'}
+IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'image/webp',**image_formats.HEIF_MEDIA}
 
 def is_bundle(name):return str(name).lower().endswith('.stellar.zip')
 
@@ -56,6 +56,7 @@ def create(text,files,urls=None,existing=None):
             if not media.startswith('image/'):
                 try:source,warning=extract(name,raw)
                 except Exception:warning='附件文字解析失败，原件已完整保存。'
+                if image_formats.is_heif(name):warning='HEIC/HEIF 图片无法解码，原件已保留'
         elif name.lower().endswith('.pdf'):
             from .pdf_preview import read
             source,warning=read(data)
@@ -126,7 +127,8 @@ def load(data):
 
 def metadata(data):
     archive,value=load(data)
-    with archive:return [{key:file[key] for key in ('id','name','media','size','warning')} for file in value['files']]
+    # Older archives saved HEIC as an opaque file; expose it without rewriting the ZIP.
+    with archive:return [{**{key:file[key] for key in ('id','name','media','size','warning')},**({'media':'image/heic'} if image_formats.is_heif(file['name']) else {})} for file in value['files']]
 
 def attachment(data,key):
     archive,value=load(data)
@@ -190,7 +192,7 @@ def model_material(data,current_text,link_values=None):
                 if later:source=source[:later.start()];limited=True
             if len(source)>allowance:source=source[:allowance];limited=True
             parts.append(file['name']+'\n'+source+('\n'+file['warning'] if file['warning'] else ''))
-            if file['media'].startswith('image/') and file['size']<=INLINE_MAX:
+            if (file['media'].startswith('image/') or image_formats.is_heif(file['name'])) and file['size']<=INLINE_MAX:
                 if len(images)>=8:raise ValueError('每份组合资料最多分析 8 张图片')
                 with Image.open(io.BytesIO(archive.read(file['path']))) as original:
                     if original.width*original.height>40_000_000:raise ValueError('图片尺寸过大，原件已保存')

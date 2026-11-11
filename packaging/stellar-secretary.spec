@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata,collect_dynamic_libs
 
 ROOT = Path(SPECPATH).parent
 sys.path.insert(0, str(ROOT))
@@ -16,13 +16,14 @@ datas = [(str(ROOT/'secretary/static'), 'secretary/static'),
          (str(ROOT/'browser-extension'), 'browser-extension'), (str(ROOT/'LICENSE'), '.'),
          (str(ROOT/'packaging/THIRD_PARTY_NOTICES.md'),'.')]
 datas += collect_data_files('pypdfium2_raw') + collect_data_files('pypdfium2') + copy_metadata('pypdfium2')
+datas += copy_metadata('pillow-heif')
 datas += [item for item in collect_data_files('playwright') if Path(item[0]) != node]
 if QT_DESKTOP:
     for package in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6'):datas+=copy_metadata(package)
 a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
-             binaries=[(str(node), 'playwright/driver')], datas=datas,
+             binaries=[(str(node), 'playwright/driver')]+collect_dynamic_libs('pillow_heif'), datas=datas,
              hiddenimports=collect_submodules('secretary') + collect_submodules('pypdf')
-                           + ['cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
+                           + collect_submodules('pillow_heif') + ['_pillow_heif','cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython']+(['PySide6'] if not QT_DESKTOP else []))
 if WINDOWS:
     # Qt >= 6.10 imports Windows' unversioned ICU API (Windows 10+). A conda

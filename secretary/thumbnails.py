@@ -5,6 +5,7 @@ from .pdf_preview import LOCK
 from collections import OrderedDict
 from pathlib import Path
 from PIL import Image,ImageOps
+from . import image_formats
 
 _lock=LOCK
 _cache=OrderedDict()

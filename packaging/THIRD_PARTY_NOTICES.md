@@ -1,5 +1,9 @@
 # Third-party components
 
+HEIC/HEIF image decoding uses pillow-heif and its dynamically linked libheif
+and codec libraries. Their licenses and bundled third-party notices are included
+in pillow_heif distribution metadata. Upstream: https://github.com/bigcat88/pillow_heif
+
 The Windows and Linux desktop window uses dynamically linked PySide6 / Qt and Qt WebEngine.
 PySide6 and the included Qt modules are distributed under their applicable LGPL v3
 terms. The package includes the component metadata and license files in the

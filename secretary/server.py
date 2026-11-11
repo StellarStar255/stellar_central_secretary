@@ -25,6 +25,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
+from . import image_formats
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -382,7 +383,7 @@ class Service:
     def queue(self, item_id, force=False, full_pdf=False, pdf_new=False):
         item = self.archive.get(item_id)
         if self.stopping:return
-        if not (item['text'].strip() or item.get('user_context','').strip() or pdf_reading.index_text(item.get('pdf_reads',{})).strip()) or (not force and not self.archive.settings()['auto_ai']): return
+        if not (item['text'].strip() or item.get('user_context','').strip() or image_formats.is_heif(item['filename']) or pdf_reading.index_text(item.get('pdf_reads',{})).strip()) or (not force and not self.archive.settings()['auto_ai']): return
         if company_ai.restricted(item):
             try:self.model_backend(item_ids=[item_id])
             except company_ai.ApprovalRequired:
@@ -423,6 +424,12 @@ class Service:
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                     source,scope=service_pdf_material(self.archive,item,source,scope)
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
+                elif image_formats.is_heif(item['filename']):
+                    original=self.archive.root/'files'/item_id
+                    if original.stat().st_size>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
+                    data=original.read_bytes()
+                    images=[{'name':item['filename'],'media':'image/jpeg','data':image_formats.preview(data)}]
+                    fields,_=ai.analyze_material(item['text'],item['title'],self.model_backend(item_ids=[item_id]),images,'【图片概览】图片以分析用缩略图读取，原件完整保留。')
                 else:
                     selected,scope=service_pdf_material(self.archive,item,item['text'],'')
                     if full_pdf:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=True)
@@ -799,6 +806,7 @@ class Service:
                 path=base+('/additions/'+batch_id if batch_id else '')+'/attachments/'+file['id']
                 catalog.append({**file,'path':path,'batch_id':batch_id,'created':created,'download_url':path,'preview_url':path+'/preview','thumbnail_url':path+'/thumbnail'})
         for file in catalog:
+            if image_formats.is_heif(file['name']):file['media']='image/heic'
             if file['name'].lower().endswith('.pdf'):
                 entry=item.get('pdf_reads',{}).get(pdf_reading.key(file['batch_id'],'' if file['id']=='original' else file['id']),{})
                 file['read_pages']=sorted(map(int,entry.get('pages',{})));file['pdf_total']=entry.get('total')
@@ -1007,6 +1015,9 @@ def handler(service):
                     media='application/octet-stream';disposition='attachment'
                     if bundle_match[4]:
                         if local_media.video_type(file['name']):return self.video(source,file['name'])
+                        if image_formats.is_heif(file['name']) or file['media'] in ('image/heic','image/heif'):
+                            if file['size']>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
+                            return self.send(200,image_formats.preview(source.read_bytes()),'image/jpeg')
                         if file['media'] in bundles.IMAGE_MEDIA.values():media=file['media'];disposition='inline'
                         elif file['name'].lower().endswith('.pdf'):media='application/pdf';disposition='inline'
                     return self.stream_file(source,file['name'],media,disposition=='inline')
@@ -1047,6 +1058,10 @@ def handler(service):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
                         if local_media.video_type(item['filename']):return self.video(service.archive.root/'files'/item['id'],item['filename'])
+                        if image_formats.is_heif(item['filename']):
+                            source=service.archive.root/'files'/item['id']
+                            if source.stat().st_size>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
+                            return self.send(200,image_formats.preview(source.read_bytes()),'image/jpeg')
                         if Path(item['filename']).suffix.lower() in ('.png','.jpg','.jpeg','.gif','.webp'):
                             data=(service.archive.root/'files'/item['id']).read_bytes()
                             try:

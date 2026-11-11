@@ -1,7 +1,7 @@
 /* Quick-note file input appends originals; note text remains independent. */
 (()=>{
  const states=new Map(),t=s=>StellarI18n.t(s);
- const image=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp)$/i.test(file.name);
+ const image=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp|heic|heif|hif)$/i.test(file.name);
  const pending=id=>{const state=states.get(id);return !!state&&(state.running||state.files.length>0)};
  function bind(id,config){
   let state=states.get(id);if(!state){state={id,files:[],running:false,error:'',message:'',deleted:false};states.set(id,state)}

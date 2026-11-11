@@ -265,7 +265,7 @@ function updateSend(){$('#send-button').disabled=sending||(!$('#message-input').
 $('#message-input').oninput=resizeInput;
 $('#message-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();if(!$('#send-button').disabled)$('#composer-form').requestSubmit()}};
 const attachmentPreviews=new WeakMap();
-const isImageFile=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp)$/i.test(file.name);
+const isImageFile=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp|heic|heif|hif)$/i.test(file.name);
 function releaseAttachment(file){const url=attachmentPreviews.get(file);if(url){URL.revokeObjectURL(url);attachmentPreviews.delete(file)}}
 function renderAttachments(){
  $('#attachments').innerHTML=attachedFiles.map((file,index)=>{

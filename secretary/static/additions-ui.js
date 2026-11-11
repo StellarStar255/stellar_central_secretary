@@ -2,7 +2,7 @@
 (()=>{
  const $=s=>document.querySelector(s),t=s=>StellarI18n.t(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const valid=id=>/^[a-f0-9]{32}$/.test(id);const drafts=new Map();let current=null,saving=false,options=null;
- const image=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp)$/i.test(file.name);
+ const image=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp|heic|heif|hif)$/i.test(file.name);
  const encode=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file)});
  function error(value){$('#append-error').textContent=value}
  function files(){const target=$('#append-files');target.innerHTML='';for(const [index,file]of current.files.entries()){const node=document.createElement('div');node.className='bundle-file';if(image(file)){const img=document.createElement('img');img.src=current.urls.get(file);img.alt=file.name;const view=document.createElement('button');view.type='button';view.className='image-open';view.dataset.imageView='';view.setAttribute('aria-label',t('查看图片：')+file.name);view.append(img);node.append(view)}const name=document.createElement('strong');name.textContent=file.name;node.append(name);const remove=document.createElement('button');remove.type='button';remove.textContent=t('移除');remove.disabled=saving;remove.onclick=()=>{URL.revokeObjectURL(current.urls.get(file));current.urls.delete(file);current.files.splice(index,1);files()};node.append(remove);target.append(node)}}

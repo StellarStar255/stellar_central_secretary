@@ -30,6 +30,7 @@ jobs:
           python scripts/check_trash_active_ui.py
           python scripts/check_local_paths_ui.py
           python scripts/check_notes.py
+          python scripts/check_heic_ui.py
           python scripts/check_note_attachments_ui.py
           python scripts/check_attachment_order_ui.py
           python scripts/check_web_capture.py
