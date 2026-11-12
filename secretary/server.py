@@ -97,6 +97,8 @@ class Service:
         self.login_confirmations = {}
         self.busy = set();self.trash_cancellations=set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
+        from .question_progress import QuestionProgress
+        self.question_progress=QuestionProgress()
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
         self.video_request={};self.video_probes={}
@@ -865,10 +867,30 @@ class Service:
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id);self.questions-=1
 
-    def ask_library(self,question,history=None):
+    def ask_library(self,question,history=None,progress=None):
         from . import knowledge_chat
+        def stage(name,count=None):
+            if progress:progress(name,count)
+        started=time.monotonic();timings={'model_calls':0}
+        def measured(name,action):
+            begin=time.monotonic()
+            try:return action()
+            finally:timings[name]=round(timings.get(name,0)+time.monotonic()-begin,3)
+        def planning(turns,backend):
+            stage('planning')
+            timings['model_calls']+=1
+            return knowledge_chat.plan(question,turns,backend)
+        def result(answer,passages,notice):
+            timings['total_seconds']=round(time.monotonic()-started,3)
+            return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice)),'timings':timings}
         if not question.strip():raise ValueError('请输入问题')
         turns=knowledge_chat.history(history)
+        stage('preparing')
+        reply=knowledge_chat.social_reply(question)
+        if reply:
+            timings['local_reply']=True
+            response=result(reply,[],[]);response['local_reply']=True
+            return response
         with self.archive.db() as db:
             available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
         if not available:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}
@@ -877,15 +899,33 @@ class Service:
         backend=self.model_backend(item_ids=history_ids)
         with self.lock:self.questions+=1
         try:
-            with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True):
-                queries=knowledge_chat.plan(question,turns,backend)
+            waiting=time.monotonic()
+            stage('queued')
+            with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True,interactive=True):
+                timings['queue_seconds']=round(time.monotonic()-waiting,3)
+                queries=knowledge_chat.quick_plan(question,turns)
+                timings['fast_followup']=queries is not None
+                if queries is None:queries=measured('planning_seconds',lambda:planning(turns,backend))
+                if getattr(queries,'chat_answer',None):
+                    timings['answer_seconds']=timings.pop('planning_seconds',0)
+                    timings['general_chat']=True
+                    return result(queries.chat_answer,[],['通用对话回复，未检索知识库。'])
                 notice=[]
-                passages=knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice)
-                if not passages:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[],'retrieval_notice':' '.join(dict.fromkeys(notice))}
+                stage('retrieving')
+                passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
+                if not passages and timings['fast_followup']:
+                    timings['fast_followup']=False
+                    queries=measured('planning_seconds',lambda:planning(turns,backend))
+                    stage('retrieving')
+                    passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
+                if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice)
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
-                images,visual_status=knowledge_chat.visual_evidence(self.archive,passages,backend)
-                answer=knowledge_chat.answer(question,turns,passages,backend,images,visual_status)
-            return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice))}
+                stage('images',len({p['item_id'] for p in passages}))
+                images,visual_status=measured('image_seconds',lambda:knowledge_chat.visual_evidence(self.archive,passages,backend))
+                timings['model_calls']+=1
+                stage('answering',len({p['item_id'] for p in passages}))
+                answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,turns,passages,backend,images,visual_status))
+            return result(answer,passages,notice)
         finally:
             with self.lock:self.questions-=1
 
@@ -1262,11 +1302,20 @@ def handler(service):
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
+                if path=='/api/ask/progress':return self.send(200,service.question_progress.snapshot(body.get('progress_id')))
                 if path=='/api/ask':
                     question=str(body.get('question',''))[:4000]
                     if body.get('library_chat') is True:
                         if body.get('item_ids') is not None:raise ValueError('知识库对话请通过已归档资料检索')
-                        return self.send(200,service.ask_library(question,body.get('history')))
+                        progress_id=body.get('progress_id')
+                        if progress_id is None:return self.send(200,service.ask_library(question,body.get('history')))
+                        service.question_progress.begin(progress_id)
+                        try:
+                            answer=service.ask_library(question,body.get('history'),lambda name,count:service.question_progress.update(progress_id,name,count))
+                        except Exception:
+                            service.question_progress.update(progress_id,'error');raise
+                        service.question_progress.update(progress_id,'done')
+                        return self.send(200,answer)
                     return self.send(200,service.ask(question,body.get('item_ids')))
                 if path.startswith('/api/items/'):
                     note_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})/open',path)

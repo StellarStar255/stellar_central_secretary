@@ -115,3 +115,7 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .message.assistant .answer-prose{white-space:normal}.answer-prose p{margin:0 0 12px}.answer-prose p:last-child{margin-bottom:0}.answer-prose pre{white-space:pre-wrap;background:var(--input);padding:12px;border-radius:8px;overflow:auto}.answer-prose ul,.answer-prose ol{padding-left:1.6em}.answer-prose blockquote{margin:12px 0;padding-left:14px;border-left:3px solid var(--line)}
 
 .composer-hint.archive-mode-hint{color:#ae7a27;font-weight:600}.resume-conversation{display:block;margin:6px auto 0;padding:5px 12px;border:1px solid var(--line);border-radius:8px;font-size:.785714rem}
+
+.answer-timing{margin:8px 0 0 31px;color:var(--muted);font-size:.714286rem}.answer-timing summary{cursor:pointer}.answer-timing p{margin:5px 0;line-height:1.7}@media(max-width:700px){.answer-timing{margin-left:0}}
+
+.question-progress{line-height:1.7}.question-progress>p{margin:0 0 8px}.question-progress small,.question-progress .muted{color:var(--muted);font-size:.85em}.question-progress>p:first-child:before{content:"";display:inline-block;width:7px;height:7px;margin-right:10px;border-radius:50%;background:var(--accent)}

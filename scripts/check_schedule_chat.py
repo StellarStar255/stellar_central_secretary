@@ -33,6 +33,10 @@ with tempfile.TemporaryDirectory() as root:
    page=browser.new_page(viewport={'width':1280,'height':950});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}');expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
    expect(page.locator('#input-mode')).to_have_value('auto')
+   page.locator('#message-input').fill('你好呀');page.locator('#send-button').click()
+   expect(page.locator('.answer-timing')).to_contain_text('本地即时回复')
+   assert not calls,'Greeting must never reach a model'
+   assert service.archive.export()==before,'Greeting must not be archived'
    page.locator('#message-input').fill('我老婆今天下午有课吗？');page.locator('#send-button').click()
    expect(page.locator('.source')).to_have_count(1);expect(page.locator('.message-body strong')).to_have_text('不能确定今天下午是否有课')
    assert '罗马' not in page.locator('#messages').inner_text()
@@ -54,6 +58,9 @@ with tempfile.TemporaryDirectory() as root:
    page.locator('#message-input').fill(clarification);page.locator('#resume-conversation').click()
    expect(page.locator('#archive-only')).not_to_be_checked();expect(page.locator('#message-input')).to_have_value(clarification)
    page.locator('#send-button').click();expect(page.locator('.source')).to_have_count(5)
+   expect(page.locator('.answer-timing')).to_have_count(6)
+   page.locator('.answer-timing summary').last.click()
+   expect(page.locator('.answer-timing').last).to_contain_text('省去检索规划请求')
    assert service.archive.export()==before
    assert len([call for call in calls if call[1].get('images')])==5
    page.screenshot(path='/tmp/secretary-schedule-chat-fixed.png')

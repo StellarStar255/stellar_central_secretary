@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.89** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.89.md)
+Version **v0.1.90** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.90.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -23,6 +23,11 @@ The configured CLI or compatible API first generates up to three keyword queries
 Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. By default, retrieval uses full-text search with model-expanded keywords. Enable local semantic search below to add vector retrieval.
 
 Auto-detected questions use this same conversation pipeline. Once a conversation starts, ordinary clarifications, corrections and follow-ups keep receiving answers without relying on question words. Explicit save instructions, commands and archive modes remain available. Conversation intent persists across reloads and intermediate accidental archives in older chats. New chats clear archive-only and stale archive modes. Archive-only displays a clear warning and a Back to conversation button. Local date/time context and image date ranges constrain schedule answers; an older week’s empty cells do not establish today’s availability. When the user explicitly asks for a judgment based on that timetable, the answer gives a conditional conclusion with its assumptions and visible time range. Related saved images can be rechecked through bounded compatible previews when the selected model accepts images. Missing or unsupported image input is disclosed.
+
+Library questions use a dedicated interactive lane, separate from background short summaries. Explicit short clarifications about recently cited material can reread that material and answer in one model call. New topics and long documents retain full query planning; image checks and source confirmation remain in place. Simple questions use a lower reasoning budget, while explicitly detailed analysis retains a higher budget where supported (currently Codex CLI). Expand **Processing time** beneath an answer to see queue, query-planning, search, image-preparation and answer durations.
+
+Whole-message greetings and thanks receive an instant local reply without a model call or library search, even before model setup. They do not replace the cited conversation context. Pure chat or creative requests can finish in the first model call; questions about saved material still retrieve evidence before answering.
+While a library question is running, the reply shows the current server stage and elapsed time: conversation preparation, queue, query planning, retrieval, image preparation, and answering. Progress contains only stage names and item counts, and clears when the request completes or fails.
 
 ## Local semantic search
 

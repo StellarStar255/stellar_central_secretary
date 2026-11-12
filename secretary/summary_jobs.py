@@ -7,7 +7,7 @@ class SummaryJobs:
     def __init__(self):
         self.lock=threading.RLock();self.jobs={};self.stopped=threading.Event()
         # One long call cannot consume the slot reserved for short/interactive work.
-        self.lanes={'short':threading.Lock(),'long':threading.Lock()}
+        self.lanes={'short':threading.Lock(),'long':threading.Lock(),'interactive':threading.Lock()}
     def prune(self):
         finished=sorted((key for key,value in self.jobs.items() if value['ended'] is not None),key=lambda key:self.jobs[key]['ended'])
         for old in finished[:-100]:self.jobs.pop(old,None)
@@ -36,9 +36,10 @@ class SummaryJobs:
         with self.lock:
             if key in self.jobs:self.stage(key,stage);self.jobs[key]['ended']=time.monotonic();self.prune()
     @contextmanager
-    def session(self,key,chars=0,short=False,wait_timeout=None):
+    def session(self,key,chars=0,short=False,wait_timeout=None,interactive=False):
         with self.lock:
             if key not in self.jobs or self.jobs[key]['ended'] is not None:self.enqueue(key,chars,short)
+            if interactive:self.jobs[key]['lane']='interactive'
             lane=self.lanes[self.jobs[key]['lane']]
         event=self.jobs[key]['cancel'];acquired=False;failed=True;waiting=time.monotonic()
         try:

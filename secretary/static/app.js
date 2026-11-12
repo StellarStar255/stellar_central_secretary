@@ -171,7 +171,7 @@ function renderChat(scroll=true){
  updateInputMode();
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${answerTiming(m)}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
  bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
@@ -405,10 +405,43 @@ function knowledgeHistory(chat,current){
  const turns=[];
  for(let i=0;i<chat.messages.indexOf(current);i++){
   const question=chat.messages[i],answer=chat.messages[i+1];
-  if(question.role==='user'&&answer?.role==='assistant'&&(question.knowledgeQuestion||!answer.archiveOnly&&answer.sources?.length)&&!answer.pending&&!answer.error)
+  if(question.role==='user'&&answer?.role==='assistant'&&(question.knowledgeQuestion||!answer.archiveOnly&&answer.sources?.length)&&!answer.pending&&!answer.error&&!answer.localReply&&!isSocialMessage(question.text))
    turns.push({question:question.text.slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set(answerSources(answer).map(s=>s.item_id))].slice(0,12)});
  }
  return turns.slice(-6);
+}
+function isSocialMessage(text){
+ const value=String(text||'').toLowerCase().replace(/[\s,，。.!！?？~～]+/g,'');
+ return /^(?:(?:你好|您好|嗨|哈喽|哈啰|嘿|hello|hi|hey)(?:呀|啊|哦|喔|哈|啦)?|早上好|早安|中午好|下午好|晚上好|在吗|你在吗|谢谢(?:你|您|啦|呀|啊|了)?|多谢|感谢|辛苦了|thanks|thankyou)$/.test(value);
+}
+function questionProgress(message){
+ const p=message.questionProgress;if(!message.pending||!p)return '';
+ const labels={connecting:'正在连接本地服务…',preparing:'正在读取对话上下文…',queued:'正在等待问答模型空闲…',planning:'正在理解问题，规划检索或直接回复…',retrieving:'正在搜索知识库…',images:'已找到相关资料，正在准备原图核对…',answering:'正在结合资料与对话生成回答…',done:'回答已生成，正在接收结果…',error:'正在等待请求结果…'};
+ const elapsed=Math.max(0,Math.floor((Date.now()-p.started)/1000));
+ const note=p.offline?'暂时无法获取进度，仍在等待回答。':elapsed>=8&&['planning','answering'].includes(p.stage)?'正在等待模型返回，耗时受模型服务和网络影响。':'';
+ return `<div class="question-progress" role="status" aria-live="polite"><p>${esc(t(labels[p.stage]||labels.connecting))}</p><small>${esc(t('已等待'))} ${elapsed} ${esc(t('秒'))}${p.count?` · ${esc(t('相关资料'))} ${Number(p.count)}`:''}</small>${note?`<p class="muted">${esc(t(note))}</p>`:''}</div>`;
+}
+function watchQuestionProgress(chat,message,progressId){
+ let stopped=false,pollTimer,tickTimer;message.text='';message.questionProgress={stage:'connecting',started:Date.now()};
+ const render=()=>{if(!stopped&&chat.id===activeId)renderChat(false)};
+ const poll=async()=>{
+  try{
+   const state=await api('/api/ask/progress',{progress_id:progressId});
+   if(stopped)return;
+   if(state.stage!=='connecting'||message.questionProgress.stage==='connecting')Object.assign(message.questionProgress,{stage:state.stage,count:state.count});
+   message.questionProgress.offline=false;
+  }catch(e){if(!stopped)message.questionProgress.offline=true}
+  if(!stopped){render();pollTimer=setTimeout(poll,700)}
+ };
+ render();pollTimer=setTimeout(poll,250);tickTimer=setInterval(render,1000);
+ return ()=>{stopped=true;clearTimeout(pollTimer);clearInterval(tickTimer);delete message.questionProgress};
+}
+function answerTiming(message){
+ const timing=message.timings;if(!timing||!Number.isFinite(Number(timing.total_seconds)))return '';
+ const seconds=key=>Math.max(0,Number(timing[key])||0).toFixed(1);
+ if(timing.local_reply)return `<details class="answer-timing"><summary>${esc(t('本地即时回复'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('未调用模型，也未检索知识库。'))}</p></details>`;
+ const labels=[['queue_seconds','排队'],['planning_seconds','检索规划'],['retrieval_seconds','本地检索'],['image_seconds','准备图片'],['answer_seconds','模型回答']];
+ return `<details class="answer-timing"><summary>${esc(t('本次用时'))} ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${labels.map(([key,label])=>esc(t(label))+' '+seconds(key)+'s').join(' · ')}</p>${timing.fast_followup?`<p>${esc(t('本次直接沿用已引用资料，省去检索规划请求。'))}</p>`:''}</details>`;
 }
 function answerSources(message){
  const sources=message.sources||[],numbers=[...String(message.text||'').matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1]));
@@ -426,6 +459,7 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  const first=text.split('\n').find(line=>line.trim())?.trim()||'';
  const save=/^(?:(?:请|麻烦|帮我|请帮我)\s*)?(?:归档|收藏|保存|记录|记住|存下|存一下)(?:一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b/i.test(first);
  if(save)return 'note';
+ if(!hasFiles&&isSocialMessage(text))return 'ask';
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';
@@ -447,9 +481,9 @@ $('#composer-form').onsubmit=async event=>{
   if(mode==='library'||mode==='ask'&&!files.length&&!/https?:\/\//i.test(text)){
    chat.dialogueActive=true;
    updateMessage(chat,userMessage,{knowledgeQuestion:true});
-   updateMessage(chat,response,{text:t('正在理解问题、检索知识库，整理答案…')});
-   const data=await api('/api/ask',{question:text,library_chat:true,history:knowledgeHistory(chat,userMessage)});
-   updateMessage(chat,response,{text:data.answer,sources:data.sources,retrievalNotice:data.retrieval_notice||'',pending:false,error:false});return;
+   const progressId=uid().replace(/-/g,''),stopProgress=watchQuestionProgress(chat,response,progressId);
+   let data;try{data=await api('/api/ask',{question:text,library_chat:true,history:knowledgeHistory(chat,userMessage),progress_id:progressId})}finally{stopProgress()}
+   updateMessage(chat,response,{text:data.answer,sources:data.sources,retrievalNotice:data.retrieval_notice||'',localReply:data.local_reply===true,timings:data.timings||null,pending:false,error:false});return;
   }
   const groupLinks=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
