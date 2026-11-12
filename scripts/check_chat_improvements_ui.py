@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory() as root:
     def send(text):page.locator('#message-input').fill(text);page.locator('#send-button').click()
     send('列出所有罗马史资料')
     expect(page.locator('.catalog-pager')).to_contain_text('1–20 / 65');expect(page.locator('.source')).to_have_count(20)
+    page.evaluate('()=>{const remote=JSON.parse(JSON.stringify(conversations));remote.find(c=>c.id===activeId).updated+=1;mergeChats({conversations:remote});renderChat(false)}')
     page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('21–40 / 65')
     page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('41–60 / 65')
     page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('61–65 / 65');expect(page.locator('.source')).to_have_count(5)
@@ -52,6 +53,8 @@ with tempfile.TemporaryDirectory() as root:
     send('她今天有课吗？')
     expect(page.locator('.streaming-answer')).to_contain_text('周四14:00有课',timeout=10000)
     assert not page.locator('[data-recheck]').count(),'Partial text must not become a completed answer'
+    page.evaluate('()=>{saveChats();return sharedChatSaves}')
+    assert 'questionProgress' not in json.dumps(service.chat_history()),'Transient streamed text must not be persisted as conversation data'
     finish.set();expect(page.locator('.source')).to_have_count(1)
     expect(page.locator('.source-quote')).to_contain_text('原文中的具体内容')
     page.locator('.source').click();expect(page.locator('#detail-dialog')).to_be_visible()
@@ -68,6 +71,7 @@ with tempfile.TemporaryDirectory() as root:
     send('星期一呢？');expect(page.locator('.source')).to_have_count(4)
     payload=json.loads(requests[-1].split('\n',1)[1]);assert any('就是她的' in turn['question'] for turn in payload['history'])
     page.locator('#conversation-basis summary').click();expect(page.locator('#conversation-basis')).to_contain_text('这个课程表就是她的')
+    page.evaluate('()=>{const remote=JSON.parse(JSON.stringify(conversations));remote.find(c=>c.id===activeId).updated+=1;mergeChats({conversations:remote});renderChat(false)}')
     page.locator('#clear-conversation-basis').click();assert page.evaluate('()=>rememberedContext(currentChat()).length')==0
     page.evaluate('()=>sharedChatSaves')
     page.reload();expect(page.locator('#model-label')).to_contain_text('synthetic')

@@ -111,9 +111,9 @@ let sharedChatsReady=false,historyLoaded=false,sharedChatSaves=Promise.resolve()
 try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); conversations=Array.isArray(saved.conversations)?saved.conversations:[];activeId=saved.activeId||''; } catch {}
 const uid=()=>crypto.randomUUID();
 function currentChat(){return conversations.find(c=>c.id===activeId)}
-function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);if(!conversations.some(chat=>chat.id===activeId))activeId='';try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
-function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId}));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast(t('对话同步未完成：')+e.message))}}
-function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
+function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);if(!conversations.some(chat=>chat.id===activeId))activeId='';try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
+function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast(t('对话同步未完成：')+e.message))}}
+function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>=(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
 async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;historyLoaded=true;writeLocalChats();restoreInputMode()}
 async function pullSharedChats(){if(!sharedChatsReady||sending)return;await sharedChatSaves;mergeChats(await api('/api/conversations'))}
 async function switchInterface(mode){if(sending){toast(t('请等待当前消息处理完成后再切换'));return}await sharedChatSaves;await api('/api/conversations',{conversations,activeId});await api('/api/interface',{mode});toast(mode==='desktop'?t('正在打开桌面窗口'):t('正在打开网页模式'))}
@@ -194,7 +194,7 @@ function renderChat(scroll=true){
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
-function updateMessage(chat,message,values){Object.assign(message,values);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat()}
+function updateMessage(chat,message,values){const live=conversations.find(c=>c.id===chat.id),target=live?.messages.find(m=>m.id===message.id);if(!target)return;Object.assign(target,values);live.updated=Math.max(Date.now(),(live.updated||0)+1);saveChats();if(live.id===activeId)renderChat()}
 let refreshPromise=null,refreshAgain=false,activeWork=false,lastHistoryPoll=0;
 function refresh(){if(refreshPromise){refreshAgain=true;return refreshPromise}refreshPromise=(async()=>{do{refreshAgain=false;await refreshNow()}while(refreshAgain)})().finally(()=>{refreshPromise=null});return refreshPromise}
 async function refreshNow(){
@@ -439,7 +439,7 @@ function rememberedContext(chat,current){
 }
 function renderConversationBasis(chat){
  const target=$('#conversation-basis'),claims=rememberedContext(chat),key=JSON.stringify([chat?.id,claims,StellarI18n.language]);if(target._basisKey===key)return;target._basisKey=key;target.innerHTML=claims.length?`<details><summary>${esc(t('本轮对话依据'))} (${claims.length})</summary><small>${esc(t('以下是你明确说明的条件，不代表已核实的资料事实。'))}</small>${claims.map(c=>`<p>${esc(c.statement)}</p>`).join('')}<button class="secondary" id="clear-conversation-basis">${esc(t('清除对话依据'))}</button></details>`:'';
- const button=target.querySelector('#clear-conversation-basis');if(button)button.onclick=()=>{chat.contextReset=chat.messages.at(-1)?.id;chat.contextIgnored=chat.messages.filter(m=>m.role==='user').map(m=>m.id);chat.updated=Math.max(Date.now(),(chat.updated||0)+1);saveChats();renderConversationBasis(chat)};
+ const button=target.querySelector('#clear-conversation-basis');if(button)button.onclick=()=>{const live=conversations.find(c=>c.id===chat.id);if(!live)return;live.contextReset=live.messages.at(-1)?.id;live.contextIgnored=live.messages.filter(m=>m.role==='user').map(m=>m.id);live.updated=Math.max(Date.now(),(live.updated||0)+1);saveChats();renderConversationBasis(live)};
 }
 function isSocialMessage(text){
  const value=String(text||'').toLowerCase().replace(/[\s,，。.!！?？~～]+/g,'');
@@ -479,15 +479,17 @@ function catalogPager(message){
  const c=message.catalog;if(!c)return '';
  return `<div class="catalog-pager"><small>${esc(t('关键词'))}: ${esc(c.queries.join(' / '))} · ${c.total?c.offset+1:0}–${Math.min(c.total,c.offset+c.limit)} / ${c.total}</small><button class="secondary" data-catalog="${esc(message.id)}" data-offset="${Math.max(0,c.offset-c.limit)}" ${c.offset===0?'disabled':''}>${esc(t('上一页'))}</button><button class="secondary" data-catalog="${esc(message.id)}" data-offset="${c.offset+c.limit}" ${c.offset+c.limit>=c.total?'disabled':''}>${esc(t('下一页'))}</button></div>`;
 }
-function bindCatalogPages(chat){
+function bindCatalogPages(boundChat){
  $('#messages').querySelectorAll('[data-catalog]').forEach(button=>button.onclick=async()=>{
+  const chat=conversations.find(c=>c.id===boundChat.id);if(!chat)return;
   const message=chat.messages.find(m=>m.id===button.dataset.catalog);if(!message?.catalog)return;
   button.disabled=true;
   try{const data=await api('/api/library/catalog',{queries:message.catalog.queries,offset:Number(button.dataset.offset),limit:message.catalog.limit});updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog})}catch(error){toast(error.message);button.disabled=false}
  });
 }
-function bindRechecks(chat){
+function bindRechecks(boundChat){
  $('#messages').querySelectorAll('[data-recheck]').forEach(button=>button.onclick=async()=>{
+  const chat=conversations.find(c=>c.id===boundChat.id);if(!chat)return;
   if(sending)return;
   const message=chat.messages.find(m=>m.id===button.dataset.recheck),question=chat.messages.find(m=>m.id===message?.questionId);if(!question)return;
   const previous={text:message.text,sources:message.sources,catalog:message.catalog,timings:message.timings};
