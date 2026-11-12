@@ -27,6 +27,7 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: |
           python scripts/check_library_workflow.py
+          python scripts/check_chat_improvements_ui.py
           python scripts/check_trash_active_ui.py
           python scripts/check_local_paths_ui.py
           python scripts/check_notes.py

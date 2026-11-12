@@ -1254,5 +1254,22 @@
   "暂时无法获取进度，仍在等待回答。": "Progress is temporarily unavailable; still waiting for the answer.",
   "正在等待模型返回，耗时受模型服务和网络影响。": "Waiting for the model response; timing depends on the model service and network.",
   "已等待": "Elapsed",
-  "相关资料": "Relevant items"
+  "相关资料": "Relevant items",
+  "关键词": "Keywords",
+  "本轮对话依据": "Conversation context",
+  "以下是你明确说明的条件，不代表已核实的资料事实。": "These are your stated conditions, not verified source facts.",
+  "清除对话依据": "Clear conversation context",
+  "流式显示回答（接口支持时）": "Stream answers (when supported by the API)",
+  "回答生成中，内容尚未核对完成。": "Answer in progress; the content has not been fully checked.",
+  "整理完成或失败时通知我": "Notify me when organization completes or fails",
+  "系统通知不显示资料标题或正文。浏览器模式需允许通知。": "System notifications omit source titles and content. Browser mode requires notification permission.",
+  "资料已整理": "Material organized",
+  "资料整理失败": "Organization failed",
+  "可在知识库中查看。": "Open the library to view it.",
+  "打开任务中心查看原因并重试。": "Open Tasks for the reason and retry.",
+  "重新核对": "Check again",
+  "复用近期回答": "Recent answer reused",
+  "问题与资料未变化，可点击重新核对强制生成。": "The question and sources are unchanged. Choose Check again to generate a fresh answer.",
+  "已复用近期回答：问题、对话条件、资料和模型配置未变化。": "Reused a recent answer: the question, conversation conditions, sources and model configuration are unchanged.",
+  "重新核对未完成，保留上次回答。": "The fresh check did not complete; the previous answer is preserved."
 }

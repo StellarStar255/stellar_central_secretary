@@ -131,6 +131,8 @@ def run(address,service=None,server=None,open_browser=True):
         destination=Path(target);request.setDownloadDirectory(str(destination.parent));request.setDownloadFileName(destination.name);request.accept()
     profile.downloadRequested.connect(download)
     tray=QSystemTrayIcon(QIcon(str(icons/'tray-starting.png')),app);menu=QMenu();tray.setContextMenu(menu)
+    from .completion_notifications import CompletionConsumer,message as completion_message
+    completion_consumer=CompletionConsumer()
     status_action=menu.addAction(tr('启动中'));status_action.setEnabled(False);menu.addSeparator()
     actions=[]
     def request_mode(mode,panel=None):
@@ -138,6 +140,7 @@ def run(address,service=None,server=None,open_browser=True):
             try:post('/api/interface',{'mode':mode,'panel':panel})
             except Exception as error:state['mode_error']=str(error)
         threading.Thread(target=change,daemon=True).start()
+    tray.messageClicked.connect(lambda:request_mode('desktop','tasks'))
     def open_file(path):
         if linux:launch_browser(QUrl.fromLocalFile(str(path)).toString())
         else:QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
@@ -169,6 +172,8 @@ def run(address,service=None,server=None,open_browser=True):
     app.aboutToQuit.connect(tray.hide)
     def refresh():
         value=state['value'];label=presentation(value);icon=QIcon(str(icons/('tray-'+label['icon']+'.png')))
+        for event in completion_consumer.consume(value):
+            title,body=completion_message(event,language());tray.showMessage(title,body)
         tray.setIcon(icon);tray.setToolTip(tr('知识秘书')+' · '+label['detail']);status_action.setText(label['detail'])
         for action,title in actions:action.setText(tr(title))
         if app_menu is not None:app_menu.setTitle(tr('知识秘书'))

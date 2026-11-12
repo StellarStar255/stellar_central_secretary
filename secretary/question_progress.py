@@ -27,6 +27,10 @@ class QuestionProgress:
             value.pop('count',None)
             if count is not None:value['count']=count
             if stage in ('done','error'):value['ended']=time.monotonic()
+            if stage in ('done','error'):value.pop('partial',None)
+
+    def partial(self,key,text):
+        with self.lock:self.records[key]['partial']=str(text)[:16000]
 
     def snapshot(self,key):
         self.validate(key)
@@ -35,4 +39,4 @@ class QuestionProgress:
             if not value:return {'stage':'connecting','elapsed_seconds':0,'stage_seconds':0}
             now=value.get('ended',time.monotonic())
             return {'stage':value['stage'],'elapsed_seconds':round(now-value['started'],1),'stage_seconds':round(now-value['stage_at'],1),
-                    **({'count':value['count']} if 'count' in value else {})}
+                    **({'count':value['count']} if 'count' in value else {}),**({'partial':value['partial']} if 'partial' in value else {})}

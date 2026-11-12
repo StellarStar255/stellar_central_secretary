@@ -166,7 +166,7 @@ with tempfile.TemporaryDirectory() as data:
         with zipfile.ZipFile(io.BytesIO(request('/api/backup'))) as clean_backup:
             assert 'files/'+saved['note_images'][0]['id'] not in clean_backup.namelist()
         print('PASS: frozen confirmed archive deletion, attachment cleanup and unrelated PDF preserved')
-        api_key=uuid.uuid4().hex;provider_calls=[]
+        api_key=uuid.uuid4().hex;provider_calls=[];stream_release=threading.Event()
         class LocalAPI(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_POST(self):
@@ -182,6 +182,11 @@ with tempfile.TemporaryDirectory() as data:
                 content='OK' if 'Reply with exactly OK' in prompt else json.dumps({'title':'Synthetic commands','summary':'Creates a synthetic compressed archive.','category':'Test','tags':['commands']})
                 if prompt.startswith('为个人知识库生成全文检索词'):content=json.dumps({'queries':['省电']})
                 if prompt.startswith('请仅依据本次检索到的资料回答当前问题'):content='Close background applications to improve battery life. [1]'
+                if body.get('stream'):
+                    self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
+                    self.wfile.write(('data: '+json.dumps({'choices':[{'delta':{'content':content[:20]},'finish_reason':None}]})+'\n\n').encode());self.wfile.flush()
+                    assert stream_release.wait(15),'Frozen stream was not observed'
+                    self.wfile.write(('data: '+json.dumps({'choices':[{'delta':{'content':content[20:]},'finish_reason':'stop'}]})+'\n\ndata: [DONE]\n\n').encode());self.wfile.flush();return
                 raw=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         provider=ThreadingHTTPServer(('127.0.0.1',0),LocalAPI);threading.Thread(target=provider.serve_forever,daemon=True).start()
@@ -241,11 +246,30 @@ with tempfile.TemporaryDirectory() as data:
             else:raise AssertionError('Frozen semantic backfill did not complete')
             grounded=json.loads(request('/api/ask',{'question':'如何省电','library_chat':True,'history':[]},status['token']))
             assert '[1]' in grounded['answer'] and [source['item_id'] for source in grounded['sources']]==[power['id']],grounded
+            request('/api/settings',{'backend':'api','auto_ai':False,'model_api':{'streaming':True}},status['token'])
+            progress_id=uuid.uuid4().hex;streamed=[];stream_errors=[]
+            def stream_question():
+                try:streamed.append(json.loads(request('/api/ask',{'question':'如何省电','library_chat':True,'history':[],'force_refresh':True,'progress_id':progress_id},status['token'])))
+                except Exception as error:stream_errors.append(error)
+            streaming_thread=threading.Thread(target=stream_question,daemon=True);streaming_thread.start()
+            try:
+                for _ in range(80):
+                    progress=json.loads(request('/api/ask/progress',{'progress_id':progress_id},status['token']))
+                    if progress.get('partial'):break
+                    if stream_errors:raise stream_errors[0]
+                    time.sleep(.1)
+                else:raise AssertionError('Frozen API worker did not expose streaming progress')
+                assert not streamed,'The partial text must precede the final answer'
+            finally:stream_release.set();streaming_thread.join(15)
+            assert not stream_errors and streamed and streamed[0]['sources'][0]['item_id']==power['id'],stream_errors
+            catalog=json.loads(request('/api/library/catalog',{'queries':['battery'],'offset':0},status['token']))
+            assert power['id'] in [source['item_id'] for source in catalog['sources']]
+            print('PASS: frozen API-worker SSE text before completion, authenticated partial progress, checked final citations and complete catalog endpoint')
             request('/api/semantic/settings',{**semantic_config,'enabled':False},status['token'])
             print('PASS: frozen embedding worker, SQLite vector cache and semantic-only library answer with source; local deterministic API/embedding fixtures')
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
             print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
-        finally:provider.shutdown();provider.server_close()
+        finally:stream_release.set();provider.shutdown();provider.server_close()
         # Prepare an isolated working copy without launching an external GUI app.
         sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
         from secretary.core import Archive

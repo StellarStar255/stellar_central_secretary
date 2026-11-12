@@ -55,6 +55,8 @@ def run(address, service=None, server=None, open_browser=True):
             self.accept_reopen = False
             self.last_label = None
             self.window_controller=None
+            from .completion_notifications import CompletionConsumer
+            self.completion_consumer=CompletionConsumer();self.notification_panel=None
             self.mode=service.archive.settings()['interface_mode'] if service is not None else 'browser'
             self.handled_interface=None
             self.language=service.archive.settings()['ui_language'] if service is not None else 'zh'
@@ -111,6 +113,14 @@ def run(address, service=None, server=None, open_browser=True):
         @objc.python_method
         def refresh(self):
             value = state['value']
+            for event in self.completion_consumer.consume(value):
+                try:
+                    from Foundation import NSUserNotification,NSUserNotificationCenter
+                    from .completion_notifications import message
+                    title,body=message(event,value.get('settings',{}).get('ui_language','zh'))
+                    notification=NSUserNotification.alloc().init();notification.setTitle_(title);notification.setInformativeText_(body)
+                    center=NSUserNotificationCenter.defaultUserNotificationCenter();center.setDelegate_(self);center.deliverNotification_(notification)
+                except Exception:pass
             self.language=value.get('settings',{}).get('ui_language',self.language)
             for item,title in self.localized_items:item.setTitle_(translate(title,self.language))
             for menu,title in self.localized_menus:menu.setTitle_(translate(title,self.language))
@@ -142,6 +152,8 @@ def run(address, service=None, server=None, open_browser=True):
                 app.postEvent_atStart_(event, True)
                 return
             self.accept_reopen = True
+            if self.notification_panel and self.window_controller and self.window_controller[2].loaded:
+                self.window_controller[1].evaluateJavaScript_completionHandler_('globalThis.StellarOpenPanel?.("tasks")',None);self.notification_panel=None
             request=state['value'].get('interface_request',{})
             if request.get('id') and request['id']!=self.handled_interface:
                 self.handled_interface=request['id'];self.set_mode(request['mode'])
@@ -164,6 +176,11 @@ def run(address, service=None, server=None, open_browser=True):
         def openDesktop_(self,sender):self.set_mode('desktop')
         def openBrowser_(self,sender):self.set_mode('browser')
         def openMain_(self, sender):self.set_mode(self.mode)
+
+        def userNotificationCenter_didActivateNotification_(self,center,notification):
+            self.set_mode('desktop');self.notification_panel='tasks'
+
+        def userNotificationCenter_shouldPresentNotification_(self,center,notification):return True
 
         def closeCurrentWindow_(self,sender):
             window=app.keyWindow()

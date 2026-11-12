@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 
 NAME='model-api.json'
-DEFAULT={'base_url':'https://api.deepseek.com','model':'deepseek-flash','vision':False,'json_mode':False,'max_tokens':8192,'token_parameter':'max_tokens','use_key':True,'api_key':''}
+DEFAULT={'base_url':'https://api.deepseek.com','model':'deepseek-flash','vision':False,'json_mode':False,'streaming':False,'max_tokens':8192,'token_parameter':'max_tokens','use_key':True,'api_key':''}
 
 def read(root):
     path=Path(root)/NAME
@@ -38,7 +38,7 @@ def prepare(root,body):
     value={**old,**{key:body[key] for key in DEFAULT if key in body and key!='api_key'}}
     value['base_url']=normalize(value['base_url'])
     if not isinstance(value['model'],str) or not re.fullmatch(r'[^\s\x00-\x1f]{1,200}',value['model']):raise ValueError('请填写有效的模型名称')
-    for key in ('vision','json_mode','use_key'):
+    for key in ('vision','json_mode','use_key','streaming'):
         if type(value[key]) is not bool:raise ValueError('模型 API 选项无效')
     if type(value['max_tokens']) is not int or not 128<=value['max_tokens']<=65536:raise ValueError('最大输出 token 必须为 128–65536')
     if value['token_parameter'] not in ('max_tokens','max_completion_tokens'):raise ValueError('输出长度参数无效')
@@ -62,16 +62,16 @@ def write(root,value):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
 
-def complete(config,prompt,images):
+def complete(config,prompt,images,on_text=None):
     # Validate even when invoked as a standalone worker.
     base=normalize(config['base_url']);content=prompt
     if images:
         if not config['vision']:raise ValueError('当前 API 未启用图片输入')
         content=[{'type':'text','text':prompt}]+[{'type':'image_url','image_url':{'url':'data:'+image['media']+';base64,'+image['data']}} for image in images]
     from .ai import RULES,ModelTimeoutError
-    payload={'model':config['model'],'messages':[{'role':'system','content':RULES},{'role':'user','content':content}],'stream':False,config.get('token_parameter','max_tokens'):config['max_tokens']}
+    payload={'model':config['model'],'messages':[{'role':'system','content':RULES},{'role':'user','content':content}],'stream':bool(on_text),config.get('token_parameter','max_tokens'):config['max_tokens']}
     if config['json_mode'] and '仅输出 JSON' in prompt:payload['response_format']={'type':'json_object'}
-    headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'StellarSecretary'}
+    headers={'Content-Type':'application/json','Accept':'text/event-stream' if on_text else 'application/json','User-Agent':'StellarSecretary'}
     if config['use_key']:headers['Authorization']='Bearer '+config['api_key']
     from .network import is_loopback_url
     handlers=[NoRedirect()]
@@ -84,6 +84,9 @@ def complete(config,prompt,images):
     opener=urllib.request.build_opener(*handlers)
     try:
         with opener.open(urllib.request.Request(base+'/chat/completions',data=json.dumps(payload,ensure_ascii=False).encode(),headers=headers),timeout=120) as response:
+            if on_text and 'text/event-stream' in response.headers.get('Content-Type',''):
+                from .streaming import chat_sse
+                return chat_sse(response,on_text,config.get('api_key',''))
             raw=response.read(4_000_001)
         if len(raw)>4_000_000:raise ValueError('模型 API 返回内容过大')
         result=json.loads(raw);choice=result['choices'][0]
@@ -121,7 +124,13 @@ def main():
     paths.configure_tls()
     value={}
     try:
-        value=json.loads(__import__('sys').stdin.read());answer=complete(value['config'],value['prompt'],value.get('images',[]))
+        value=json.loads(__import__('sys').stdin.read())
+        previous=['']
+        def emit(text):
+            text=text[:16000]
+            if text!=previous[0]:print(json.dumps({'partial':text},ensure_ascii=False),flush=True);previous[0]=text
+        callback=emit if value.get('streaming') else None
+        answer=complete(value['config'],value['prompt'],value.get('images',[]),on_text=callback)
         print(json.dumps({'answer':answer},ensure_ascii=False),flush=True)
     except Exception as error:
         from .ai import ModelTimeoutError

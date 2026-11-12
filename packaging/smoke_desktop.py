@@ -10,7 +10,7 @@ import urllib.request
 
 with socket.socket() as sock:
     sock.bind(('127.0.0.1', 0)); port=sock.getsockname()[1]
-binary=Path('dist/Stellar Secretary.app/Contents/MacOS/Stellar Secretary').resolve()
+binary=Path(os.environ.get('SECRETARY_SMOKE_BINARY','dist/Stellar Secretary.app/Contents/MacOS/Stellar Secretary')).resolve()
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with tempfile.TemporaryDirectory() as temp:
     proc=subprocess.Popen([str(binary), '--desktop', '--no-browser', '--port', str(port), '--data-dir', temp],

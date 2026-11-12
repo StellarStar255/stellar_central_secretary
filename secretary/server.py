@@ -97,8 +97,12 @@ class Service:
         self.login_confirmations = {}
         self.busy = set();self.trash_cancellations=set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
+        from .completion_notifications import CompletionEvents
+        self.completion_events=CompletionEvents();self.summary_jobs.on_finished=self.notify_summary_finished
         from .question_progress import QuestionProgress
         self.question_progress=QuestionProgress()
+        from .answer_cache import AnswerCache
+        self.answer_cache=AnswerCache()
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
         self.video_request={};self.video_probes={}
@@ -106,6 +110,12 @@ class Service:
         self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self);self.storage=storage.Storage(self)
         from .semantic import SemanticIndex
         self.semantic=SemanticIndex(self.archive)
+    def notify_summary_finished(self,item_id,stage):
+        if re.fullmatch('[a-f0-9]{32}',item_id) and stage in ('done','error') and self.archive.settings()['completion_notifications']:
+            try:self.archive.get(item_id)
+            except KeyError:return
+            self.completion_events.add(item_id,stage)
+
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
         with self.lock:
@@ -188,7 +198,7 @@ class Service:
         return result
     def switch_interface(self,mode,panel=None):
         if not self.desktop_status().get('supports_window'):raise ValueError('请从 Windows、macOS 或 Linux 桌面安装版启动程序，才能切换桌面窗口')
-        if panel not in (None,'settings','updates'):raise ValueError('无效的界面入口')
+        if panel not in (None,'settings','updates','tasks'):raise ValueError('无效的界面入口')
         self.archive.set_interface_mode(mode)
         self.interface_request={'mode':mode,'id':secrets.token_hex(16),'panel':panel}
         return {'ok':True,'mode':mode}
@@ -233,6 +243,7 @@ class Service:
         return {'ok':True}
 
     def save_settings(self,body):
+        if 'completion_notifications' in body and type(body['completion_notifications']) is not bool:raise ValueError('通知设置无效')
         try:previous_company=company_ai.descriptor(self.model_backend())['fingerprint']
         except ValueError:previous_company=None
         path=self.archive.root/model_api.NAME;previous=path.read_bytes() if body.get('backend')=='api' and path.exists() else None
@@ -240,6 +251,8 @@ class Service:
         try:
             if value is not None:model_api.write(self.archive.root,value)
             self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'),body.get('capture_proxy'))
+            if 'completion_notifications' in body:
+                with self.archive.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('completion_notifications',str(body['completion_notifications']).lower()))
         except BaseException:
             if value is not None:
                 if previous is None:path.unlink(missing_ok=True)
@@ -867,7 +880,7 @@ class Service:
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id);self.questions-=1
 
-    def ask_library(self,question,history=None,progress=None):
+    def ask_library(self,question,history=None,progress=None,context=None,force_refresh=False):
         from . import knowledge_chat
         def stage(name,count=None):
             if progress:progress(name,count)
@@ -885,6 +898,8 @@ class Service:
             return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice)),'timings':timings}
         if not question.strip():raise ValueError('请输入问题')
         turns=knowledge_chat.history(history)
+        from .conversation_context import turns as context_turns
+        turns=context_turns(context)+turns
         stage('preparing')
         reply=knowledge_chat.social_reply(question)
         if reply:
@@ -897,6 +912,14 @@ class Service:
         # Review historical sources before sending previous answers to a model.
         history_ids=[item for turn in turns for item in turn['source_ids']]
         backend=self.model_backend(item_ids=history_ids)
+        from .answer_cache import key as answer_key
+        cache_key=answer_key(self.archive,question,turns,backend,self.semantic.generation)
+        cached=None if force_refresh else self.answer_cache.get(cache_key,self.archive)
+        if cached:
+            self.model_backend(item_ids=history_ids+[source['item_id'] for source in cached['sources']])
+            cached['timings']={'model_calls':0,'cache_hit':True,'total_seconds':round(time.monotonic()-started,3)}
+            cached['retrieval_notice']='已复用近期回答：问题、对话条件、资料和模型配置未变化。'
+            return cached
         with self.lock:self.questions+=1
         try:
             waiting=time.monotonic()
@@ -906,6 +929,12 @@ class Service:
                 queries=knowledge_chat.quick_plan(question,turns)
                 timings['fast_followup']=queries is not None
                 if queries is None:queries=measured('planning_seconds',lambda:planning(turns,backend))
+                if getattr(queries,'catalog',False):
+                    from .catalog import page
+                    stage('retrieving')
+                    response=measured('retrieval_seconds',lambda:page(self.archive,[q for q in queries if q!=question][:3] or [question[:200]]))
+                    timings['total_seconds']=round(time.monotonic()-started,3);response['timings']=timings
+                    return response
                 if getattr(queries,'chat_answer',None):
                     timings['answer_seconds']=timings.pop('planning_seconds',0)
                     timings['general_chat']=True
@@ -920,12 +949,19 @@ class Service:
                     passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
                 if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice)
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
+                from .answer_cache import files as source_files
+                original_signature=source_files(self.archive,[p['item_id'] for p in passages])
                 stage('images',len({p['item_id'] for p in passages}))
                 images,visual_status=measured('image_seconds',lambda:knowledge_chat.visual_evidence(self.archive,passages,backend))
                 timings['model_calls']+=1
                 stage('answering',len({p['item_id'] for p in passages}))
-                answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,turns,passages,backend,images,visual_status))
-            return result(answer,passages,notice)
+                with ai.text_progress(lambda text:stage('partial',text)):
+                    answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,turns,passages,backend,images,visual_status))
+            response=result(answer,passages,notice)
+            # Do not cache a response if any indexed record changed during generation.
+            if original_signature is not None and original_signature==source_files(self.archive,[p['item_id'] for p in passages]) and cache_key==answer_key(self.archive,question,turns,backend,self.semantic.generation):
+                self.answer_cache.put(cache_key,self.archive,response,passages,original_signature)
+            return response
         finally:
             with self.lock:self.questions-=1
 
@@ -1041,7 +1077,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1302,16 +1338,19 @@ def handler(service):
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
+                if path=='/api/library/catalog':
+                    from .catalog import page
+                    return self.send(200,page(service.archive,body.get('queries'),body.get('offset',0),body.get('limit',20)))
                 if path=='/api/ask/progress':return self.send(200,service.question_progress.snapshot(body.get('progress_id')))
                 if path=='/api/ask':
                     question=str(body.get('question',''))[:4000]
                     if body.get('library_chat') is True:
                         if body.get('item_ids') is not None:raise ValueError('知识库对话请通过已归档资料检索')
                         progress_id=body.get('progress_id')
-                        if progress_id is None:return self.send(200,service.ask_library(question,body.get('history')))
+                        if progress_id is None:return self.send(200,service.ask_library(question,body.get('history'),context=body.get('context'),force_refresh=body.get('force_refresh') is True))
                         service.question_progress.begin(progress_id)
                         try:
-                            answer=service.ask_library(question,body.get('history'),lambda name,count:service.question_progress.update(progress_id,name,count))
+                            answer=service.ask_library(question,body.get('history'),lambda name,count:service.question_progress.partial(progress_id,count) if name=='partial' else service.question_progress.update(progress_id,name,count),context=body.get('context'),force_refresh=body.get('force_refresh') is True)
                         except Exception:
                             service.question_progress.update(progress_id,'error');raise
                         service.question_progress.update(progress_id,'done')

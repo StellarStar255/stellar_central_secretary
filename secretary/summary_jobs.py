@@ -5,7 +5,7 @@ from . import ai
 
 class SummaryJobs:
     def __init__(self):
-        self.lock=threading.RLock();self.jobs={};self.stopped=threading.Event()
+        self.lock=threading.RLock();self.jobs={};self.stopped=threading.Event();self.on_finished=None
         # One long call cannot consume the slot reserved for short/interactive work.
         self.lanes={'short':threading.Lock(),'long':threading.Lock(),'interactive':threading.Lock()}
     def prune(self):
@@ -33,8 +33,14 @@ class SummaryJobs:
                 value['durations'][previous]=value['durations'].get(previous,0)+now-value['stage_at']
                 value.update(stage=stage,stage_at=now)
     def finish(self,key,stage='done'):
+        notify=False
         with self.lock:
-            if key in self.jobs:self.stage(key,stage);self.jobs[key]['ended']=time.monotonic();self.prune()
+            if key in self.jobs:
+                notify=self.jobs[key]['ended'] is None
+                self.stage(key,stage);self.jobs[key]['ended']=time.monotonic();self.prune()
+        if notify and self.on_finished:
+            try:self.on_finished(key,stage)
+            except Exception:pass
     @contextmanager
     def session(self,key,chars=0,short=False,wait_timeout=None,interactive=False):
         with self.lock:

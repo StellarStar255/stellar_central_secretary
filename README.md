@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.92** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.92.md)
+Version **v0.1.93** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.93.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -28,6 +28,16 @@ Library questions use a dedicated interactive lane, separate from background sho
 
 Whole-message greetings and thanks receive an instant local reply without a model call or library search, even before model setup. They do not replace the cited conversation context. Pure chat or creative requests can finish in the first model call; questions about saved material still retrieve evidence before answering.
 While a library question is running, the reply shows the current server stage and elapsed time: conversation preparation, queue, query planning, retrieval, image preparation, and answering. Progress contains only stage names and item counts, and clears when the request completes or fails.
+
+### More complete conversations
+
+Ask to list all records on a topic to receive a distinct record count and a paginated catalog (20 per page). The count covers the union of the displayed keyword searches across indexed text and metadata, excluding the recycle bin; it is not a guarantee of every semantically related record. Pagination queries the current library again, so counts can change if the library changes.
+
+Explicit ownership confirmations, corrections and instructions to judge from a source are retained separately from the six recent turns, within the current conversation. Open **Conversation context** above the composer to review or clear these user-stated conditions. They remain assumptions, not verified source facts; they are not shared with a new chat. Source cards show an excerpt and attempt to locate it in the original; PDF citations retain page navigation.
+
+For compatible APIs, enable **Stream answers** in API settings to show provisional text while generating. The complete answer and source numbers are checked before it is saved. Current CLI backends that return text only on completion continue to show live stage progress. In settings, optionally enable completion/failure notifications; native desktop notifications work independently of the hidden webview. Browser mode requires notification permission and may be delayed by browser background throttling. Notifications omit source titles and content; clicking opens Tasks for details and retry.
+
+A small in-memory cache can reuse recent source-backed answers. It expires within five minutes and invalidates on question/context, minute/date/timezone, archived-record, original/added-file metadata, model configuration or semantic-index changes. It still checks company-data authorization. **Check again** bypasses the cache and rereads the material. Restarting clears the cache; it is not exported or shared across devices.
 
 ## Local semantic search
 

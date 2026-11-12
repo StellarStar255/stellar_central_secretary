@@ -170,6 +170,7 @@ class Archive:
         except (TypeError,ValueError):content_scale=100
         if not 70<=content_scale<=200:content_scale=100
         return {'backend': values.get('backend', 'codex'), 'auto_ai': values.get('auto_ai', 'true') == 'true','company_mode':values.get('company_mode','false')=='true',
+                'completion_notifications':values.get('completion_notifications','false')=='true',
                 'model_proxy':{'mode':values.get('model_proxy_mode','auto'),'url':values.get('model_proxy_url','')},
                 'capture_proxy':{'mode':values.get('capture_proxy_mode','system'),'url':values.get('capture_proxy_url','')},
                 'capture_background': values.get('capture_background', 'true') == 'true',
