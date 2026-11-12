@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory() as temp:
    browser=pw.chromium.launch(headless=True,executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None))
    try:
     page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base)
-    page.wait_for_function('historyLoaded === true')
+    page.wait_for_function('() => historyLoaded === true')
     page.locator('#archive-only').check();page.locator('#file-input').set_input_files(source)
     with page.expect_response(lambda response:response.url.endswith('/api/ingest'),timeout=30000) as saved:page.locator('#send-button').click()
     result=saved.value.json();assert saved.value.ok,result;item=result['item'];ident=item['id']
