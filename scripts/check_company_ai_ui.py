@@ -1,4 +1,4 @@
-"""Synthetic company material; verify consent and real HTTP enforcement without a model call."""
+"""Synthetic company material; verify consent and HTTP enforcement without live providers."""
 import json,os,sys,tempfile,threading
 from pathlib import Path
 from http.server import ThreadingHTTPServer
@@ -62,9 +62,17 @@ with tempfile.TemporaryDirectory() as root:
                 page.locator('#settings-dialog .dialog-head button').click()
                 # A library question cannot send protected retrieved passages after revocation.
                 page.locator('#input-mode').select_option('ask');page.locator('#message-input').fill('Confidential synthetic project result?');page.locator('#send-button').click()
-                expect(page.locator('#company-model-dialog')).to_be_visible();assert model.call_count==2
+                expect(page.locator('#company-model-dialog')).to_be_visible();assert model.call_count==3
+                # Query planning sees only the user's question, before any
+                # protected retrieved material can enter the answer prompt.
+                planning=model.call_args_list[-1].args[0]
+                assert planning.startswith('为个人知识库生成全文检索词')
+                planning_input=json.loads(planning.split('\n',1)[1])
+                assert planning_input['question']=='Confidential synthetic project result?'
+                assert planning_input['history']==[] and 'passages' not in planning_input
+                assert source not in planning
                 page.locator('#company-model-cancel').click();expect(page.locator('#company-model-dialog')).to_have_count(0)
-                assert model.call_count==2
+                assert model.call_count==3
                 assert service.archive.get(item['id'])['summary']=='Synthetic permitted summary'
                 page.locator('#settings-open').click();page.locator('#company-mode').uncheck()
                 expect(page.locator('#company-mode-controls')).not_to_be_visible()
@@ -78,7 +86,7 @@ with tempfile.TemporaryDirectory() as root:
                 if future:future.result(timeout=5)
                 assert page.locator('#company-model-dialog').count()==0
                 expect(page.locator('#detail-content')).to_contain_text('Synthetic permitted summary')
-                assert model.call_count==3
+                assert model.call_count==4
                 page.screenshot(path='/tmp/secretary-company-model-policy.png')
                 assert not errors,errors
                 print('PASS: company mode defaults off and has no extra confirmation; toggle persists across reload; enabled mode direct HTTP enforcement; cancel preserves source with zero model calls; once-confirmed destination enables automatic summaries; revocation blocks library Q&A; original summary preserved; no live model/network provider calls')
