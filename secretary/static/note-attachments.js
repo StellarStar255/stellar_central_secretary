@@ -20,8 +20,15 @@
     try{
      for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{state.message=t('正在上传：')+name+' '+percent+'%';state.paint()},'quick-note:'+id));
      if(state.deleted)return;
-     const latest=await config.api('/api/items/'+id);
-     await config.api('/api/items/'+id+'/additions',{text:'',attachments,expected_updated:latest.updated,summarize:false,read_links:false});
+     for(let attempt=0;attempt<3;attempt++){
+      const latest=await config.api('/api/items/'+id);
+      try{await config.api('/api/items/'+id+'/additions',{text:'',attachments,expected_updated:latest.updated,summarize:false,read_links:false});break}
+      catch(error){
+       // Appending is additive. A note autosave can advance the item revision
+       // between GET and POST; reread before retrying only that precise conflict.
+       if(attempt===2||(error.originalMessage||error.message)!=='资料已更新，请重新打开后再追加；本次草稿仍保留')throw error;
+      }
+     }
     }catch(error){StellarUploads.abandon(files);state.error=error.message;return}
     state.files.splice(0,files.length);state.message=t('附件已追加到全部附件');state.paint();
     await StellarUploads.cleanup(attachments).catch(()=>{});

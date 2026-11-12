@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False)
  server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
-  with patch.object(service,'ask',return_value={'answer':'Synthetic question answer.','sources':[]}) as ask,patch('secretary.server.fetch_page',side_effect=AssertionError('Command URLs must not be fetched')) as fetch,sync_playwright() as pw:
+  with patch.object(service,'ask',side_effect=AssertionError('Text questions must use the conversation pipeline')),patch.object(service,'ask_library',return_value={'answer':'Synthetic question answer.','sources':[]}) as ask,patch('secretary.server.fetch_page',side_effect=AssertionError('Command URLs must not be fetched')) as fetch,sync_playwright() as pw:
    executable=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None)
    browser=pw.chromium.launch(headless=True,**({'executable_path':executable} if executable else {}))
    try:

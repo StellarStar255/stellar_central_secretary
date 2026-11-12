@@ -7,6 +7,7 @@ from PIL import Image
 from playwright.sync_api import sync_playwright,expect
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from secretary.server import Service,handler
+from secretary.notes import set_note
 stream=io.BytesIO();Image.new('RGB',(17,13),'#aabb33').save(stream,format='PNG')
 encoded=base64.b64encode(stream.getvalue()).decode()
 with tempfile.TemporaryDirectory() as root:
@@ -17,7 +18,7 @@ with tempfile.TemporaryDirectory() as root:
   with patch.object(service,'queue') as queue,patch('secretary.ai.analyze_material',side_effect=AssertionError('No AI from quick notes')) as analyze,sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,**({'executable_path':os.environ.get('CHROME_PATH') or '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'} if os.environ.get('CHROME_PATH') or sys.platform=='darwin' else {}))
    try:
-    page=browser.new_page(viewport={'width':1150,'height':950});errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+    page=browser.new_page(viewport={'width':1150,'height':950});errors=[];page.on('pageerror',lambda error:(errors.append(str(error)),print('PAGE ERROR:',error,flush=True)))
     base=f'http://127.0.0.1:{server.server_port}';page.goto(base);page.locator('#library-open').click();page.locator('#items [data-id="'+ident+'"]').click();page.locator('#preview-full').click()
     def paste(files,text=''):
      page.locator('#note-text').focus();page.locator('#note-text').evaluate('''(node,value)=>{const data=new DataTransfer();for(const file of value.files)data.items.add(new File([Uint8Array.from(atob(file.data),c=>c.charCodeAt(0))],file.name,{type:file.type}));if(value.text)data.setData('text/plain',value.text);node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}))}''',{'files':files,'text':text})
@@ -72,9 +73,21 @@ with tempfile.TemporaryDirectory() as root:
     entry=next(file for file in service.item_detail(ident)['all_attachments'] if file['name']=='大附件.bin')
     assert page.request.get(base+entry['download_url']).body()==large
     assert not list(service.uploads.folder.iterdir())
+    # Force an independent autosave exactly between the append's GET and POST.
+    conflicts=[]
+    def advance_note(route):
+     conflicts.append(True)
+     if len(conflicts)==1:
+      latest=service.archive.get(ident);set_note(service.archive,ident,latest['note'],[],latest['note_version'])
+     route.continue_()
+    page.route('**/api/items/'+ident+'/additions',advance_note)
+    paste([file('保存同时追加.txt',b'APPEND-AFTER-NOTE-AUTOSAVE')])
+    expect(page.locator('#detail-attachments .material-card')).to_have_count(10,timeout=20000)
+    assert len(conflicts)==2,'Only the known revision conflict should be retried'
+    page.unroute('**/api/items/'+ident+'/additions')
     assert page.locator('#note-text').evaluate("node=>{const data=new DataTransfer();data.setData('text/plain','plain text');const event=new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true});node.dispatchEvent(event);return !event.defaultPrevented}")
     page.reload();page.locator('#library-open').click();page.locator('#items [data-id="'+ident+'"]').click();page.locator('#preview-full').click()
-    expect(page.locator('#detail-attachments .material-card')).to_have_count(9)
+    expect(page.locator('#detail-attachments .material-card')).to_have_count(10)
     expect(page.locator('#note-text')).to_have_value('速记文字 PasteMemo 只插入一次')
     item=service.archive.get(ident);assert item['text']=='Preserved original body' and item['summary']=='Preserved summary' and not item['note_images']
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');page.locator('#settings-dialog .dialog-head button').click();page.locator('#library-open').click();page.locator('#items [data-id="'+ident+'"]').click();page.locator('#preview-full').click()

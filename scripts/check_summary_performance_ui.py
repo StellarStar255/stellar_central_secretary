@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as root:
   else:short_started.set();assert release_short.wait(60)
   return {'title':item['title'],'summary':'Synthetic concise summary.','state':'ready','error':''}
  try:
-  with patch.object(ai,'summary_fields',side_effect=model) as summarize,patch.object(service,'ask',side_effect=AssertionError('Archive only must not ask')) as ask,patch('secretary.server.fetch_page',side_effect=AssertionError('Archive only must not fetch')) as fetch,sync_playwright() as pw:
+  with patch.object(ai,'summary_fields',side_effect=model) as summarize,patch.object(service,'ask',side_effect=AssertionError('Archive only must not ask')) as ask,patch.object(service,'ask_library',side_effect=AssertionError('Archive only must not ask')) as library_ask,patch('secretary.server.fetch_page',side_effect=AssertionError('Archive only must not fetch')) as fetch,sync_playwright() as pw:
    long_id,_=service.archive.add('Long synthetic source','L'*5000);other,_=service.archive.add('Second long source','M'*5000)
    service.queue(long_id,force=True);assert long_started.wait(3);service.queue(other,force=True)
    executable=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None)
@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('#messages .archive-card')).to_have_count(2);expect(page.locator('#messages')).to_contain_text('未调用 AI')
     page.locator('#input-mode').select_option('auto');page.locator('#message-input').fill('Related links\nhttps://example.invalid/one\nhttps://example.invalid/two');page.locator('#send-button').click()
     expect(page.locator('#messages .archive-card')).to_have_count(3)
-    assert summarize.call_count==calls and not ask.called and not fetch.called
+    assert summarize.call_count==calls and not ask.called and not library_ask.called and not fetch.called
     saved=[item for item in service.archive.list() if item['state']=='saved'];assert len(saved)==2
     page.locator('#settings-open').click();page.locator('#ui-language').select_option('en')
     expect(page.locator('.archive-only-control')).to_contain_text('Archive only, skip summary')
