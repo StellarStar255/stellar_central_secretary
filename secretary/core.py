@@ -129,6 +129,8 @@ class Archive:
             chunk_columns={row[1] for row in db.execute('PRAGMA table_info(chunks)')}
             source_migration='origin' not in chunk_columns
             if source_migration:db.execute("ALTER TABLE chunks ADD COLUMN origin TEXT NOT NULL DEFAULT '{}'")
+            from .semantic import initialize as initialize_semantic
+            initialize_semantic(db)
             columns={row[1] for row in db.execute('PRAGMA table_info(items)')}
             for name,definition in [('attachment_order',"TEXT NOT NULL DEFAULT '[]'"),('pdf_reads',"TEXT NOT NULL DEFAULT '{}'"),('company_data','INTEGER NOT NULL DEFAULT 0'),('favorite','INTEGER NOT NULL DEFAULT 0'),('pinned','INTEGER NOT NULL DEFAULT 0'),('trashed_at',"TEXT NOT NULL DEFAULT ''"),('last_viewed',"TEXT NOT NULL DEFAULT ''"),('note',"TEXT NOT NULL DEFAULT ''"),('note_images',"TEXT NOT NULL DEFAULT '[]'"),('note_version','INTEGER NOT NULL DEFAULT 0'),('vision_text',"TEXT NOT NULL DEFAULT ''"),('user_context',"TEXT NOT NULL DEFAULT ''"),('additions',"TEXT NOT NULL DEFAULT '[]'"),('group_links',"TEXT NOT NULL DEFAULT '[]'")]:
                 if name not in columns:

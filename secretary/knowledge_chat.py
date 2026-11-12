@@ -33,10 +33,24 @@ def plan(question,turns,backend):
     return list(dict.fromkeys(queries))
 
 
-def retrieve(archive,queries,limit=8):
+def retrieve(archive,queries,limit=8,semantic=None,notice=None):
     scores={};hits={}
-    for query in queries:
-        for rank,hit in enumerate(archive.retrieve(query,limit)):
+    rankings=[archive.retrieve(query,limit) for query in queries]
+    if semantic is not None:
+        try:
+            semantic_hits=semantic.search(queries,limit)
+            # Balance the two retrieval methods, independently of query count.
+            if semantic_hits:rankings.extend([semantic_hits]*len(queries))
+            state=semantic.status()
+            if state['config']['enabled'] and state['error'] and notice is not None:
+                notice.append('语义检索暂不可用，已使用关键词检索。')
+            elif state['config']['enabled'] and state['indexed']<state['total'] and notice is not None:
+                notice.append('语义索引尚未建完，本次结合已有索引和关键词检索。')
+        except Exception as exc:
+            with semantic.lock:semantic.error=str(exc)
+            if notice is not None:notice.append('语义检索暂不可用，已使用关键词检索。')
+    for ranking in rankings:
+        for rank,hit in enumerate(ranking):
             origin=hit.get('origin',{})
             key=(hit['item_id'],origin.get('batch_id'),origin.get('attachment_id'),origin.get('page'))
             scores[key]=scores.get(key,0)+1/(60+rank)

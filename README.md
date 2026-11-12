@@ -20,7 +20,17 @@ Choose **Library chat** in the composer, or select **Chat with your library** on
 
 The configured CLI or compatible API first generates up to three keyword queries. The app searches its local full-text index, includes the original question as a fallback, combines results and sends up to eight source passages to the model for a cited answer. Source buttons open the archived material and show attachment/page information where available. Missing evidence produces a clear message. Prior answers help interpret the question and are not treated as factual evidence.
 
-Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. This first version uses full-text search with model-expanded keywords; it does not add a vector index.
+Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. By default, retrieval uses full-text search with model-expanded keywords. Enable local semantic search below to add vector retrieval.
+
+## Local semantic search
+
+Enable **Models & settings → Local semantic search** to combine keyword retrieval with locally generated embeddings. Answers continue to use the selected CLI/API model and existing company-data confirmation.
+
+Install and start [Ollama](https://ollama.com/download), then run `ollama pull bge-m3`. This multilingual embedding model is about 1.2 GB; see the [model page](https://ollama.com/library/bge-m3). The app does not download models automatically. Keep `http://127.0.0.1:11434` and `bge-m3`, test the embedding service, enable it and save. Other local models exposing [Ollama's embedding API](https://docs.ollama.com/api/embed) can also be configured.
+
+Existing passages are indexed in background batches of up to 16; new and edited material updates automatically. Progress and errors appear in settings. Vectors live in the existing SQLite database and its backups, without extra Python ML dependencies or a separate vector database. Embedding requests accept loopback addresses only, bypass proxies and reject redirects.
+
+If disabled or unavailable, keyword search remains usable. Incomplete indexing and service failures are disclosed in the conversation. Edits and trash/delete operations invalidate affected vectors, and writes check that the input still matches current material. Changing the model or URL invalidates the cache; rebuild manually after replacing weights under the same model name. Disabling preserves the cache. The adjustable similarity threshold defaults to 0.45 and depends on the model. Retrieval uses exact cosine scanning for personal libraries, rather than an approximate index for very large collections.
 
 ## Example: turn a paper manual into searchable material
 

@@ -102,6 +102,8 @@ class Service:
         self.video_request={};self.video_probes={}
         self.uploads=uploads.Uploads(self.archive.root);self.backups=local_backups.Backups(self.archive)
         self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self);self.storage=storage.Storage(self)
+        from .semantic import SemanticIndex
+        self.semantic=SemanticIndex(self.archive)
     def chat_history(self,body=None):
         path=self.archive.root/'conversations.json'
         with self.lock:
@@ -877,11 +879,12 @@ class Service:
         try:
             with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True):
                 queries=knowledge_chat.plan(question,turns,backend)
-                passages=knowledge_chat.retrieve(self.archive,queries)
-                if not passages:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}
+                notice=[]
+                passages=knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice)
+                if not passages:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[],'retrieval_notice':' '.join(dict.fromkeys(notice))}
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
                 answer=knowledge_chat.answer(question,turns,passages,backend)
-            return {'answer':answer,'sources':[dict(p,number=i+1) for i,p in enumerate(passages)]}
+            return {'answer':answer,'sources':[dict(p,number=i+1) for i,p in enumerate(passages)],'retrieval_notice':' '.join(dict.fromkeys(notice))}
         finally:
             with self.lock:self.questions-=1
 
@@ -900,6 +903,7 @@ class Service:
             with self.lock: self.questions -= 1
         return {'answer':answer, 'sources':[dict(p, number=i+1) for i,p in enumerate(passages)]}
     def close(self):
+        self.semantic.close()
         self.pdf_jobs.close()
         with self.lock:
             self.stopping=True
@@ -1058,6 +1062,7 @@ def handler(service):
                 if recovery:return self.send(200,{'items':attachment_recovery.public(service.archive,recovery[1])})
                 if path=='/api/backups':return self.send(200,{'items':service.backups.entries(),'error':service.backups.error,'status':service.backups.status()})
                 if path=='/api/tasks':return self.send(200,service.task_status())
+                if path=='/api/semantic':return self.send(200,service.semantic.status())
                 if path=='/api/update': return self.send(200, updater.status())
                 if path=='/api/library':
                     from .library import query
@@ -1102,7 +1107,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/attachment-order-ui.js':'attachment-order-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/attachment-order-ui.js':'attachment-order-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/semantic-ui.js':'semantic-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1231,6 +1236,12 @@ def handler(service):
                     if 'content_font_scale' in body:
                         service.archive.set_content_font_scale(body['content_font_scale']);return self.send(200,{'ok':True,'content_font_scale':body['content_font_scale']})
                     service.archive.set_font_size(body.get('ui_font_size'));return self.send(200,{'ok':True,'ui_font_size':body['ui_font_size']})
+                if path=='/api/semantic/settings':return self.send(200,service.semantic.save(body))
+                if path=='/api/semantic/rebuild':return self.send(200,service.semantic.save(body,rebuild=True))
+                if path=='/api/semantic/test':
+                    from .semantic import embed,normalize
+                    vectors=embed(normalize(body),['知识库语义检索连接测试'],timeout=15)
+                    return self.send(200,{'ok':True,'dimensions':len(vectors[0])})
                 if path=='/api/model-api/test':return self.send(200,service.test_model_api(body))
                 if path=='/api/model-connection/test':return self.send(200,service.test_model_connection(body))
                 if path=='/api/company-mode':
