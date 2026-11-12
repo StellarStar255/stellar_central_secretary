@@ -146,14 +146,15 @@ function originalLink(item){try{const url=new URL(item?.url||'');return ['http:'
 function bindDetails(container,items=allItems){container.querySelectorAll('[data-id]').forEach(button=>{
  const inLibrary=container===$('#items');
  const show=()=>{const action=inLibrary&&globalThis.StellarLibraryPreview?.select;return (action?action(button.dataset.id):detail(button.dataset.id,true)).catch(error=>toast(error.message))};
- const linkedRow=container===$('#messages')&&button.classList.contains('archive-card')||container===$('#items')&&button.classList.contains('library-row');
+ const linkedRow=container===$('#messages')&&(button.classList.contains('archive-card')||button.classList.contains('source'))||container===$('#items')&&button.classList.contains('library-row');
  const url=linkedRow?originalLink(items.find(item=>item.id===button.dataset.id)):'';
- if(button.dataset.sourceOrigin){button.onclick=()=>{try{const origin=JSON.parse(button.dataset.sourceOrigin);if(origin.page){const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page);return}}catch{}void show()};return}
+ let origin;try{origin=JSON.parse(button.dataset.sourceOrigin||'null')}catch{}
+ if(origin?.page){button.onclick=()=>{const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)};return}
  if(!url){button.onclick=show;return}
  let pending;
  button.title=t('单击查看资料；双击打开原始链接');
  // Keep the first click from opening a modal over the second mouse click.
- button.onclick=event=>{if(button.dataset.sourceOrigin){const origin=JSON.parse(button.dataset.sourceOrigin);if(origin.page){const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page);return}}clearTimeout(pending);if(inLibrary){if(!(event?.detail>1))show();return}if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},400)};
+ button.onclick=event=>{clearTimeout(pending);if(inLibrary){if(!(event?.detail>1))show();return}if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},400)};
  button.ondblclick=event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);window.open(url,'_blank','noopener,noreferrer');void api('/api/items/'+button.dataset.id+'/view',{}).catch(()=>{})};
 })}
 function summaryProgress(item){
@@ -173,7 +174,7 @@ function renderChat(scroll=true){
  $('#workspace').classList.toggle('empty',messages.length===0);
  const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${answerTiming(m)}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
- bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
+ bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
@@ -183,7 +184,7 @@ function refresh(){if(refreshPromise){refreshAgain=true;return refreshPromise}re
 async function refreshNow(){
  const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,languageRevision=uiLanguageRevision;const languageStatus=await api('/api/status');globalThis.StellarBackups?.sync(languageStatus.backup);syncContentFontScale(languageStatus.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(languageStatus.settings.ui_font_size||14);activeWork=Object.values(languageStatus.runtime||{}).some(Boolean);const language=languageStatus.settings.ui_language||'zh';if(!languageChanging&&languageRevision===uiLanguageRevision&&language!==StellarI18n.language)await applyUILanguage(language);
  if(Date.now()-lastHistoryPoll>5000){lastHistoryPoll=Date.now();try{await pullSharedChats()}catch(e){sharedChatsReady=false;toast(t('对话同步未完成，知识库仍可使用：')+e.message)}}
- const referenced=[...new Set([selectedId,...captureActions.keys(),...(currentChat()?.messages||[]).slice(-200).flatMap(message=>message.items||[])].filter(Boolean))].slice(-1000);const dashboard=await api('/api/dashboard',{ids:referenced});libraryTotal=dashboard.total;libraryCategories=dashboard.categories;allItems=dashboard.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
+ const referenced=[...new Set([selectedId,...captureActions.keys(),...(currentChat()?.messages||[]).slice(-200).flatMap(message=>[...(message.items||[]),...(message.sources||[]).map(source=>source.item_id)])].filter(Boolean))].slice(-1000);const dashboard=await api('/api/dashboard',{ids:referenced});libraryTotal=dashboard.total;libraryCategories=dashboard.categories;allItems=dashboard.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));
  for(const [id,action] of captureActions){
   const item=allItems.find(i=>i.id===id);
   if(action.accepted&&item?.state!=='waiting_login')captureActions.delete(id);
