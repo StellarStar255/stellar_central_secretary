@@ -14,6 +14,8 @@ def model(prompt,backend,**kwargs):
  assert len(kwargs.get('images',[]))==1
  assert payload['visual_evidence'][0]['status']=='image_attached_for_rechecking'
  number=next(p['source'] for p in payload['passages'] if p['title']=='2026年第9周课程表')
+ if '依据这个判断' in payload['question']:
+  return '**按你指定的这张课表判断，周四下午图示时段没有课**。这以本周沿用该表为前提；图片本身显示11月2日至8日。['+str(number)+']'
  return '**不能确定今天下午是否有课**。已核对图示范围为11月2日至8日，不能把旧周空白推断为今天无课。['+str(number)+']'
 
 with tempfile.TemporaryDirectory() as root:
@@ -39,10 +41,23 @@ with tempfile.TemporaryDirectory() as root:
    assert calls[-2][0]['history'][0]['question']=='我老婆今天下午有课吗？'
    assert calls[-2][0]['history'][0]['source_ids']==[course]
    page.locator('#message-input').fill('继续');page.locator('#send-button').click();expect(page.locator('.source')).to_have_count(3)
+   # A legacy accidental archive must not erase the conversation's intent.
+   page.evaluate("""()=>{const chat=currentChat();delete chat.dialogueActive;for(const m of chat.messages)delete m.knowledgeQuestion;addMessage(chat,'user','旧版误存的补充');addMessage(chat,'assistant','旧版已归档',{archiveOnly:true})}""")
+   clarification='这个课程表就是她的，依据这个判断就行'
+   page.locator('#message-input').fill(clarification);page.locator('#send-button').click()
+   expect(page.locator('.source')).to_have_count(4)
+   expect(page.locator('.message-body strong').last).to_contain_text('按你指定的这张课表判断')
+   assert calls[-1][0]['question']==clarification and calls[-1][0]['history'][0]['question']=='我老婆今天下午有课吗？'
+   page.reload();expect(page.locator('#composer-hint')).to_contain_text('对话进行中')
+   page.locator('#archive-only').check();expect(page.locator('#composer-hint')).to_contain_text('只保存，不会回答')
+   expect(page.locator('#resume-conversation')).to_be_visible()
+   page.locator('#message-input').fill(clarification);page.locator('#resume-conversation').click()
+   expect(page.locator('#archive-only')).not_to_be_checked();expect(page.locator('#message-input')).to_have_value(clarification)
+   page.locator('#send-button').click();expect(page.locator('.source')).to_have_count(5)
    assert service.archive.export()==before
-   assert len([call for call in calls if call[1].get('images')])==3
+   assert len([call for call in calls if call[1].get('images')])==5
    page.screenshot(path='/tmp/secretary-schedule-chat-fixed.png')
    assert not errors,errors
    browser.close()
-   print('PASS: screenshot sequence in automatic mode, source-only cards, actual saved image supplied on every turn, Markdown, follow-up context, date context and no accidental archives; deterministic model replies')
+   print('PASS: screenshot questions and declarative clarification, legacy accidental-archive recovery, persistent dialogue after reload, archive-only warning/return button, source cards, saved image supplied and zero new archives; deterministic model replies')
  finally:server.shutdown();server.server_close();service.close()

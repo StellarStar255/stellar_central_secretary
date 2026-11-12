@@ -122,7 +122,7 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  elements.get('#input-mode').value='note';input.value='为什么命令中需要引号？';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+2);
  elements.get('#input-mode').value='ask';input.value='tar -czf samples.tar.gz samples/';await form.onsubmit({preventDefault(){}});assert.equal(countAsk(),askBeforeNotes+3);
  elements.get('#new-chat').onclick();elements.get('#input-mode').value='library';elements.get('#input-mode').onchange();
- assert(input.placeholder.includes('继续追问'));
+ assert(input.placeholder.includes('补充条件'));
  const beforeLibraryArchive=archive.length;
  input.value='本地部署方案';await form.onsubmit({preventDefault(){}});
  let libraryCall=calls.filter(c=>c.path==='/api/ask').at(-1);
@@ -152,8 +152,25 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert.deepEqual(followupCall.history[0].source_ids,['a1']);
  input.value='继续';await form.onsubmit({preventDefault(){}});
  assert.equal(archive.length,beforeScheduleArchive,'Follow-up instructions must not become archived notes');
+ for(const clarification of ['这个课程表就是她的，依据这个判断就行','用这份即可','每天都按这个执行','对象是我妻子，不是我','明天下午','她换了一间教室']){
+  input.value=clarification;await form.onsubmit({preventDefault(){}});
+  assert.equal(calls.filter(c=>c.path==='/api/ask').at(-1).body.question,clarification);
+  assert.equal(archive.length,beforeScheduleArchive,'All conversational clarifications must remain dialogue: '+clarification);
+ }
+ // Simulate upgrading an older conversation with a mistaken archive after QA.
+ vm.runInContext("delete currentChat().dialogueActive;currentChat().messages.forEach(m=>delete m.knowledgeQuestion)",context);
+ elements.get('#input-mode').value='note';input.value='以前被误存的补充';await form.onsubmit({preventDefault(){}});
+ const afterMistake=archive.length;elements.get('#input-mode').value='auto';
+ input.value='这个课程表就是她的，依据这个判断就行';await form.onsubmit({preventDefault(){}});
+ assert.equal(archive.length,afterMistake,'An intermediate archive must not erase earlier QA intent');
+ elements.get('#archive-only').checked=true;elements.get('#archive-only').onchange();
+ assert(elements.get('#composer-hint').textContent.includes('不会回答'));
+ assert.equal(elements.get('#resume-conversation').hidden,false);
+ elements.get('#resume-conversation').onclick();assert.equal(elements.get('#archive-only').checked,false);
+ elements.get('#archive-only').checked=true;elements.get('#new-chat').onclick();
+ assert.equal(elements.get('#archive-only').checked,false,'Archive-only must not leak into a new chat');
  elements.get('#input-mode').value='note';input.value='看下课程表再告诉我';await form.onsubmit({preventDefault(){}});
- assert.equal(archive.length,beforeScheduleArchive+1,'An explicit archive choice must still take priority');askReply=null;
+ assert.equal(archive.length,afterMistake+1,'An explicit archive choice must still take priority');askReply=null;
  console.log('PASS: screenshot regression: automatic schedule question, non-question follow-up, only cited sources in history/UI, safe Markdown and explicit archive override');
  console.log('PASS: automatic command/knowledge archiving, literal whitespace and URLs retained, no retrieval or URL fetch for commands, explicit archive/ask overrides and text-only group');
  console.log('PASS: startup, link archive, question with sources, save note, history persistence, new chat preserves archive, legacy backend and false-success rejection, delegated confirmation click, expired-token retry, persistent failure feedback');

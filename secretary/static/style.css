@@ -113,3 +113,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .attachment-order-hint{font-size:.78rem}.attachment-drag-handle{align-self:flex-start;cursor:grab;padding:0 7px;border:0;background:transparent;color:var(--muted);font-size:1.25rem;line-height:1.2}.attachment-drag-handle:active{cursor:grabbing}.material-card.attachment-dragging{opacity:.45}.material-card.attachment-drop-target{outline:2px solid var(--green);outline-offset:2px}.order-saving .material-card{cursor:progress}.order-saving .attachment-drag-handle{cursor:progress}
 
 .message.assistant .answer-prose{white-space:normal}.answer-prose p{margin:0 0 12px}.answer-prose p:last-child{margin-bottom:0}.answer-prose pre{white-space:pre-wrap;background:var(--input);padding:12px;border-radius:8px;overflow:auto}.answer-prose ul,.answer-prose ol{padding-left:1.6em}.answer-prose blockquote{margin:12px 0;padding-left:14px;border-left:3px solid var(--line)}
+
+.composer-hint.archive-mode-hint{color:#ae7a27;font-weight:600}.resume-conversation{display:block;margin:6px auto 0;padding:5px 12px;border:1px solid var(--line);border-radius:8px;font-size:.785714rem}

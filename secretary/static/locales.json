@@ -1221,5 +1221,14 @@
   "嵌入模型维度已变化，请重建语义索引": "Embedding dimensions changed. Rebuild the semantic index.",
   "本机嵌入服务请求失败，请确认模型已下载且支持嵌入（HTTP ": "The local embedding request failed. Check that the model is downloaded and supports embeddings (HTTP ",
   "自动识别：问题和对话追问会检索；普通文字和命令归档，不会执行命令。": "Auto-detect: questions and follow-ups search the library; ordinary text and commands are archived. Commands are never executed.",
-  "回答包含无法核对的来源编号，请重试": "The answer contains an invalid source number. Please try again."
+  "回答包含无法核对的来源编号，请重试": "The answer contains an invalid source number. Please try again.",
+  "继续提问、补充条件或纠正上一条回答…": "Ask a follow-up, add context or correct the previous answer…",
+  "归档模式：输入要保存的文字或添加附件…": "Archive mode: enter text to save or add attachments…",
+  "仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。": "Archive only is on: this message will be saved, without an answer. Turn it off to continue the conversation.",
+  "归档模式：当前文字保存为笔记，不进行问答。": "Archive mode: text is saved as a note, without an answer.",
+  "组合归档：本次文字、链接和附件保存为一份资料。": "Grouped archive: save this text, links and attachments as one item.",
+  "对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。": "Conversation active: clarifications, corrections and follow-ups receive answers. Choose archive explicitly to save a note.",
+  "自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。": "Auto-detect: once a conversation starts, keep talking. Material and commands can be archived; commands are never executed.",
+  "仅保存当前消息，不进行问答": "Save this message without answering",
+  "切回对话": "Back to conversation"
 }

@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.88** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.88.md)
+Version **v0.1.89** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.89.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -22,7 +22,7 @@ The configured CLI or compatible API first generates up to three keyword queries
 
 Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. By default, retrieval uses full-text search with model-expanded keywords. Enable local semantic search below to add vector retrieval.
 
-Auto-detected questions use this same conversation pipeline. Follow-ups such as “look at the timetable again” or “continue” are not archived as notes. Local date/time context and image date ranges constrain schedule answers; an older week’s empty cells do not establish today’s availability. Related saved images can be rechecked through bounded compatible previews when the selected model accepts images. Missing or unsupported image input is disclosed.
+Auto-detected questions use this same conversation pipeline. Once a conversation starts, ordinary clarifications, corrections and follow-ups keep receiving answers without relying on question words. Explicit save instructions, commands and archive modes remain available. Conversation intent persists across reloads and intermediate accidental archives in older chats. New chats clear archive-only and stale archive modes. Archive-only displays a clear warning and a Back to conversation button. Local date/time context and image date ranges constrain schedule answers; an older week’s empty cells do not establish today’s availability. When the user explicitly asks for a judgment based on that timetable, the answer gives a conditional conclusion with its assumptions and visible time range. Related saved images can be rechecked through bounded compatible previews when the selected model accepts images. Missing or unsupported image input is disclosed.
 
 ## Local semantic search
 

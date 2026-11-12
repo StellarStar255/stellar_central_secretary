@@ -135,7 +135,7 @@ async function api(path,body,retry=true,companyRetry=true){
 async function busy(button,action,label=t('处理中…')){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await action()}catch(e){toast(e.message)}finally{button.disabled=false;button.textContent=old}}
 function displayCategory(value){return value==='未分类'?t('未分类'):value}
 function date(value){return new Date(value).toLocaleDateString(StellarI18n.locale,{month:'short',day:'numeric'})}
-function newChat(){activeId='';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
+function newChat(){activeId='';$('#archive-only').checked=false;if(['note','group','ask'].includes($('#input-mode').value))$('#input-mode').value='auto';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
 function renderSidebar(){
  $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
  $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;restoreInputMode();saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))});
@@ -168,6 +168,7 @@ function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return 
 function renderChat(scroll=true){
  if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
+ updateInputMode();
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
  const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
@@ -386,15 +387,20 @@ function archiveReply(result){const i=result.item;
  return t('已存入知识库，正文现在就可以检索。')+($('#auto-ai').checked?t('我会继续在后台整理摘要和主题，结果会更新在下方。'):t('自动整理已关闭，之后可以在资料详情中生成摘要。'))}
 
 function updateInputMode(){
- const library=$('#input-mode').value==='library';
- $('#message-input').placeholder=t(library?'直接提问，自动搜索知识库；可以继续追问…':'发送消息、粘贴图片或链接，或拖入文件…');
- $('#composer-hint').textContent=t(library?'知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。':'自动识别：问题和对话追问会检索；普通文字和命令归档，不会执行命令。');
+ const mode=$('#input-mode').value,archive=$('#archive-only').checked===true,note=mode==='note',library=mode==='library',dialogue=mode==='auto'&&hasKnowledgeContext();
+ $('#message-input').placeholder=t(archive||note?'归档模式：输入要保存的文字或添加附件…':library||dialogue?'继续提问、补充条件或纠正上一条回答…':'发送消息、粘贴图片或链接，或拖入文件…');
+ $('#composer-hint').textContent=t(archive?'仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。':note?'归档模式：当前文字保存为笔记，不进行问答。':mode==='group'?'组合归档：本次文字、链接和附件保存为一份资料。':library?'知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。':dialogue?'对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。':'自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。');
+ $('#composer-hint').classList.toggle('archive-mode-hint',archive||note);
+ $('#resume-conversation').hidden=!(archive||note);
+ $('#send-button').title=t(archive||note?'仅保存当前消息，不进行问答':'发送 (Enter)');
 }
 function restoreInputMode(){
  const mode=currentChat()?.inputMode;
- $('#input-mode').value=['auto','library','group','ask','note'].includes(mode)?mode:'auto';updateInputMode();
+ $('#archive-only').checked=false;$('#input-mode').value=['auto','library','group','ask','note'].includes(mode)?mode:'auto';updateInputMode();
 }
-$('#input-mode').onchange=()=>{const chat=currentChat();if(chat){chat.inputMode=$('#input-mode').value;chat.updated=Date.now();saveChats()}updateInputMode()};
+$('#input-mode').onchange=()=>{if(['library','ask'].includes($('#input-mode').value))$('#archive-only').checked=false;const chat=currentChat();if(chat){chat.inputMode=$('#input-mode').value;chat.updated=Date.now();saveChats()}updateInputMode()};
+$('#archive-only').onchange=updateInputMode;
+$('#resume-conversation').onclick=()=>{$('#archive-only').checked=false;$('#input-mode').value='library';$('#input-mode').onchange();$('#message-input').focus()};
 function knowledgeHistory(chat,current){
  const turns=[];
  for(let i=0;i<chat.messages.indexOf(current);i++){
@@ -409,8 +415,10 @@ function answerSources(message){
  return numbers.length?sources.filter(source=>numbers.includes(source.number)):sources;
 }
 function hasKnowledgeContext(){
- const messages=currentChat()?.messages||[],answer=messages.at(-1),question=messages.at(-2);
- return answer?.role==='assistant'&&!answer.pending&&!answer.error&&!answer.archiveOnly&&(question?.knowledgeQuestion||answer.sources?.length>0);
+ const chat=currentChat();
+ // Conversation intent is persistent. A declarative clarification, a failed
+ // answer, or an older mistakenly archived reply cannot turn it into a note.
+ return !!chat&&(chat.dialogueActive===true||(chat.messages||[]).some(message=>message.knowledgeQuestion||message.role==='assistant'&&!message.archiveOnly&&message.sources?.length>0));
 }
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
@@ -421,7 +429,7 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';
- if(followup&&!hasFiles&&!/https?:\/\//i.test(text)&&/^(?:继续|接着|再(?:看|查|说|解释|确认)|重新(?:看|查|确认)|仔细(?:看|查)|那(?:她|他|它|个|这|么|下午|上午|今天|明天)|她的|他的|它的|第二个|第三个|第\d+个|不是|不对|上面|刚才|前面)|^(?:continue|and what|what about|check again|look again|the second)\b/i.test(first))return 'ask';
+ if(followup&&!hasFiles&&!/https?:\/\//i.test(text))return 'ask';
  if(!hasFiles&&!/https?:\/\//i.test(text))return question||/[?？]\s*$|(?:是什么|有哪些|有什么|在哪里|怎么样|怎么办|吗|呢)[^\n]{0,24}$/.test(text)?'ask':'note';
  return mode;
 }
@@ -437,6 +445,7 @@ $('#composer-form').onsubmit=async event=>{
  const results=[],errors=[];
  try{
   if(mode==='library'||mode==='ask'&&!files.length&&!/https?:\/\//i.test(text)){
+   chat.dialogueActive=true;
    updateMessage(chat,userMessage,{knowledgeQuestion:true});
    updateMessage(chat,response,{text:t('正在理解问题、检索知识库，整理答案…')});
    const data=await api('/api/ask',{question:text,library_chat:true,history:knowledgeHistory(chat,userMessage)});

@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory() as root:
     assert service.archive.get(long_id)['state']=='processing' and service.archive.get(other)['state']=='pending'
     assert 'queue_seconds' not in json.dumps(service.chat_history()),'Timing polls must not rewrite chat history with transient metrics'
     calls=summarize.call_count
-    page.locator('#archive-only').check();page.locator('#input-mode').select_option('ask')
+    page.locator('#input-mode').select_option('ask');page.locator('#archive-only').check()
     page.locator('#message-input').fill('为什么这个命令需要引号？仅作为备忘保存。');page.locator('#send-button').click()
     expect(page.locator('#messages .archive-card')).to_have_count(2);expect(page.locator('#messages')).to_contain_text('未调用 AI')
     page.locator('#input-mode').select_option('auto');page.locator('#message-input').fill('Related links\nhttps://example.invalid/one\nhttps://example.invalid/two');page.locator('#send-button').click()
