@@ -45,8 +45,14 @@ with tempfile.TemporaryDirectory() as data:
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
         assert status['settings']['company_mode'] is False
-        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/note-attachments.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/attachment-order-ui.js','/additions-ui.js','/model-proxy-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
+        for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/note-attachments.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/attachment-order-ui.js','/additions-ui.js','/model-proxy-ui.js','/semantic-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
             assert request(path), path
+        assert b'value="library"' in request('/') and b'semantic-settings' in request('/')
+        semantic=json.loads(request('/api/semantic'))
+        assert semantic['config']['enabled'] is False and semantic['indexed']==0
+        assert json.loads(request('/api/ask',{'question':'Empty library question','library_chat':True,'history':[]},status['token']))['sources']==[]
+        assert json.loads(request('/api/semantic/settings',semantic['config'],status['token']))['config']['enabled'] is False
+        print('PASS: frozen library chat, semantic module and UI assets, empty-library answer and embedding settings without external model calls')
         extension=json.loads(request('/api/browser-extension/prepare',{},status['token']))
         extension_path=Path(extension['path'])
         assert extension_path.parent.resolve()==Path(data).resolve() and (extension_path/'manifest.json').is_file()
@@ -165,9 +171,17 @@ with tempfile.TemporaryDirectory() as data:
             def log_message(self,*args):pass
             def do_POST(self):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path=='/api/embed':
+                    assert body['model']=='synthetic-embedding' and body['truncate'] is False
+                    vectors=[[1.,0.,0.] if 'battery' in value or '省电' in value else [0.,1.,0.] for value in body['input']]
+                    raw=json.dumps({'embeddings':vectors}).encode()
+                    self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
                 assert self.headers.get('Authorization')=='Bearer '+api_key and body['model']=='synthetic-model'
                 provider_calls.append(True)
-                content='OK' if 'Reply with exactly OK' in str(body['messages'][-1]['content']) else json.dumps({'title':'Synthetic commands','summary':'Creates a synthetic compressed archive.','category':'Test','tags':['commands']})
+                prompt=str(body['messages'][-1]['content'])
+                content='OK' if 'Reply with exactly OK' in prompt else json.dumps({'title':'Synthetic commands','summary':'Creates a synthetic compressed archive.','category':'Test','tags':['commands']})
+                if prompt.startswith('为个人知识库生成全文检索词'):content=json.dumps({'queries':['省电']})
+                if prompt.startswith('请仅依据本次检索到的资料回答当前问题'):content='Close background applications to improve battery life. [1]'
                 raw=json.dumps({'choices':[{'message':{'content':content},'finish_reason':'stop'}]}).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         provider=ThreadingHTTPServer(('127.0.0.1',0),LocalAPI);threading.Thread(target=provider.serve_forever,daemon=True).start()
@@ -216,6 +230,19 @@ with tempfile.TemporaryDirectory() as data:
             request('/api/ask',{'question':'CompanyGuardFixture'},status['token'])
             assert len(provider_calls)==4
             print('PASS: company mode defaults off; off mode has no extra approval; frozen company material blocked before confirmation; confirmed destination enables summary; revocation blocks retrieved company passages; no unapproved provider call')
+            power=json.loads(request('/api/ingest',{'text':'Improve battery life by closing background applications.','archive_only':True},status['token']))['item']
+            semantic_config={'enabled':True,'base_url':f'http://127.0.0.1:{provider.server_port}','model':'synthetic-embedding','min_score':0.45}
+            assert json.loads(request('/api/semantic/test',semantic_config,status['token']))['dimensions']==3
+            request('/api/semantic/settings',semantic_config,status['token'])
+            for _ in range(100):
+                index=json.loads(request('/api/semantic'))
+                if index['indexed']==index['total'] and index['indexed']>0:break
+                time.sleep(.1)
+            else:raise AssertionError('Frozen semantic backfill did not complete')
+            grounded=json.loads(request('/api/ask',{'question':'如何省电','library_chat':True,'history':[]},status['token']))
+            assert '[1]' in grounded['answer'] and [source['item_id'] for source in grounded['sources']]==[power['id']],grounded
+            request('/api/semantic/settings',{**semantic_config,'enabled':False},status['token'])
+            print('PASS: frozen embedding worker, SQLite vector cache and semantic-only library answer with source; local deterministic API/embedding fixtures')
             request('/api/settings',{'backend':'codex','auto_ai':False},status['token'])
             print('PASS: frozen custom API worker, local HTTP request, masked status and credential-free backup')
         finally:provider.shutdown();provider.server_close()
