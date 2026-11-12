@@ -630,7 +630,7 @@ globalThis.StellarCompanyAI?.setup({api,toast,reload:loadStatus,onModeChanged:re
 globalThis.StellarSemantic?.bind({api,toast});globalThis.StellarModelAPI?.bind({api,toast});globalThis.StellarModelProxy?.bind({api,toast});
 $('#backend').addEventListener('change',()=>{backendRevision++;updateModelLabel()});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{const body={model_proxy:globalThis.StellarModelProxy?.collect(),capture_proxy:globalThis.StellarModelProxy?.collectBrowser(),backend:$('#backend').value,auto_ai:$('#auto-ai').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value};if(body.backend==='api')body.model_api=StellarModelAPI.collect();const saved=await api('/api/settings',body);await globalThis.StellarSemantic?.save();if(body.backend==='api')StellarModelAPI.saved(saved.model_api);globalThis.StellarModelProxy?.saved(saved.model_proxy,saved.capture_proxy);updateModelLabel();await loadStatus();$('#settings-dialog').close();toast(t('设置已保存'))});
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));setTimeout(pollArchiveUpdates,activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
@@ -670,7 +670,13 @@ $('#backup-input').onchange=async()=>{
  finally{importingBackup=false;$('#import-backup').disabled=$('#library-import').disabled=false;$('#backup-input').value=''}
 };
 
-async function pollArchiveUpdates(){try{if(!document.hidden)await refresh()}catch{}finally{setTimeout(pollArchiveUpdates,!document.hidden&&activeWork?1000:10000)}}
+let archivePollTimer;
+function scheduleArchivePoll(delay){clearTimeout(archivePollTimer);archivePollTimer=setTimeout(pollArchiveUpdates,delay)}
+async function pollArchiveUpdates(){try{if(!document.hidden)await refresh()}catch{}finally{scheduleArchivePoll(!document.hidden&&activeWork?1000:10000)}}
+function resumeArchiveUpdates(){if(!document.hidden&&token&&historyLoaded)scheduleArchivePoll(0)}
+document.addEventListener('visibilitychange',resumeArchiveUpdates);
+window.addEventListener('focus',resumeArchiveUpdates);
+window.addEventListener('pageshow',resumeArchiveUpdates);
 
 globalThis.StellarBundles?.bind({api,toast,nativeVideo:()=>latestStatus?.desktop?.video_player===true,onSaved:async id=>{await refresh();if(selectedId===id&&$('#detail-dialog').open)await detail(id)}});
 

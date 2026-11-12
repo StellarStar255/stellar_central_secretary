@@ -33,7 +33,18 @@ with tempfile.TemporaryDirectory() as root:
     page.evaluate("window.__testMessageBody=document.querySelector('#messages .message-body');true")
     page.evaluate('refresh()');assert page.evaluate("window.__testMessageBody===document.querySelector('#messages .message-body')"),'Timing updates must preserve message nodes and text selection'
     page.screenshot(path='/tmp/secretary-summary-progress.png')
-    release_short.set();expect(page.locator('#messages .archive-summary')).to_contain_text('Synthetic concise summary.',timeout=5000)
+    short_id=next(item['id'] for item in service.archive.list() if service.archive.get(item['id'])['text']=='tar -czf synthetic.tar.gz samples/')
+    with service.lock:short_future=service.summary_futures[short_id]
+    # The background worker must persist completion without any GUI refresh.
+    # Hold the page hidden long enough for its normal polling to enter idle mode.
+    page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(1600)
+    release_short.set();short_future.result(timeout=5)
+    assert service.archive.get(short_id)['state']=='ready','Completion must be persisted before the GUI is reopened'
+    expect(page.locator('#messages .archive-status')).to_contain_text('正在整理')
+    page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))")
+    expect(page.locator('#messages .archive-status')).to_contain_text('已整理',timeout=2000)
+    expect(page.locator('#messages .archive-summary')).to_contain_text('Synthetic concise summary.',timeout=2000)
     expect(page.locator('#messages .summary-progress')).to_contain_text('处理完成')
     assert service.archive.get(long_id)['state']=='processing' and service.archive.get(other)['state']=='pending'
     assert 'queue_seconds' not in json.dumps(service.chat_history()),'Timing polls must not rewrite chat history with transient metrics'
