@@ -14,6 +14,14 @@ A local knowledge library for links, AI conversations, PDFs, documents and notes
 
 The demo uses fictional documents and a prewritten summary. Waiting is accelerated; it does not show actual model latency.
 
+## Chat with your library
+
+Choose **Library chat** in the composer, or select **Chat with your library** on the welcome screen. Ask about saved material and continue with follow-up questions. Up to six recent successful question/answer pairs provide context; starting a new chat clears that context.
+
+The configured CLI or compatible API first generates up to three keyword queries. The app searches its local full-text index, includes the original question as a fallback, combines results and sends up to eight source passages to the model for a cited answer. Source buttons open the archived material and show attachment/page information where available. Missing evidence produces a clear message. Prior answers help interpret the question and are not treated as factual evidence.
+
+Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. This first version uses full-text search with model-expanded keywords; it does not add a vector index.
+
 ## Example: turn a paper manual into searchable material
 
 Photograph both sides of a fitness-band manual and send the two HEIC photos together. Stellar Secretary keeps the originals in your local library and organizes their contents for later reference. These four screenshots follow the material from its first summary to finding it again.

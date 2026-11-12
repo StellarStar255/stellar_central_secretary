@@ -1178,5 +1178,13 @@
   "调整附件顺序：": "Reorder attachment: ",
   "正在保存附件顺序…": "Saving attachment order…",
   "附件顺序已保存": "Attachment order saved",
-  "附件排序未保存：": "Attachment order was not saved: "
+  "附件排序未保存：": "Attachment order was not saved: ",
+  "知识库对话": "Library chat",
+  "⌕ 开始知识库对话": "⌕ Chat with your library",
+  "直接提问，自动搜索知识库；可以继续追问…": "Ask a question to search your library, then ask follow-up questions…",
+  "知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。": "Library chat searches saved material using recent conversation context and cites sources. Archive new files first.",
+  "请先归档附件，再在知识库对话中提问。": "Archive attachments first, then ask about them in Library chat.",
+  "正在理解问题、检索知识库，整理答案…": "Understanding your question, searching the library and preparing an answer…",
+  "知识库对话上下文格式无效": "Invalid library conversation context",
+  "知识库对话请通过已归档资料检索": "Library chat searches material already in your library"
 }

@@ -114,7 +114,7 @@ function currentChat(){return conversations.find(c=>c.id===activeId)}
 function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);if(!conversations.some(chat=>chat.id===activeId))activeId='';try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId}))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
 function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId}));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast(t('对话同步未完成：')+e.message))}}
 function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
-async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;historyLoaded=true;writeLocalChats()}
+async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;historyLoaded=true;writeLocalChats();restoreInputMode()}
 async function pullSharedChats(){if(!sharedChatsReady||sending)return;await sharedChatSaves;mergeChats(await api('/api/conversations'))}
 async function switchInterface(mode){if(sending){toast(t('请等待当前消息处理完成后再切换'));return}await sharedChatSaves;await api('/api/conversations',{conversations,activeId});await api('/api/interface',{mode});toast(mode==='desktop'?t('正在打开桌面窗口'):t('正在打开网页模式'))}
 $('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterface((globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?'browser':'desktop'));
@@ -138,7 +138,7 @@ function date(value){return new Date(value).toLocaleDateString(StellarI18n.local
 function newChat(){activeId='';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
 function renderSidebar(){
  $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
- $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))});
+ $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;restoreInputMode();saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))});
  $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
  bindDetails($('#recent-items'));
 }
@@ -296,7 +296,7 @@ window.addEventListener('dragenter',e=>{if([...e.dataTransfer.types].includes('F
 window.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('Files'))e.preventDefault()});
 window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('#drag-overlay').hidden=true});
 window.addEventListener('drop',e=>{if(e.dataTransfer.files.length){e.preventDefault();attach([...e.dataTransfer.files])}dragDepth=0;$('#drag-overlay').hidden=true});
-document.querySelectorAll('[data-suggestion]').forEach(b=>b.onclick=()=>{if(b.dataset.suggestion==='file')$('#file-input').click();else{$('#message-input').value=b.dataset.suggestion==='archive'?'':t('帮我找一下之前收藏的资料：');$('#message-input').placeholder=b.dataset.suggestion==='archive'?t('在这里粘贴链接，然后按 Enter…'):t('输入你想找的资料或问题…');resizeInput();$('#message-input').focus()}});
+document.querySelectorAll('[data-suggestion]').forEach(b=>b.onclick=()=>{if(b.dataset.suggestion==='file'){$('#input-mode').value='auto';updateInputMode();$('#file-input').click()}else{$('#input-mode').value=b.dataset.suggestion==='archive'?'auto':'library';$('#archive-only').checked=false;updateInputMode();$('#message-input').value='';resizeInput();$('#message-input').focus()}});
 async function readFile(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error(t('无法读取 ')+file.name));reader.readAsDataURL(file)})}
 function canReadChatGPT(url){try{const u=new URL(url);return u.protocol==='https:'&&['chatgpt.com','chat.openai.com'].includes(u.hostname)&&/^\/(c|share)\/[a-zA-Z0-9_-]+\/?$/.test(u.pathname)}catch{return false}}
 function canReadWebPage(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!/\.(pdf|zip|rar|7z|dmg|exe|docx?|xlsx?|pptx?|png|jpe?g|gif|mp[34])$/i.test(u.pathname)}catch{return false}}
@@ -385,6 +385,25 @@ function archiveReply(result){const i=result.item;
  if(!result.created&&!result.updated)return t('正文已在知识库中。')+(i.state==='processing'?t('正在生成总结，请稍候。'):t('尚未生成总结，可点击资料中的「重新整理」。'));
  return t('已存入知识库，正文现在就可以检索。')+($('#auto-ai').checked?t('我会继续在后台整理摘要和主题，结果会更新在下方。'):t('自动整理已关闭，之后可以在资料详情中生成摘要。'))}
 
+function updateInputMode(){
+ const library=$('#input-mode').value==='library';
+ $('#message-input').placeholder=t(library?'直接提问，自动搜索知识库；可以继续追问…':'发送消息、粘贴图片或链接，或拖入文件…');
+ $('#composer-hint').textContent=t(library?'知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。':'自动识别：文字和命令默认归档，明确的问题才检索；不会执行命令。');
+}
+function restoreInputMode(){
+ const mode=currentChat()?.inputMode;
+ $('#input-mode').value=['auto','library','group','ask','note'].includes(mode)?mode:'auto';updateInputMode();
+}
+$('#input-mode').onchange=()=>{const chat=currentChat();if(chat){chat.inputMode=$('#input-mode').value;chat.updated=Date.now();saveChats()}updateInputMode()};
+function knowledgeHistory(chat,current){
+ const turns=[];
+ for(let i=0;i<chat.messages.indexOf(current);i++){
+  const question=chat.messages[i],answer=chat.messages[i+1];
+  if(question.role==='user'&&question.knowledgeQuestion&&answer?.role==='assistant'&&!answer.pending&&!answer.error)
+   turns.push({question:question.text.slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set((answer.sources||[]).map(s=>s.item_id))].slice(0,12)});
+ }
+ return turns.slice(-6);
+}
 function resolveInputMode(text,mode,hasFiles=false){
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
  if(mode!=='auto')return mode;
@@ -399,13 +418,21 @@ function resolveInputMode(text,mode,hasFiles=false){
 }
 
 $('#composer-form').onsubmit=async event=>{
- event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],archiveOnly=$('#archive-only').checked===true;let mode=resolveInputMode(text,archiveOnly&&$('#input-mode').value==='ask'?'auto':$('#input-mode').value,files.length>0);if(archiveOnly&&mode==='ask')mode='note';if(!text&&!files.length)return;
+ event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],archiveOnly=$('#archive-only').checked===true;let mode=resolveInputMode(text,archiveOnly&&$('#input-mode').value==='ask'?'auto':$('#input-mode').value,files.length>0);if(archiveOnly&&['ask','library'].includes(mode))mode='note';if(!text&&!files.length)return;
+ if(mode==='library'&&files.length){toast(t('请先归档附件，再在知识库对话中提问。'));return}
  if(!token){toast(t('服务尚未连接，请稍后重试或刷新页面。'));return}
  let chat=currentChat();if(!chat){chat={id:uid(),title:(text||files[0]?.name||t('新对话')).slice(0,36),messages:[]};conversations.unshift(chat);activeId=chat.id}
+ chat.inputMode=$('#input-mode').value;
  const userMessage=addMessage(chat,'user',text,{files:files.map(f=>f.name)});const response=addMessage(chat,'assistant',t('正在处理…'),{pending:true,items:[]});
  $('#message-input').value='';for(const file of files)releaseAttachment(file);attachedFiles=[];sending=true;renderAttachments();resizeInput();renderSidebar();$('#composer-status').textContent=t('正在处理…');
  const results=[],errors=[];
  try{
+  if(mode==='library'){
+   updateMessage(chat,userMessage,{knowledgeQuestion:true});
+   updateMessage(chat,response,{text:t('正在理解问题、检索知识库，整理答案…')});
+   const data=await api('/api/ask',{question:text,library_chat:true,history:knowledgeHistory(chat,userMessage)});
+   updateMessage(chat,response,{text:data.answer,sources:data.sources,pending:false,error:false});return;
+  }
   const groupLinks=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
   if(grouped){
@@ -487,6 +514,7 @@ async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.is
 }
 async function applyUILanguage(language){
  const changed=StellarI18n.language!==language;StellarI18n.setLanguage(language);$('#ui-language').value=language;$('#tutorial-open').href='/tutorial?lang='+language;
+ updateInputMode();
  $('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');
  if(changed){lastMessageMarkup='';renderAttachments();if(sending)$('#composer-status').textContent=t('正在处理…');if(latestStatus){$('#backend-status').textContent=latestStatus.settings.backend==='api'?t(latestStatus.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(latestStatus.backends).map(([key,value])=>key+': '+t(value?'已找到 CLI（登录状态需调用验证）':'未找到')).join(' · ');$('#data-dir').textContent=t('本机资料目录：')+latestStatus.data_dir}if(lastUpdateState)renderUpdate(lastUpdateState);globalThis.StellarLibraryPreview?.refresh();if($('#tasks-dialog').open)void globalThis.StellarTasks?.refresh();renderSidebar();renderChat(false);updateModelLabel();if($('#library-dialog').open)await renderLibrary();if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId))await detail(selectedId);}
 }

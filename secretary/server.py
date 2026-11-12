@@ -863,6 +863,28 @@ class Service:
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id);self.questions-=1
 
+    def ask_library(self,question,history=None):
+        from . import knowledge_chat
+        if not question.strip():raise ValueError('请输入问题')
+        turns=knowledge_chat.history(history)
+        with self.archive.db() as db:
+            available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
+        if not available:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}
+        # Review historical sources before sending previous answers to a model.
+        history_ids=[item for turn in turns for item in turn['source_ids']]
+        backend=self.model_backend(item_ids=history_ids)
+        with self.lock:self.questions+=1
+        try:
+            with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True):
+                queries=knowledge_chat.plan(question,turns,backend)
+                passages=knowledge_chat.retrieve(self.archive,queries)
+                if not passages:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}
+                backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
+                answer=knowledge_chat.answer(question,turns,passages,backend)
+            return {'answer':answer,'sources':[dict(p,number=i+1) for i,p in enumerate(passages)]}
+        finally:
+            with self.lock:self.questions-=1
+
     def ask(self, question,item_ids=None):
         if not question.strip(): raise ValueError('请输入问题')
         if item_ids is not None:return self.ask_material(question,item_ids)
@@ -1227,7 +1249,12 @@ def handler(service):
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
-                if path=='/api/ask': return self.send(200, service.ask(str(body.get('question',''))[:4000],body.get('item_ids')))
+                if path=='/api/ask':
+                    question=str(body.get('question',''))[:4000]
+                    if body.get('library_chat') is True:
+                        if body.get('item_ids') is not None:raise ValueError('知识库对话请通过已归档资料检索')
+                        return self.send(200,service.ask_library(question,body.get('history')))
+                    return self.send(200,service.ask(question,body.get('item_ids')))
                 if path.startswith('/api/items/'):
                     note_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/note-images/([a-f0-9]{32})/open',path)
                     if note_open:return self.send(200,notes.open_image(service.archive,*note_open.groups()))
