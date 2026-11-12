@@ -883,8 +883,9 @@ class Service:
                 passages=knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice)
                 if not passages:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[],'retrieval_notice':' '.join(dict.fromkeys(notice))}
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
-                answer=knowledge_chat.answer(question,turns,passages,backend)
-            return {'answer':answer,'sources':[dict(p,number=i+1) for i,p in enumerate(passages)],'retrieval_notice':' '.join(dict.fromkeys(notice))}
+                images,visual_status=knowledge_chat.visual_evidence(self.archive,passages,backend)
+                answer=knowledge_chat.answer(question,turns,passages,backend,images,visual_status)
+            return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice))}
         finally:
             with self.lock:self.questions-=1
 
@@ -901,7 +902,8 @@ class Service:
                                 +json.dumps({'question': question, 'passages': [{'source':i+1, 'title':p['title'], 'text':p['text'],'origin':p.get('origin',{})} for i,p in enumerate(passages)]}, ensure_ascii=False), self.model_backend(item_ids=[p['item_id'] for p in passages]))
         finally:
             with self.lock: self.questions -= 1
-        return {'answer':answer, 'sources':[dict(p, number=i+1) for i,p in enumerate(passages)]}
+        from .knowledge_chat import citations
+        return {'answer':answer, 'sources':citations(answer,passages)}
     def close(self):
         self.semantic.close()
         self.pdf_jobs.close()

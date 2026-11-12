@@ -1,9 +1,12 @@
 import json
+import io
+import base64
 import tempfile
 import unittest
 from unittest.mock import patch
 from secretary import company_ai, knowledge_chat
 from secretary.server import Service
+from PIL import Image
 
 
 class KnowledgeChatTest(unittest.TestCase):
@@ -100,6 +103,45 @@ class KnowledgeChatTest(unittest.TestCase):
         turn=knowledge_chat.history([dict(question='x'*3000,answer='y'*5000)])[0]
         self.assertEqual(len(turn['question']),2000)
         self.assertEqual(len(turn['answer']),4000)
+
+    def test_specific_planned_keywords_do_not_fill_sources_with_generic_today_matches(self):
+        schedule,_=self.service.archive.add('课程表','11月2日至8日的课程表，周四所示区域无课程。')
+        for title in ('罗马皇位继承','消费贷款','登山笔记'):
+            self.service.archive.add(title,'今天下午讨论这个话题，问题是有没有安排。')
+        with patch('secretary.ai.run',side_effect=['{"queries":["课程表"]}','这份课表只覆盖11月2日至8日，不能证明今天的课程。[1]']):
+            result=self.service.ask_library('我老婆今天下午有课吗？')
+        self.assertEqual([source['item_id'] for source in result['sources']],[schedule])
+
+    def test_only_cited_sources_are_returned_and_invalid_citations_are_rejected(self):
+        hits=[dict(item_id='a',title='无关'),dict(item_id='b',title='课表')]
+        self.assertEqual(knowledge_chat.citations('根据旧课表仍不能确认。[2]',hits),[dict(hits[1],number=2)])
+        self.assertEqual(knowledge_chat.citations('没有足够信息。',hits),[])
+        with self.assertRaises(ValueError):knowledge_chat.citations('有课。[8]',hits)
+
+    def test_followup_reloads_prior_cited_document_even_without_current_term_match(self):
+        schedule,_=self.service.archive.add('课程表','11月2日至8日，周四可见区域无课。')
+        turns=[dict(question='今天下午有课吗',answer='只能确认旧周课表。[1]',source_ids=[schedule])]
+        with patch('secretary.ai.run',side_effect=['{"queries":["仔细核对"],"followup":true}','核对的仍是旧周课表，不能推断今天。[1]']) as model:
+            result=self.service.ask_library('再仔细看看',turns)
+        payload=json.loads(model.call_args_list[-1].args[0].split('\n',1)[1])
+        self.assertIn('11月2日至8日',payload['passages'][0]['text'])
+        self.assertIn('weekday',payload['current_time'])
+        self.assertEqual(result['sources'][0]['item_id'],schedule)
+
+    def test_schedule_question_rechecks_saved_image_without_rewriting_archive(self):
+        image=io.BytesIO();Image.new('RGB',(800,1200),'white').save(image,'PNG')
+        item=self.service.ingest({'text':'2026年课程表','attachments':[{'name':'timetable.png','data':base64.b64encode(image.getvalue()).decode()}],'archive_only':True})['item']['id']
+        self.service.archive.update(item,title='课程表',vision_text='第9周，2026年11月2日至8日。星期四没有可见课程块。')
+        before=self.service.archive.get(item)
+        with patch('secretary.ai.run',side_effect=['{"queries":["课程表"]}','已核对原图，只能确认11月2日至8日的安排。[1]']) as model:
+            result=self.service.ask_library('看下课程表再告诉我')
+        call=model.call_args_list[-1]
+        self.assertEqual(len(call.kwargs['images']),1)
+        self.assertTrue(call.kwargs['images'][0]['data'].startswith(b'\xff\xd8'))
+        payload=json.loads(call.args[0].split('\n',1)[1])
+        self.assertEqual(payload['visual_evidence'][0]['status'],'image_attached_for_rechecking')
+        self.assertIn(result['sources'][0]['item_id'],[item])
+        self.assertEqual(self.service.archive.get(item),before)
 
 
 if __name__=='__main__':unittest.main()

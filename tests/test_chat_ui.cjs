@@ -4,7 +4,7 @@ const elements=new Map();
 function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,open:false,style:{},dataset:{},scrollHeight:100,scrollTop:0,clientHeight:500,classList:{add(){},remove(){},toggle(){}},querySelectorAll(){return[]},querySelector(){return element()},addEventListener(type,callback){this.listeners??={};(this.listeners[type]??=[]).push(callback)},focus(){},showModal(){this.open=true},close(){this.open=false},append(){}}}
 for(const id of html.matchAll(/id="([^"]+)"/g))elements.set('#'+id[1],element());
 elements.get('#backend').value='codex';elements.get('#input-mode').value='auto';
-const timerDelays=[],calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current';
+const timerDelays=[],calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current',askReply=null;
 const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:(callback,delay)=>{timerDelays.push(delay);return 1},clearTimeout(){},setInterval(){},clearInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:element(),hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{
  const body=options?.body?JSON.parse(options.body):undefined;calls.push({path,body});
  let data;if(path==='/api/status')data={token:'test',capabilities:captureCapability?{conversation_capture:true,manual_browser_login:true,profile_window_reuse:true,in_place_browser_read:true}:{},settings:{backend:'codex',auto_ai:true},backends:{codex:true,claude:true,gemini:true},data_dir:'/tmp/test'};
@@ -22,7 +22,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else if(path==='/api/proxy/check')data={ok:true,message:'代理端口可以连接'};
  else if(path==='/api/model-connection/test')data={ok:true};
  else if(path==='/api/interface')data={ok:true,mode:body.mode};
- else if(path==='/api/ask')data={answer:'这是带来源的答案。',sources:[{number:1,item_id:'a0',title:'来源资料'}]};
+ else if(path==='/api/ask')data=askReply||{answer:'这是带来源的答案。',sources:[{number:1,item_id:'a0',title:'来源资料'}]};
  else throw Error('unexpected API '+path);
  return{ok:true,json:async()=>data};
 }};
@@ -138,6 +138,23 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  elements.get('#archive-only').checked=true;input.value='只保存这段文字';await form.onsubmit({preventDefault(){}});
  assert.equal(archive.length,beforeLibraryArchive+1);elements.get('#archive-only').checked=false;
  console.log('PASS: library mode, declarative follow-ups, bounded question/answer context, source references, URLs without ingestion, new-chat isolation, archive-only override');
+ elements.get('#new-chat').onclick();elements.get('#input-mode').value='auto';
+ askReply={answer:'**已核对课程表**，仅覆盖旧周，不能推断今天。[2]',sources:[{number:1,item_id:'a0',title:'罗马皇位继承'},{number:2,item_id:'a1',title:'2026年第9周课程表'},{number:3,item_id:'a2',title:'消费贷款'}]};
+ const beforeScheduleArchive=archive.length;
+ input.value='我老婆今天下午有课吗？';await form.onsubmit({preventDefault(){}});
+ assert.equal(calls.filter(c=>c.path==='/api/ask').at(-1).body.library_chat,true,'Auto questions must use the same context-aware library pipeline');
+ assert(elements.get('#messages').innerHTML.includes('<strong>已核对课程表</strong>'));
+ assert(!elements.get('#messages').innerHTML.includes('罗马皇位继承'));
+ assert(!elements.get('#messages').innerHTML.includes('消费贷款'));
+ input.value='看下课程表再告诉我';await form.onsubmit({preventDefault(){}});
+ const followupCall=calls.filter(c=>c.path==='/api/ask').at(-1).body;
+ assert.equal(followupCall.library_chat,true);assert.equal(followupCall.history[0].question,'我老婆今天下午有课吗？');
+ assert.deepEqual(followupCall.history[0].source_ids,['a1']);
+ input.value='继续';await form.onsubmit({preventDefault(){}});
+ assert.equal(archive.length,beforeScheduleArchive,'Follow-up instructions must not become archived notes');
+ elements.get('#input-mode').value='note';input.value='看下课程表再告诉我';await form.onsubmit({preventDefault(){}});
+ assert.equal(archive.length,beforeScheduleArchive+1,'An explicit archive choice must still take priority');askReply=null;
+ console.log('PASS: screenshot regression: automatic schedule question, non-question follow-up, only cited sources in history/UI, safe Markdown and explicit archive override');
  console.log('PASS: automatic command/knowledge archiving, literal whitespace and URLs retained, no retrieval or URL fetch for commands, explicit archive/ask overrides and text-only group');
  console.log('PASS: startup, link archive, question with sources, save note, history persistence, new chat preserves archive, legacy backend and false-success rejection, delegated confirmation click, expired-token retry, persistent failure feedback');
 })().catch(e=>{console.error(e);process.exitCode=1});

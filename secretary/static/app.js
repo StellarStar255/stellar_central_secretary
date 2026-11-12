@@ -170,7 +170,7 @@ function renderChat(scroll=true){
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body">${esc(m.text)}</div>`:''}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${m.sources?.length?`<div class="source-list">${m.sources.map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br><span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
  bindDetails($('#messages'));$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
@@ -388,7 +388,7 @@ function archiveReply(result){const i=result.item;
 function updateInputMode(){
  const library=$('#input-mode').value==='library';
  $('#message-input').placeholder=t(library?'直接提问，自动搜索知识库；可以继续追问…':'发送消息、粘贴图片或链接，或拖入文件…');
- $('#composer-hint').textContent=t(library?'知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。':'自动识别：文字和命令默认归档，明确的问题才检索；不会执行命令。');
+ $('#composer-hint').textContent=t(library?'知识库对话：结合最近对话检索已存资料，回答附来源；新文件请先归档。':'自动识别：问题和对话追问会检索；普通文字和命令归档，不会执行命令。');
 }
 function restoreInputMode(){
  const mode=currentChat()?.inputMode;
@@ -399,26 +399,35 @@ function knowledgeHistory(chat,current){
  const turns=[];
  for(let i=0;i<chat.messages.indexOf(current);i++){
   const question=chat.messages[i],answer=chat.messages[i+1];
-  if(question.role==='user'&&question.knowledgeQuestion&&answer?.role==='assistant'&&!answer.pending&&!answer.error)
-   turns.push({question:question.text.slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set((answer.sources||[]).map(s=>s.item_id))].slice(0,12)});
+  if(question.role==='user'&&answer?.role==='assistant'&&(question.knowledgeQuestion||!answer.archiveOnly&&answer.sources?.length)&&!answer.pending&&!answer.error)
+   turns.push({question:question.text.slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set(answerSources(answer).map(s=>s.item_id))].slice(0,12)});
  }
  return turns.slice(-6);
 }
-function resolveInputMode(text,mode,hasFiles=false){
+function answerSources(message){
+ const sources=message.sources||[],numbers=[...String(message.text||'').matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1]));
+ return numbers.length?sources.filter(source=>numbers.includes(source.number)):sources;
+}
+function hasKnowledgeContext(){
+ const messages=currentChat()?.messages||[],answer=messages.at(-1),question=messages.at(-2);
+ return answer?.role==='assistant'&&!answer.pending&&!answer.error&&!answer.archiveOnly&&(question?.knowledgeQuestion||answer.sources?.length>0);
+}
+function resolveInputMode(text,mode,hasFiles=false,followup=false){
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
  if(mode!=='auto')return mode;
  const first=text.split('\n').find(line=>line.trim())?.trim()||'';
  const save=/^(?:(?:请|麻烦|帮我|请帮我)\s*)?(?:归档|收藏|保存|记录|记住|存下|存一下)(?:一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b/i.test(first);
  if(save)return 'note';
- const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|解释|看看|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me)\b/i.test(first);
+ const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';
+ if(followup&&!hasFiles&&!/https?:\/\//i.test(text)&&/^(?:继续|接着|再(?:看|查|说|解释|确认)|重新(?:看|查|确认)|仔细(?:看|查)|那(?:她|他|它|个|这|么|下午|上午|今天|明天)|她的|他的|它的|第二个|第三个|第\d+个|不是|不对|上面|刚才|前面)|^(?:continue|and what|what about|check again|look again|the second)\b/i.test(first))return 'ask';
  if(!hasFiles&&!/https?:\/\//i.test(text))return question||/[?？]\s*$|(?:是什么|有哪些|有什么|在哪里|怎么样|怎么办|吗|呢)[^\n]{0,24}$/.test(text)?'ask':'note';
  return mode;
 }
 
 $('#composer-form').onsubmit=async event=>{
- event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],archiveOnly=$('#archive-only').checked===true;let mode=resolveInputMode(text,archiveOnly&&$('#input-mode').value==='ask'?'auto':$('#input-mode').value,files.length>0);if(archiveOnly&&['ask','library'].includes(mode))mode='note';if(!text&&!files.length)return;
+ event.preventDefault();if(sending)return;const text=$('#message-input').value.trim(),files=[...attachedFiles],archiveOnly=$('#archive-only').checked===true;let mode=resolveInputMode(text,archiveOnly&&$('#input-mode').value==='ask'?'auto':$('#input-mode').value,files.length>0,hasKnowledgeContext());if(archiveOnly&&['ask','library'].includes(mode))mode='note';if(!text&&!files.length)return;
  if(mode==='library'&&files.length){toast(t('请先归档附件，再在知识库对话中提问。'));return}
  if(!token){toast(t('服务尚未连接，请稍后重试或刷新页面。'));return}
  let chat=currentChat();if(!chat){chat={id:uid(),title:(text||files[0]?.name||t('新对话')).slice(0,36),messages:[]};conversations.unshift(chat);activeId=chat.id}
@@ -427,7 +436,7 @@ $('#composer-form').onsubmit=async event=>{
  $('#message-input').value='';for(const file of files)releaseAttachment(file);attachedFiles=[];sending=true;renderAttachments();resizeInput();renderSidebar();$('#composer-status').textContent=t('正在处理…');
  const results=[],errors=[];
  try{
-  if(mode==='library'){
+  if(mode==='library'||mode==='ask'&&!files.length&&!/https?:\/\//i.test(text)){
    updateMessage(chat,userMessage,{knowledgeQuestion:true});
    updateMessage(chat,response,{text:t('正在理解问题、检索知识库，整理答案…')});
    const data=await api('/api/ask',{question:text,library_chat:true,history:knowledgeHistory(chat,userMessage)});

@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.85** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.85.md)
+Version **v0.1.86** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.86.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -18,9 +18,11 @@ The demo uses fictional documents and a prewritten summary. Waiting is accelerat
 
 Choose **Library chat** in the composer, or select **Chat with your library** on the welcome screen. Ask about saved material and continue with follow-up questions. Up to six recent successful question/answer pairs provide context; starting a new chat clears that context.
 
-The configured CLI or compatible API first generates up to three keyword queries. The app searches its local full-text index, includes the original question as a fallback, combines results and sends up to eight source passages to the model for a cited answer. Source buttons open the archived material and show attachment/page information where available. Missing evidence produces a clear message. Prior answers help interpret the question and are not treated as factual evidence.
+The configured CLI or compatible API first generates up to three keyword queries. The app searches its local full-text index, includes the original question as a fallback, combines results and sends up to eight retrieved passages to the model, with additional context from previously cited documents for follow-ups. Only cited sources are displayed. Source buttons open the archived material and show attachment/page information where available. Missing evidence produces a clear message. Prior answers help interpret the question and are not treated as factual evidence.
 
 Text and URLs in this mode are questions; archive new attachments first. **Archive only** takes priority when checked. Existing model settings and company-data confirmation apply. A normal answer uses two model calls, for query planning and answering. By default, retrieval uses full-text search with model-expanded keywords. Enable local semantic search below to add vector retrieval.
+
+Auto-detected questions use this same conversation pipeline. Follow-ups such as “look at the timetable again” or “continue” are not archived as notes. Local date/time context and image date ranges constrain schedule answers; an older week’s empty cells do not establish today’s availability. Related saved images can be rechecked through bounded compatible previews when the selected model accepts images. Missing or unsupported image input is disclosed.
 
 ## Local semantic search
 

@@ -1219,5 +1219,7 @@
   "嵌入模型返回的向量维度不一致": "The embedding model returned inconsistent vector dimensions",
   "无法连接本机嵌入服务，请启动 Ollama 并检查地址": "Cannot connect to the local embedding service. Start Ollama and check its URL.",
   "嵌入模型维度已变化，请重建语义索引": "Embedding dimensions changed. Rebuild the semantic index.",
-  "本机嵌入服务请求失败，请确认模型已下载且支持嵌入（HTTP ": "The local embedding request failed. Check that the model is downloaded and supports embeddings (HTTP "
+  "本机嵌入服务请求失败，请确认模型已下载且支持嵌入（HTTP ": "The local embedding request failed. Check that the model is downloaded and supports embeddings (HTTP ",
+  "自动识别：问题和对话追问会检索；普通文字和命令归档，不会执行命令。": "Auto-detect: questions and follow-ups search the library; ordinary text and commands are archived. Commands are never executed.",
+  "回答包含无法核对的来源编号，请重试": "The answer contains an invalid source number. Please try again."
 }
