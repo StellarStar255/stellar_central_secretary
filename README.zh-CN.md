@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.96** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.96.md)
+版本 **v0.1.98** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.98.md)
 
 HEIC/HEIF 照片支持本地缩略图、应用内查看和视觉总结（需支持图片输入的模型）。原件完整保留，预览和分析使用本地生成的兼容 JPEG；已入库附件无需重新上传，旧摘要可通过“重新总结”更新图片内容。
 

@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory() as root:
     page=browser.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     page.add_init_script("window.__notices=[];window.Notification=class{static permission='granted';constructor(title,options){this.title=title;this.options=options;window.__notices.push(this)}close(){}}")
     page.goto(f'http://127.0.0.1:{server.server_port}');expect(page.locator('#model-label')).to_contain_text('synthetic')
+    page.wait_for_function('()=>historyLoaded')
     page.locator('#input-mode').select_option('library')
     def send(text):page.locator('#message-input').fill(text);page.locator('#send-button').click()
     send('列出所有罗马史资料')
