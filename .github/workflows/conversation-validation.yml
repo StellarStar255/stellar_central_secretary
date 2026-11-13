@@ -1,0 +1,54 @@
+name: Conversation recovery validation
+on:
+  push:
+    branches: ['validation/conversation-recovery-20261113']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-validation:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+      STELLAR_TEST_ARTIFACTS: test-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb dbus-x11 openbox stalonetray xdotool wmctrl x11-utils fonts-noto-cjk libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0 libegl1 libopengl0 libpulse0 libpulse-mainloop-glib0 policykit-1 tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+      - name: Install application and test tools
+        run: python -m pip install -r requirements.txt -r packaging/requirements-build.txt "websocket-client>=1.8,<2"
+      - name: Install isolated browser
+        run: python -m playwright install chromium
+      - name: Unit suite
+        run: python -m unittest discover -s tests
+      - name: Chat JavaScript
+        run: node --test tests/test_chat_ui.cjs
+      - name: Recovery and source controls
+        run: |
+          python scripts/check_question_recovery_ui.py
+          python scripts/check_conversation_controls_ui.py
+          python scripts/check_chat_improvements_ui.py
+          python scripts/check_source_links_ui.py
+      - name: Windows native source lifecycle
+        if: runner.os == 'Windows'
+        run: python packaging/smoke_windows_desktop.py --source
+      - name: Linux native source lifecycle
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a python packaging/smoke_linux_desktop.py --source
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conversation-validation-${{ runner.os }}
+          path: test-results/
+          if-no-files-found: ignore

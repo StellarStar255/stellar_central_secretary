@@ -19,3 +19,16 @@ class CatalogTest(unittest.TestCase):
      result=s.ask_library('List all Roman records')
     self.assertEqual(result['catalog']['total'],65);self.assertEqual(model.call_count,1)
    finally:s.close()
+
+ def test_history_suffix_only_relaxes_an_empty_catalog_and_reports_actual_keywords(self):
+  with tempfile.TemporaryDirectory() as root:
+   s=Service(root)
+   try:
+    item=s.archive.add('罗马皇位继承','军队拥立和政治承认影响罗马皇位。')[0]
+    result=page(s.archive,['罗马史'])
+    self.assertEqual(result['catalog']['total'],1);self.assertEqual(result['sources'][0]['item_id'],item)
+    self.assertIn('罗马',result['catalog']['queries']);self.assertTrue(result['retrieval_notice'])
+    exact=s.archive.add('罗马史','Specific topic')[0]
+    result=page(s.archive,['罗马史']);self.assertEqual({source['item_id'] for source in result['sources']},{exact})
+    self.assertEqual(page(s.archive,['党史'])['catalog']['total'],0)
+   finally:s.close()

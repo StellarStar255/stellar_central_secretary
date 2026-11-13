@@ -1294,5 +1294,19 @@
   "尚未找到所选 CLI。": "Selected CLI was not found.",
   "点击下方「测试模型连接」，用简短请求检查当前配置。": "Use Test model connection below to check the current configuration with a short request.",
   "可安装并登录所选 CLI 后重启应用，或选择自定义模型 API。桌面聊天软件的登录不等于 CLI 已登录。": "Install and sign into the selected CLI, then restart the app, or select a custom model API. Signing into a desktop chat app does not sign into its CLI.",
-  "复用已准备的核对图片，仍交由模型检查。": "Prepared evidence images were reused and still provided to the model for checking."
+  "复用已准备的核对图片，仍交由模型检查。": "Prepared evidence images were reused and still provided to the model for checking.",
+  "正在等待确认模型服务…": "Waiting for model-service confirmation…",
+  "正在补读相关章节和相邻内容…": "Reading relevant sections and neighboring content…",
+  "编辑对话条件": "Edit conversation condition",
+  "保存条件": "Save condition",
+  "条件不能为空，可选择移除。": "A condition cannot be empty. Choose Remove instead.",
+  "条件已更新，下次提问生效。": "Condition updated. It will apply to your next question.",
+  "补读上下文": "Read more context",
+  "本次补读片段": "Additional passages read",
+  "上次问答因程序重启而中断，可重试。": "The previous question was interrupted by an app restart. You can retry.",
+  "上次问答因程序重启而中断，已有答案已保留，可重新核对。": "The recheck was interrupted by an app restart. Your previous answer was preserved.",
+  "相邻 PDF 页面没有可提取文字，可按页 OCR 后再核对。": "Adjacent PDF pages contain no extractable text. Read them with OCR to check further.",
+  "部分相邻 PDF 页面未能读取，本次仅依据已取得的内容回答。": "Some adjacent PDF pages could not be read. This answer uses only the content obtained.",
+  "完整主题词未命中，已按主体关键词补查；请核对清单范围。": "The full topic term had no matches. Subject keywords were also checked; review the scope of this list.",
+  "对话记录无法读取，请从备份恢复对话。": "Conversation records could not be read. Restore them from a backup."
 }

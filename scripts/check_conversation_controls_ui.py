@@ -51,9 +51,9 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('.message-body').last).to_contain_text('周二下午无课。')
     assert not page.locator('.question-stop').count()
     # Failed rechecks preserve a completed answer and its references.
-    page.route('**/api/ask',lambda route:route.fulfill(status=500,content_type='application/json',body='{"error":"Synthetic retry failure"}'))
+    page.route('**/api/ask/start',lambda route:route.fulfill(status=500,content_type='application/json',body='{"error":"Synthetic retry failure"}'))
     page.locator('[data-recheck]').click();expect(page.locator('#messages')).to_contain_text('重新核对未完成，保留上次回答。')
-    expect(page.locator('.source')).to_have_count(1);page.unroute('**/api/ask')
+    expect(page.locator('.source')).to_have_count(1);page.unroute('**/api/ask/start')
     s.archive.update(item,text='课程表：周二下午已调整。');page.evaluate('refresh()')
     expect(page.locator('.source-changed')).to_have_text('资料已更新')
     s.trash_item(item);page.evaluate('refresh()');expect(page.locator('.source-changed')).to_have_text('已移入回收站')

@@ -55,6 +55,7 @@ jobs:
           python scripts/check_summary_performance_ui.py
           python scripts/check_chat_improvements_ui.py
           python scripts/check_conversation_controls_ui.py
+          python scripts/check_question_recovery_ui.py
           python scripts/check_source_links_ui.py
           python scripts/check_attachment_editor_ui.py
           python scripts/check_local_paths_ui.py

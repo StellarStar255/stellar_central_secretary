@@ -105,7 +105,7 @@ let supportsWebCapture=false;
 let latestStatus=null,lastUpdateState=null,uiLanguageRevision=0,languageChanging=false;
 let backendRevision=0;
 let libraryCategories=[],libraryTotal=0;let token='', allItems=[], selectedId='', detailVersion='', searchTimer, attachedFiles=[], sending=false;
-let activeQuestion=null,sourceStates={},inputModeTouched=false;
+let activeQuestion=null,sourceStates={},inputModeTouched=false,basisDraft=null;
 const storageKey='stellar.conversations.v1';
 let conversations=[], activeId='';
 let sharedChatsReady=false,historyLoaded=false,sharedChatSaves=Promise.resolve();
@@ -113,8 +113,20 @@ try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); conversati
 const uid=()=>crypto.randomUUID();
 function currentChat(){return conversations.find(c=>c.id===activeId)}
 function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);if(!conversations.some(chat=>chat.id===activeId))activeId='';try{localStorage.setItem(storageKey,JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value))}catch{toast(t('本机对话记录存储空间已满；归档资料仍保存在知识库中。'))}}
-function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value));sharedChatSaves=sharedChatSaves.then(()=>api('/api/conversations',snapshot)).catch(e=>toast(t('对话同步未完成：')+e.message))}}
-function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>=(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));writeLocalChats()}
+function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value));sharedChatSaves=sharedChatSaves.then(async()=>{const saved=await api('/api/conversations',snapshot);mergeQuestionMessages(saved);writeLocalChats()}).catch(e=>toast(t('对话同步未完成：')+e.message))}}
+function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>=(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));mergeQuestionMessages(remote);writeLocalChats()}
+function mergeQuestionMessages(remote){
+ const fields=['text','sources','catalog','timings','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestVersion','requestApproval'];
+ for(const saved of remote.conversations||[]){
+  const local=conversations.find(c=>c.id===saved.id);if(!local)continue;
+  for(const message of saved.messages||[]){
+   if(!message.requestId)continue;
+   const target=local.messages.find(m=>m.id===message.id);if(!target||(target.requestVersion||0)>(message.requestVersion||0))continue;
+   if(activeQuestion?.messageId===message.id&&activeQuestion.id!==message.requestId)continue;
+   for(const field of fields){if(field in message)target[field]=message[field];else delete target[field]}
+  }
+ }
+}
 async function loadSharedChats(){const remote=await api('/api/conversations');if(!conversations.length&&!activeId)activeId=remote.activeId||'';mergeChats(remote);const saved=await api('/api/conversations',{conversations,activeId});mergeChats(saved);sharedChatsReady=true;historyLoaded=true;writeLocalChats();if(!inputModeTouched)restoreInputMode()}
 async function pullSharedChats(){if(!sharedChatsReady||sending)return;await sharedChatSaves;mergeChats(await api('/api/conversations'))}
 async function switchInterface(mode){if(sending){toast(t('请等待当前消息处理完成后再切换'));return}await sharedChatSaves;await api('/api/conversations',{conversations,activeId});await api('/api/interface',{mode});toast(mode==='desktop'?t('正在打开桌面窗口'):t('正在打开网页模式'))}
@@ -129,8 +141,8 @@ async function api(path,body,retry=true,companyRetry=true){
  finally{clearTimeout(timer)}
  const data=await response.json();
  if(response.status===403&&body!==undefined&&retry){const status=await api('/api/status');token=status.token;return api(path,body,false,companyRetry)}
- if(response.status===409&&data.company_model&&body!==undefined&&companyRetry&&globalThis.StellarCompanyAI){if(await StellarCompanyAI.review(api,data.company_model))return api(path,body,retry,false);throw Error(t('已取消模型调用，正文和已有资料保留。'))}
- if(!response.ok){const error=new Error(StellarI18n.message(data.error)||t('请求失败'));error.originalMessage=data.error;throw error}return data;
+ if(response.status===409&&data.company_model&&body!==undefined&&companyRetry&&globalThis.StellarCompanyAI){if(await StellarCompanyAI.review(api,data.company_model))return api(path,body,retry,false);const error=Error(t('已取消模型调用，正文和已有资料保留。'));error.status=409;error.cancelledReview=true;throw error}
+ if(!response.ok){const error=new Error(StellarI18n.message(data.error)||t('请求失败'));error.originalMessage=data.error;error.status=response.status;throw error}return data;
 }
 
 async function busy(button,action,label=t('处理中…')){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await action()}catch(e){toast(e.message)}finally{button.disabled=false;button.textContent=old}}
@@ -236,7 +248,7 @@ async function refreshNow(){
   }
  }
  if(changed)saveChats();
- $('#count').textContent=libraryTotal;renderSidebar();renderChat(false);
+ $('#count').textContent=libraryTotal;renderSidebar();renderChat(false);resumeQuestionJobs();
  const progress=$('#detail-content').querySelector('#detail-summary-progress');if(progress&&selectedId)progress.innerHTML=summaryProgress(allItems.find(i=>i.id===selectedId));
  if($('#library-dialog').open)await renderLibrary();
  if($('#detail-dialog').open&&selectedId&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId)){const item=allItems.find(i=>i.id===selectedId);if(item&&item.updated!==detailVersion)await detail(selectedId)}
@@ -444,41 +456,52 @@ function knowledgeHistory(chat,current){
  const turns=[];
  for(let i=0;i<chat.messages.indexOf(current);i++){
   const question=chat.messages[i],answer=chat.messages[i+1];
+  if(isContextStatement(question.text)&&((chat.contextIgnored||[]).includes(question.id)||(chat.contextReset&&i<=chat.messages.findIndex(m=>m.id===chat.contextReset))))continue;
   if(question.role==='user'&&answer?.role==='assistant'&&(question.knowledgeQuestion||!answer.archiveOnly&&answer.sources?.length)&&!answer.pending&&!answer.error&&!answer.localReply&&!isSocialMessage(question.text))
-   turns.push({question:question.text.slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set(answerSources(answer).map(s=>s.item_id))].slice(0,12)});
+   turns.push({question:(chat.contextEdits?.[question.id]||question.text).slice(0,2000),answer:answer.text.slice(0,4000),source_ids:[...new Set(answerSources(answer).map(s=>s.item_id))].slice(0,12)});
  }
  const recent=turns.slice(-6);
  if(!recent.some(turn=>turn.source_ids.length)){const anchor=turns.findLast(turn=>turn.source_ids.length);if(anchor)return [anchor,...recent.slice(-5)]}
  return recent;
 }
+function isContextStatement(text){return /(?:这(?:张|份|个).*(?:就是|属于|为准|判断)|(?:按|依据|利用|用)这.*(?:判断|为准|即可|就行)|对象是|不是.{1,30}而是|以后(?:都|请)|每(?:天|周).*(?:按|用|执行)|改为|更正为|确认.{1,30}(?:是|属于))/i.test(text||'')}
 function rememberedContext(chat,current){
  if(!chat)return [];
  const messages=chat.messages||[],end=current?messages.indexOf(current):messages.length,start=chat.contextReset?messages.findIndex(m=>m.id===chat.contextReset)+1:0;
  let cited=[];const claims=[],ignored=new Set(chat.contextIgnored||[]);
  for(const message of messages.slice(Math.max(0,start),end)){
   if(message.role==='assistant'&&answerSources(message).length)cited=[...new Set(answerSources(message).map(s=>s.item_id))].slice(0,3);
-  if(message.role==='user'&&!ignored.has(message.id)&&message.knowledgeQuestion&&message.text.length<=1000&&/(?:这(?:张|份|个).*(?:就是|属于|为准|判断)|(?:按|依据|利用|用)这.*(?:判断|为准|即可|就行)|对象是|不是.{1,30}而是|以后(?:都|请)|每(?:天|周).*(?:按|用|执行)|改为|更正为|确认.{1,30}(?:是|属于))/i.test(message.text))claims.push({statement:message.text,source_ids:[...cited]});
+  if(message.role==='user'&&!ignored.has(message.id)&&message.knowledgeQuestion&&message.text.length<=1000&&isContextStatement(message.text))claims.push({id:message.id,statement:chat.contextEdits?.[message.id]||message.text,source_ids:[...cited]});
  }
  return claims.slice(-12);
 }
 function renderConversationBasis(chat){
- const target=$('#conversation-basis'),claims=rememberedContext(chat),key=JSON.stringify([chat?.id,claims,StellarI18n.language]);if(target._basisKey===key)return;target._basisKey=key;target.innerHTML=claims.length?`<details><summary>${esc(t('本轮对话依据'))} (${claims.length})</summary><small>${esc(t('以下是你明确说明的条件，不代表已核实的资料事实。'))}</small>${claims.map(c=>`<p>${esc(c.statement)}</p>`).join('')}<button class="secondary" id="clear-conversation-basis">${esc(t('清除对话依据'))}</button></details>`:'';
- const button=target.querySelector('#clear-conversation-basis');if(button)button.onclick=()=>{const live=conversations.find(c=>c.id===chat.id);if(!live)return;live.contextReset=live.messages.at(-1)?.id;live.contextIgnored=live.messages.filter(m=>m.role==='user').map(m=>m.id);live.updated=Math.max(Date.now(),(live.updated||0)+1);saveChats();renderConversationBasis(live)};
+ const target=$('#conversation-basis'),claims=rememberedContext(chat),draft=basisDraft?.chatId===chat?.id?basisDraft:null;
+ const key=JSON.stringify([chat?.id,claims,draft?.id,StellarI18n.language]);if(target._basisKey===key)return;
+ const wasOpen=!!target.querySelector('details')?.open;target._basisKey=key;
+ target.innerHTML=claims.length?`<details ${wasOpen||draft?'open':''}><summary>${esc(t('本轮对话依据'))} (${claims.length})</summary><small>${esc(t('以下是你明确说明的条件，不代表已核实的资料事实。'))}</small>${claims.map(c=>draft?.id===c.id?`<form class="basis-editor" data-basis-form><textarea maxlength="1000" rows="2" aria-label="${esc(t('编辑对话条件'))}">${esc(draft.text)}</textarea><div><button type="submit">${esc(t('保存条件'))}</button><button type="button" data-basis-cancel>${esc(t('取消'))}</button></div></form>`:`<div class="basis-row"><p>${esc(c.statement)}</p><div><button type="button" data-basis-edit="${esc(c.id)}">${esc(t('编辑'))}</button><button type="button" data-basis-remove="${esc(c.id)}">${esc(t('移除'))}</button></div></div>`).join('')}<button class="secondary" id="clear-conversation-basis">${esc(t('清除对话依据'))}</button></details>`:'';
+ const live=()=>conversations.find(c=>c.id===chat?.id);
+ const commit=()=>{const value=live();if(!value)return;value.updated=Math.max(Date.now(),(value.updated||0)+1);saveChats();target._basisKey=null;renderConversationBasis(value)};
+ target.querySelectorAll('[data-basis-edit]').forEach(button=>button.onclick=()=>{const claim=claims.find(c=>c.id===button.dataset.basisEdit);basisDraft={chatId:chat.id,id:claim.id,text:claim.statement};renderConversationBasis(live());target.querySelector('textarea').focus()});
+ target.querySelectorAll('[data-basis-remove]').forEach(button=>button.onclick=()=>{const value=live();if(!value)return;value.contextIgnored=[...new Set([...(value.contextIgnored||[]),button.dataset.basisRemove])];if(value.contextEdits)delete value.contextEdits[button.dataset.basisRemove];commit()});
+ const form=target.querySelector('[data-basis-form]');
+ if(form){const input=form.querySelector('textarea');input.oninput=()=>{basisDraft.text=input.value};form.onsubmit=event=>{event.preventDefault();const text=input.value.trim();if(!text){toast(t('条件不能为空，可选择移除。'));return}const value=live();if(!value)return;value.contextEdits={...value.contextEdits,[basisDraft.id]:text};basisDraft=null;commit();toast(t('条件已更新，下次提问生效。'))};form.querySelector('[data-basis-cancel]').onclick=()=>{basisDraft=null;renderConversationBasis(live())};input.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();basisDraft=null;renderConversationBasis(live())}}}
+ const button=target.querySelector('#clear-conversation-basis');if(button)button.onclick=()=>{const value=live();if(!value)return;value.contextReset=value.messages.at(-1)?.id;value.contextIgnored=value.messages.filter(m=>m.role==='user').map(m=>m.id);value.contextEdits={};basisDraft=null;commit()};
 }
 function isSocialMessage(text){
  const value=String(text||'').toLowerCase().replace(/[\s,，。.!！?？~～]+/g,'');
  return /^(?:(?:你好|您好|嗨|哈喽|哈啰|嘿|hello|hi|hey)(?:呀|啊|哦|喔|哈|啦)?|早上好|早安|中午好|下午好|晚上好|在吗|你在吗|谢谢(?:你|您|啦|呀|啊|了)?|多谢|感谢|辛苦了|thanks|thankyou)$/.test(value);
 }
 function questionProgress(message){
- const p=message.questionProgress;if(!message.pending||!p)return '';
- const labels={connecting:'正在连接本地服务…',preparing:'正在读取对话上下文…',queued:'正在等待问答模型空闲…',planning:'正在理解问题，规划检索或直接回复…',retrieving:'正在搜索知识库…',images:'已找到相关资料，正在准备原图核对…',answering:'正在结合资料与对话生成回答…',done:'回答已生成，正在接收结果…',error:'正在等待请求结果…'};
+ const p=activeQuestion?.messageId===message.id?activeQuestion.progress:message.questionProgress;if(!message.pending||!p)return '';
+ const labels={connecting:'正在连接本地服务…',preparing:'正在读取对话上下文…',queued:'正在等待问答模型空闲…',planning:'正在理解问题，规划检索或直接回复…',retrieving:'正在搜索知识库…',images:'已找到相关资料，正在准备原图核对…',answering:'正在结合资料与对话生成回答…',approval:'正在等待确认模型服务…',expanding:'正在补读相关章节和相邻内容…',done:'回答已生成，正在接收结果…',error:'正在等待请求结果…'};
  const elapsed=Math.max(0,Math.floor((Date.now()-p.started)/1000));
  const stopping=activeQuestion?.messageId===message.id&&activeQuestion.cancelRequested;
  const note=p.offline?'暂时无法获取进度，仍在等待回答。':elapsed>=8&&['planning','answering'].includes(p.stage)?'正在等待模型返回，耗时受模型服务和网络影响。':'';
  return `<div class="question-progress" role="status" aria-live="polite"><p>${esc(t(stopping?'正在停止…':labels[p.stage]||labels.connecting))}</p><small>${esc(t('已等待'))} ${elapsed} ${esc(t('秒'))}${p.count?` · ${esc(t('相关资料'))} ${Number(p.count)}`:''}</small>${note?`<p class="muted">${esc(t(note))}</p>`:''}${activeQuestion?.messageId===message.id?`<button type="button" class="question-stop" data-cancel-question="${activeQuestion.id}" ${stopping?'disabled':''}>${esc(t(stopping?'正在停止…':'停止回答'))}</button>`:''}${p.partial?`<p class="muted">${esc(t('回答生成中，内容尚未核对完成。'))}</p><div class="streaming-answer">${esc(p.partial)}</div>`:''}</div>`;
 }
 function watchQuestionProgress(chat,message,progressId){
- let stopped=false,pollTimer,tickTimer;message.text='';message.questionProgress={stage:'connecting',started:Date.now()};
+ let stopped=false,pollTimer,tickTimer;if(!message.sources?.length)message.text='';message.questionProgress={stage:'connecting',started:Date.now()};if(activeQuestion)activeQuestion.progress=message.questionProgress;
  const render=()=>{if(!stopped&&chat.id===activeId)renderChat(false)};
  const poll=async()=>{
   try{
@@ -489,26 +512,59 @@ function watchQuestionProgress(chat,message,progressId){
   }catch(e){if(!stopped)message.questionProgress.offline=true}
   if(!stopped){render();pollTimer=setTimeout(poll,700)}
  };
- render();pollTimer=setTimeout(poll,250);tickTimer=setInterval(render,1000);
+ render();if(!latestStatus?.capabilities?.reconnectable_questions)pollTimer=setTimeout(poll,250);tickTimer=setInterval(render,1000);
  return ()=>{stopped=true;clearTimeout(pollTimer);clearInterval(tickTimer);delete message.questionProgress};
+}
+function jobResponse(message){return {answer:message.text,sources:message.sources||[],catalog:message.catalog,timings:message.timings,retrieval_notice:message.retrievalNotice||'',local_reply:message.localReply}}
+async function receiveQuestionJob(chat,message,request){
+ while(true){
+  try{
+   const data=await api('/api/ask/job',{progress_id:request.id,chat_id:chat.id,message_id:message.id});
+   Object.assign(request.progress,data.progress,{offline:false,started:Date.now()-(data.progress.elapsed_seconds||0)*1000});
+   if(data.message.requestState!=='running'){
+    updateMessage(chat,message,data.message);
+    if(data.message.requestState==='done'||data.message.sources?.length)return jobResponse(data.message);
+    const error=Error(data.message.text);error.terminal=true;error.cancelled=data.message.requestState==='cancelled';throw error;
+   }
+   if(chat.id===activeId)renderChat(false);
+  }catch(error){
+   if(error.status||error.terminal||error.cancelled){if(error.cancelledReview||error.status===400)void api('/api/ask/cancel',{progress_id:request.id}).catch(()=>{});throw error;}
+   request.progress.offline=true;
+  }
+  await new Promise(resolve=>setTimeout(resolve,700));
+ }
 }
 async function askWithProgress(chat,message,payload){
  const request={id:uid().replace(/-/g,''),chatId:chat.id,messageId:message.id,cancelRequested:false};
  activeQuestion=request;const stop=watchQuestionProgress(chat,message,request.id);
  try{
-  const data=await api('/api/ask',{...payload,library_chat:true,progress_id:request.id});
-  if(request.cancelRequested)throw Error(t('问答已停止。'));
+  let data;
+  if(latestStatus?.capabilities?.reconnectable_questions){
+   await sharedChatSaves;
+   await api('/api/ask/start',{...payload,progress_id:request.id,chat_id:chat.id,message_id:message.id,question_id:message.questionId});
+   updateMessage(chat,message,{requestId:request.id,requestState:'running'});
+   data=await receiveQuestionJob(chat,message,request);
+  }else data=await api('/api/ask',{...payload,library_chat:true,progress_id:request.id});
+  if(request.cancelRequested&&!data.sources?.length)throw Error(t('问答已停止。'));
   return data;
  }catch(error){if(request.cancelRequested){const stopped=Error(t('问答已停止，可重试。'));stopped.cancelled=true;throw stopped}throw error}
  finally{stop();if(activeQuestion===request)activeQuestion=null}
+}
+function resumeQuestionJobs(){
+ if(activeQuestion||sending||!latestStatus?.capabilities?.reconnectable_questions)return;
+ const chat=[currentChat(),...conversations].find(c=>c?.messages.some(m=>m.pending&&m.requestState==='running'&&m.requestId));
+ const message=chat?.messages.find(m=>m.pending&&m.requestState==='running'&&m.requestId);if(!message)return;
+ const request={id:message.requestId,chatId:chat.id,messageId:message.id,cancelRequested:false};
+ activeQuestion=request;sending=true;updateSend();const stop=watchQuestionProgress(chat,message,request.id);
+ void receiveQuestionJob(chat,message,request).catch(error=>{updateMessage(chat,message,{text:message.sources?.length?message.text:error.message,pending:false,error:!message.sources?.length&&!error.cancelled,retryable:!message.sources?.length})}).finally(()=>{stop();if(activeQuestion===request)activeQuestion=null;sending=false;updateSend();void refresh()});
 }
 function answerTiming(message){
  const timing=message.timings;if(!timing||!Number.isFinite(Number(timing.total_seconds)))return '';
  const seconds=key=>Math.max(0,Number(timing[key])||0).toFixed(1);
  if(timing.cache_hit)return `<details class="answer-timing"><summary>${esc(t('复用近期回答'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('问题与资料未变化，可点击重新核对强制生成。'))}</p></details>`;
  if(timing.local_reply)return `<details class="answer-timing"><summary>${esc(t('本地即时回复'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('未调用模型，也未检索知识库。'))}</p></details>`;
- const labels=[['queue_seconds','排队'],['planning_seconds','检索规划'],['retrieval_seconds','本地检索'],['image_seconds','准备图片'],['answer_seconds','模型回答']];
- return `<details class="answer-timing"><summary>${esc(t('本次用时'))} ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${labels.map(([key,label])=>esc(t(label))+' '+seconds(key)+'s').join(' · ')}</p>${timing.image_cache_hit?`<p>${esc(t('复用已准备的核对图片，仍交由模型检查。'))}</p>`:''}${timing.fast_followup?`<p>${esc(t('本次直接沿用已引用资料，省去检索规划请求。'))}</p>`:''}</details>`;
+ const labels=[['queue_seconds','排队'],['planning_seconds','检索规划'],['retrieval_seconds','本地检索'],['expansion_seconds','补读上下文'],['image_seconds','准备图片'],['answer_seconds','模型回答']];
+ return `<details class="answer-timing"><summary>${esc(t('本次用时'))} ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${labels.map(([key,label])=>esc(t(label))+' '+seconds(key)+'s').join(' · ')}</p>${timing.expanded_passages?`<p>${esc(t('本次补读片段'))}: ${Number(timing.expanded_passages)}</p>`:''}${timing.image_cache_hit?`<p>${esc(t('复用已准备的核对图片，仍交由模型检查。'))}</p>`:''}${timing.fast_followup?`<p>${esc(t('本次直接沿用已引用资料，省去检索规划请求。'))}</p>`:''}</details>`;
 }
 function catalogPager(message){
  const c=message.catalog;if(!c)return '';
@@ -528,7 +584,7 @@ function bindRechecks(boundChat){
   if(sending)return;
   const message=chat.messages.find(m=>m.id===button.dataset.recheck),question=chat.messages.find(m=>m.id===message?.questionId);if(!question)return;
   const previous={text:message.text,sources:message.sources,catalog:message.catalog,timings:message.timings,error:message.error,retryable:message.retryable};
-  sending=true;updateSend();updateMessage(chat,message,{pending:true,error:false,sources:[],timings:null,catalog:null,retrievalNotice:''});
+  sending=true;updateSend();updateMessage(chat,message,{pending:true,error:false,retrievalNotice:''});
   try{const data=await askWithProgress(chat,message,{question:question.text,history:knowledgeHistory(chat,question),context:rememberedContext(chat),force_refresh:true});if($('#message-input').value===question.text){$('#message-input').value='';resizeInput()}updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog||null,timings:data.timings,retrievalNotice:data.retrieval_notice||'',pending:false,error:false,retryable:false})}
   catch(error){updateMessage(chat,message,{...previous,pending:false,retrievalNotice:t('重新核对未完成，保留上次回答。')+' '+error.message})}
   finally{sending=false;updateSend()}
@@ -727,7 +783,7 @@ globalThis.StellarCompanyAI?.setup({api,toast,reload:loadStatus,onModeChanged:re
 globalThis.StellarSemantic?.bind({api,toast});globalThis.StellarModelAPI?.bind({api,toast});globalThis.StellarModelProxy?.bind({api,toast});
 $('#backend').addEventListener('change',()=>{backendRevision++;updateModelLabel()});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{if($('#completion-notifications').checked&&globalThis.Notification&&Notification.permission==='default')await Notification.requestPermission();const body={model_proxy:globalThis.StellarModelProxy?.collect(),capture_proxy:globalThis.StellarModelProxy?.collectBrowser(),backend:$('#backend').value,auto_ai:$('#auto-ai').checked,completion_notifications:$('#completion-notifications').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value};if(body.backend==='api')body.model_api=StellarModelAPI.collect();const saved=await api('/api/settings',body);await globalThis.StellarSemantic?.save();if(body.backend==='api')StellarModelAPI.saved(saved.model_api);globalThis.StellarModelProxy?.saved(saved.model_proxy,saved.capture_proxy);updateModelLabel();await loadStatus();$('#settings-dialog').close();toast(t('设置已保存'))});
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
@@ -821,3 +877,16 @@ document.addEventListener('stellar-download',event=>{
 globalThis.StellarAttachmentOrder?.bind({api,toast});
 
 $('#backend').addEventListener('change',()=>renderModelReadiness(latestStatus));
+
+// Wall-clock gaps include real sleep, browser suspension and heavily throttled
+// tabs. Reconnect by reading server state; never resubmit a question on wake.
+let lastSessionHeartbeat=Date.now();
+globalThis.StellarSessionRecovery={gaps:0,lastGapSeconds:0,check(now=Date.now()){
+ const gap=now-lastSessionHeartbeat;lastSessionHeartbeat=now;
+ if(gap<15000)return false;
+ this.gaps++;this.lastGapSeconds=Math.round(gap/1000);
+ if(activeQuestion?.progress)activeQuestion.progress.offline=true;
+ if(token&&historyLoaded){lastHistoryPoll=0;void refresh().catch(()=>{});resumeArchiveUpdates()}
+ return true;
+}};
+setInterval(()=>StellarSessionRecovery.check(),3000);

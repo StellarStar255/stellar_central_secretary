@@ -112,6 +112,8 @@ class Service:
         self.desktop_peer=None;self.desktop_heartbeat_at=0;self.pdf_jobs=pdf_jobs.PdfJobs(self);self.storage=storage.Storage(self)
         from .semantic import SemanticIndex
         self.semantic=SemanticIndex(self.archive)
+        from .question_jobs import QuestionJobs
+        self.question_jobs=QuestionJobs(self)
     def notify_summary_finished(self,item_id,stage):
         if re.fullmatch('[a-f0-9]{32}',item_id) and stage in ('done','error') and self.archive.settings()['completion_notifications']:
             try:self.archive.get(item_id)
@@ -133,7 +135,9 @@ class Service:
                 if not isinstance(updated,(int,float)) or not 0<=updated<=10**15:raise ValueError('对话时间格式无效')
                 for message in chat['messages']:
                     if not isinstance(message,dict) or message.get('role') not in ('user','assistant') or not isinstance(message.get('id'),str) or not isinstance(message.get('text',''),str):raise ValueError('消息格式无效')
-                if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):merged[chat['id']]=chat
+                if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):
+                    from .question_jobs import preserve
+                    merged[chat['id']]=preserve(chat,merged.get(chat['id'],{}))
             result={'conversations':sorted(merged.values(),key=lambda c:c.get('updated',0),reverse=True),'activeId':active}
             return self.clean_chat_history(result,path,saved)
 
@@ -284,8 +288,9 @@ class Service:
             with self.lock:self.questions-=1
 
     def runtime(self):
-        with self.lock:
-            return {'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
+        with self.lock:value={'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
+        value['answering']=max(value['answering'],self.question_jobs.active_count())
+        return value
     def append_material(self,item_id,body):
         if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
@@ -955,6 +960,9 @@ class Service:
                     passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
                 if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice)
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
+                from .evidence_context import expand
+                passages,expanded,expansion_notice=measured('expansion_seconds',lambda:expand(self.archive,question,queries,passages,stage,cancel))
+                timings['expanded_passages']=expanded;notice.extend(expansion_notice)
                 from .answer_cache import files as source_files
                 original_signature=source_files(self.archive,[p['item_id'] for p in passages])
                 stage('images',len({p['item_id'] for p in passages}))
@@ -999,6 +1007,7 @@ class Service:
         for item_id in ids:self.cancel_capture(item_id)
         self.backups.stop.set()
         self.summary_jobs.close();ai.cancel_all()
+        self.question_jobs.close()
         self.quick_pool.shutdown(wait=False,cancel_futures=True)
         self.capture_pool.shutdown(wait=False, cancel_futures=True)
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -1086,7 +1095,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1350,6 +1359,8 @@ def handler(service):
                 if path=='/api/library/catalog':
                     from .catalog import page
                     return self.send(200,page(service.archive,body.get('queries'),body.get('offset',0),body.get('limit',20)))
+                if path=='/api/ask/start':return self.send(200,service.question_jobs.start(body))
+                if path=='/api/ask/job':return self.send(200,service.question_jobs.get(body))
                 if path=='/api/ask/cancel':return self.send(200,{'cancelled':service.question_progress.cancel(body.get('progress_id'))})
                 if path=='/api/ask/progress':return self.send(200,service.question_progress.snapshot(body.get('progress_id')))
                 if path=='/api/ask':

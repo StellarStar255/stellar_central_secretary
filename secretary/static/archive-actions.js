@@ -23,7 +23,7 @@
   const user=kept.find(message=>message.role==='user')||{};
   const title=String(user.text||user.files?.[0]||'Conversation').slice(0,36);
   if(!drop.size&&title===original.title)return [original];
-  return [{...original,messages:kept,title}];
+  const ids=new Set(kept.map(m=>m.id));const edits=Object.fromEntries(Object.entries(original.contextEdits||{}).filter(([id])=>ids.has(id)));let reset=original.contextReset;if(reset&&!ids.has(reset)){const boundary=list.findIndex(m=>m.id===reset);reset=list.slice(0,boundary+1).reverse().find(m=>ids.has(m.id))?.id||''}return [{...original,messages:kept,title,contextEdits:edits,contextIgnored:(original.contextIgnored||[]).filter(id=>ids.has(id)),contextReset:reset}];
  })}
  try{accept(JSON.parse(localStorage.getItem(key)||'{}'))}catch{}
  globalThis.StellarArchiveActions={accept,clean,isDeleted:id=>items.has(id)};

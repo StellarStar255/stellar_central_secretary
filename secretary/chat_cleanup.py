@@ -19,6 +19,12 @@ def clean_chats(chats,deleted_items,deleted_messages):
             affected.add(chat['id'])
             removed.update((chat['id'],messages[index]['id']) for index in drop)
             chat['messages']=[message for index,message in enumerate(messages) if index not in drop]
+            kept={message['id'] for message in chat['messages']}
+            if isinstance(chat.get('contextEdits'),dict):chat['contextEdits']={key:value for key,value in chat['contextEdits'].items() if key in kept}
+            if isinstance(chat.get('contextIgnored'),list):chat['contextIgnored']=[key for key in chat['contextIgnored'] if key in kept]
+            if chat.get('contextReset') and chat['contextReset'] not in kept:
+                boundary=next((i for i,m in enumerate(messages) if m['id']==chat['contextReset']),-1)
+                chat['contextReset']=next((m['id'] for m in reversed(messages[:boundary+1]) if m['id'] in kept),'')
         if chat['id'] in affected:
             if not chat['messages']:continue
             user=next((message for message in chat['messages'] if message.get('role')=='user'),{})

@@ -33,7 +33,7 @@ def main():
      try:
       result=service.ask_library(case['question'],[] if case['name']=='schedule_today' else turns,context=[] if case['name']=='schedule_today' else context,force_refresh=True)
       expected={'course':course,'rome':rome,'daughter':daughter}[case['topic']]
-      report.append({'case':case['name'],'question':case['question'],'answer':result['answer'],'timings':result.get('timings',{}),'expected_topic_cited':any(s['item_id']==expected for s in result['sources']),'sources':[s['title'] for s in result['sources']],'review_required':True})
+      report.append({'case':case['name'],'question':case['question'],'answer':result['answer'],'timings':result.get('timings',{}),'expected_topic_cited':any(s['item_id']==expected for s in result['sources']),'sources':[s['title'] for s in result['sources']],'catalog_queries':result.get('catalog',{}).get('queries',[]),'review_required':True})
      except Exception as error:report.append({'case':case['name'],'error':str(error),'review_required':True})
   finally:service.close()
  args.output.write_text(json.dumps({'backend':args.backend,'synthetic_only':True,'cases':report},ensure_ascii=False,indent=2)+'\n')
