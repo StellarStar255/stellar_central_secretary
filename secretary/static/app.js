@@ -142,7 +142,7 @@ async function api(path,body,retry=true,companyRetry=true){
  const data=await response.json();
  if(response.status===403&&body!==undefined&&retry){const status=await api('/api/status');token=status.token;return api(path,body,false,companyRetry)}
  if(response.status===409&&data.company_model&&body!==undefined&&companyRetry&&globalThis.StellarCompanyAI){if(await StellarCompanyAI.review(api,data.company_model))return api(path,body,retry,false);const error=Error(t('已取消模型调用，正文和已有资料保留。'));error.status=409;error.cancelledReview=true;throw error}
- if(!response.ok){const error=new Error(StellarI18n.message(data.error)||t('请求失败'));error.originalMessage=data.error;error.status=response.status;throw error}return data;
+ if(!response.ok){const error=new Error(StellarI18n.message(data.error)||t('请求失败'));error.originalMessage=data.error;error.status=response.status;if(data.trashed_duplicate&&/^[a-f0-9]{32}$/.test(data.trashed_duplicate.id))error.trashedDuplicate=data.trashed_duplicate;throw error}return data;
 }
 
 async function busy(button,action,label=t('处理中…')){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await action()}catch(e){toast(e.message)}finally{button.disabled=false;button.textContent=old}}
@@ -222,9 +222,9 @@ function renderChat(scroll=true){
  updateInputMode();renderConversationBasis(chat);
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${m.role==='assistant'&&!m.pending&&m.questionId&&(m.sources?.length||m.retryable)?`<button class="secondary" data-recheck="${esc(m.id)}">${esc(t(m.retryable?'重试回答':'重新核对'))}</button>`:''}${catalogPager(m)}${answerTiming(m)}</article>`).join('');
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.trashedDuplicate?`<div class="archive-recovery"><button class="secondary" data-restore-duplicate="${esc(m.id)}" ${m.restoringDuplicate?'disabled':''}>${esc(t('恢复原归档'))}</button></div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${m.role==='assistant'&&!m.pending&&m.questionId&&(m.sources?.length||m.retryable)?`<button class="secondary" data-recheck="${esc(m.id)}">${esc(t(m.retryable?'重试回答':'重新核对'))}</button>`:''}${catalogPager(m)}${answerTiming(m)}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
- bindCatalogPages(chat);bindRechecks(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
+ bindCatalogPages(chat);bindRechecks(chat);bindArchiveRecovery(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,createdAt:new Date().toISOString(),...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
@@ -625,6 +625,21 @@ function archiveNote(text,chat,current){
  }
  throw Error(t('没有找到可建档的上一条文字，请在“建档：”后附上要保存的内容。'));
 }
+function bindArchiveRecovery(chat){
+ $('#messages').querySelectorAll('[data-restore-duplicate]').forEach(button=>button.onclick=async()=>{
+  const message=chat.messages.find(value=>value.id===button.dataset.restoreDuplicate),item=message?.trashedDuplicate;
+  if(!item||sending||message.restoringDuplicate||!/^[a-f0-9]{32}$/.test(item.id))return;
+  sending=true;message.restoringDuplicate=true;button.disabled=true;updateSend();
+  try{
+   await api('/api/trash/'+item.id+'/restore',{expected_updated:item.updated,expected_trashed_at:item.trashed_at});
+   const restored=await api('/api/items/'+item.id);await refresh();
+   updateMessage(chat,message,{text:t('已恢复原归档，保留原建档时间。')+'\n\n'+archiveReply({item:restored,created:false}),items:[item.id],archiveOnly:true,trashedDuplicate:null,error:false,restoringDuplicate:false});
+   const original=chat.messages.find(value=>value.id===message.questionId);
+   if(original&&$('#message-input').value.trim()===original.text.trim()){$('#message-input').value='';resizeInput()}
+  }catch(error){toast(error.message)}
+  finally{sending=false;message.restoringDuplicate=false;renderChat(false);updateSend()}
+ });
+}
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
  // An explicit save request takes precedence over an ongoing conversation.
  if(['auto','library','ask'].includes(mode)&&archiveInstruction(text))return 'note';
@@ -683,7 +698,7 @@ $('#composer-form').onsubmit=async event=>{
   if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources}
   if(errors.length)answer+=(answer?'\n\n':'')+t('以下资料未能保存：\n')+errors.join('\n');
   updateMessage(chat,response,{text:answer||t('已处理。'),pending:false,error:errors.length>0&&!results.length});
- }catch(e){globalThis.StellarUploads?.abandon(files);if((files.length||text)&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+(e.cancelled?'':t('本次处理未完成：'))+e.message,pending:false,error:!e.cancelled,retryable:mode==='library'||mode==='ask'&&!files.length})}
+ }catch(e){globalThis.StellarUploads?.abandon(files);if((files.length||text)&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:e.trashedDuplicate?t('相同资料已在回收站。可恢复原归档，原建档时间和内容会保留；本次输入尚未另存。'):(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+(e.cancelled?'':t('本次处理未完成：'))+e.message,trashedDuplicate:e.trashedDuplicate||null,pending:false,error:!e.cancelled&&!e.trashedDuplicate,retryable:!e.trashedDuplicate&&(mode==='library'||mode==='ask'&&!files.length)})}
  finally{sending=false;$('#composer-status').textContent='';updateSend();$('#message-input').focus();await refresh().catch(()=>{})}
 };
 async function detail(id,recordView=false){if(selectedId!==id&&!StellarDrafts.isFlushing()&&!await StellarDrafts.flush())return;const item=await api('/api/items/'+id);if(globalThis.StellarArchiveActions?.isDeleted(id))return;if(recordView)void api('/api/items/'+id+'/view',{}).catch(()=>{});selectedId=id;detailVersion=item.updated;

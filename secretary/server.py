@@ -23,7 +23,7 @@ from .local_http import LocalHTTPServer
 from pathlib import Path
 from PIL import Image
 
-from .core import Archive, PageText, extract
+from .core import Archive, PageText, extract, TrashedDuplicateError
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
 from . import image_formats
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
@@ -781,6 +781,20 @@ class Service:
             except (ValueError,TypeError):raise ValueError('原消息时间无效，请重新输入要建档的内容')
         if text and not (url or name or title):
             title=next((line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('```')),'未命名笔记')[:100]
+        if not (url or name):
+            from datetime import datetime
+            from .archived_arrangements import lookup,content
+            from .note_dates import resolve
+            canonical=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',text)
+            with self.lock:
+                matched=lookup(self.archive,canonical)
+                if matched:
+                    existing=self.archive.get(matched[1][0]['item_id'])
+                    reference=(note_reference or datetime.now().astimezone()).astimezone().isoformat()
+                    requested=resolve(canonical,reference)
+                    expected=requested.split('\n',2)[-1] if requested else canonical
+                    if content(existing,canonical)==expected:
+                        return {'item':existing,'created':False,'updated':False,'reused':True}
         item_id, created = self.archive.add(title, text, url, name, data, warning)
         if created and not (url or name):
             from .note_dates import resolve
@@ -935,7 +949,9 @@ class Service:
             timings['local_reply']=True
             response=result(reply,[],[]);response['local_reply']=True
             return response
-        if not force_refresh and all(turn['question']=='【用户明确说明，作为条件而非资料事实】'+question for turn in retained):
+        # Exact standalone text asks only to confirm the saved record. Old topic
+        # conditions do not transform this into a conflict or timetable analysis.
+        if not force_refresh:
             from .archived_arrangements import lookup
             with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
             if archived:
@@ -1269,7 +1285,7 @@ def handler(service):
                 trash_match=re.fullmatch(r'/api/trash/([a-f0-9]{32})/(restore|purge)',path)
                 if trash_match:
                     item=service.archive.get(trash_match[1],include_trashed=True)
-                    if trash_match[2]=='restore':return self.send(200,service.archive.restore_item(item['id']))
+                    if trash_match[2]=='restore':return self.send(200,service.archive.restore_item(item['id'],body.get('expected_updated'),body.get('expected_trashed_at')))
                     if not item['trashed_at'] or not isinstance(body.get('expected_trashed_at'),str) or not body['expected_trashed_at']:raise ValueError('请重新选择回收站中的资料并确认永久删除。')
                     if body.get('confirmed') is not True:raise ValueError('请先确认永久删除。')
                     return self.send(200,service.delete_item(item['id'],body.get('expected_updated'),body['expected_trashed_at']))
@@ -1470,6 +1486,7 @@ def handler(service):
                     service.queue(item_id, force=True, full_pdf=body.get('full_pdf') is True); return self.send(200, {'ok':True})
                 self.send(404, {'error':'不存在'})
             except company_ai.ApprovalRequired as exc:self.send(409,{'error':str(exc),'company_model':exc.info})
+            except TrashedDuplicateError as exc:self.send(409,{'error':str(exc),'trashed_duplicate':exc.item})
             except (ValueError, KeyError) as exc: self.send(400, {'error':str(exc)})
             except Exception as exc: self.send(500, {'error':str(exc)})
     return Handler

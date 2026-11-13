@@ -4,7 +4,7 @@ import re
 
 
 def content(item,value):
-    if item['note'].strip() or item['note_images']!='[]' or item['additions']!='[]':return None
+    if item['note'].strip() or item['note_images'] not in ('[]',[]) or item['additions'] not in ('[]',[]):return None
     context=item.get('user_context','')
     if context and not context.startswith('【日期解析】'):return None
     if context:

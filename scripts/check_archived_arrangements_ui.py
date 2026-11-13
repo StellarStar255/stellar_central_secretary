@@ -12,6 +12,13 @@ with tempfile.TemporaryDirectory() as root:
     service=Service(root);service.archive.configure('codex',False)
     text='周六上午11:00带测试对象去复查'
     item=service.ingest({'text':text,'archive_only':True})['item']
+    table,_=service.archive.add('Synthetic timetable','周六上午课程表，测试旧话题隔离')
+    service.chat_history({'activeId':'fixture-chat','conversations':[{'id':'fixture-chat','title':'Synthetic archived arrangement','updated':1,'messages':[
+        {'id':'old-question','role':'user','text':'周六有课吗？','knowledgeQuestion':True},
+        {'id':'old-answer','role':'assistant','text':'原来的课程表记录。[1]','sources':[{'number':1,'item_id':table,'title':'Synthetic timetable'}]},
+        {'id':'old-condition','role':'user','text':'这个课程表就是她的，依据这张表判断','knowledgeQuestion':True},
+        {'id':'old-condition-answer','role':'assistant','text':'已按指定条件核对课程表。','sources':[{'number':1,'item_id':table,'title':'Synthetic timetable'}]}
+    ]}]})
     server=ThreadingHTTPServer(('127.0.0.1',0),handler(service))
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
@@ -29,11 +36,13 @@ with tempfile.TemporaryDirectory() as root:
                     expect(answer).to_contain_text('这条安排已归档：')
                     expect(answer.locator('.answer-timing summary')).to_contain_text('直接读取归档')
                     expect(answer).to_contain_text(item['user_context'].split('\n',2)[-1])
+                    expect(answer).not_to_contain_text('课程表')
+                    expect(answer).not_to_contain_text('冲突')
                     durations.append(round(time.monotonic()-started,3))
                     expect(page.locator('#composer-status')).to_have_text('')
                 page.screenshot(path='/tmp/stellar-direct-archive-reply.png')
                 saved=service.chat_history();replies=[message for chat in saved['conversations'] for message in chat['messages'] if message.get('timings',{}).get('archive_match')]
-                assert len(replies)==2 and all(message['timings']['model_calls']==0 for message in replies)
+                assert len(replies)==2 and all(message['timings']['model_calls']==0 and [source['item_id'] for source in message['sources']]==[item['id']] for message in replies)
                 assert not errors,errors
                 print('PASS: repeated exact arrangements use live archive citations through background jobs; zero model calls; browser end-to-end seconds:',durations)
             finally:browser.close()

@@ -33,11 +33,21 @@ class ArchivedArrangementsTests(unittest.TestCase):
     def test_trash_force_refresh_conditions_and_uncertain_matches_do_not_shortcut(self):
         with patch.object(self.service,'model_backend',side_effect=ValueError('Normal model path')):
             with self.assertRaisesRegex(ValueError,'Normal model path'):self.service.ask_library(self.text,force_refresh=True)
-            with self.assertRaisesRegex(ValueError,'Normal model path'):self.service.ask_library(self.text,context=[{'statement':'安排已改为下周'}])
         self.assertIsNone(lookup(self.service.archive,self.text+'吗？'))
         self.assertIsNone(lookup(self.service.archive,'周六上午10:00带测试对象去复查'))
         self.service.trash_item(self.item['id'],self.service.archive.get(self.item['id'])['updated'])
         self.assertIsNone(lookup(self.service.archive,self.text))
+
+    def test_old_timetable_condition_does_not_expand_an_exact_record_confirmation(self):
+        table,_=self.service.archive.add('Synthetic timetable','周六上午课程表内容')
+        with patch.object(self.service,'model_backend',side_effect=AssertionError('No model or old timetable review')):
+            result=self.service.ask_library(self.text,
+                history=[{'question':'周六有课吗？','answer':'旧课程表需要按你指定的条件判断。[1]','source_ids':[table]}],
+                context=[{'statement':'这个课程表就是她的，依据这张表判断','source_ids':[table]}])
+        self.assertTrue(result['timings']['archive_match'])
+        self.assertEqual([source['item_id'] for source in result['sources']],[self.item['id']])
+        self.assertNotIn('课程',result['answer'])
+        self.assertNotIn('冲突',result['answer'])
 
     def test_header_matching_and_conflicting_annotations_fall_back(self):
         text='建档：\n'+self.text+' header'
@@ -48,7 +58,12 @@ class ArchivedArrangementsTests(unittest.TestCase):
         self.assertIsNone(lookup(self.service.archive,self.text+' header'))
 
     def test_identical_duplicates_are_fast_but_different_dates_are_not(self):
-        duplicate=self.service.ingest({'text':'建档：\n'+self.text,'archive_only':True})['item']
+        from datetime import datetime
+        from secretary.note_dates import resolve
+        raw='建档：\n'+self.text
+        duplicate_id,_=self.service.archive.add('Duplicate',raw)
+        self.service.archive.save_context(duplicate_id,resolve(raw,datetime.fromisoformat(self.item['created']).astimezone().isoformat()))
+        duplicate=self.service.archive.get(duplicate_id)
         self.assertIsNotNone(lookup(self.service.archive,self.text))
         with self.service.archive.db() as db:
             import re

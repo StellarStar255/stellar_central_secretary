@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
+
+class TrashedDuplicateError(ValueError):
+    def __init__(self,item):
+        super().__init__('相同资料已在回收站，可恢复原归档。')
+        self.item={key:item[key] for key in ('id','title','updated','trashed_at')}
 from .rich_text import searchable_text
 from . import additions,links,bundles,pdf_reading,origins,attachment_order
 
@@ -244,9 +249,9 @@ class Archive:
         else:digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
-            old = db.execute("SELECT id,text,trashed_at FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY created LIMIT 1", (digest, url, url)).fetchone()
+            old = db.execute("SELECT id,title,text,updated,trashed_at FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY (trashed_at!=''),created LIMIT 1", (digest, url, url)).fetchone()
             if old:
-                if old['trashed_at']:raise ValueError('这份资料在回收站中，请先恢复或永久删除后再归档。')
+                if old['trashed_at']:raise TrashedDuplicateError(old)
                 if text.strip() and not old['text'].strip():
                     db.execute("UPDATE items SET text=?,title=?,state='pending',error='',updated=? WHERE id=?", (text, title or filename or url, now, old['id']))
                     if data is not None:
@@ -411,10 +416,11 @@ class Archive:
             db.execute('UPDATE items SET trashed_at=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),item_id))
             db.execute('DELETE FROM search WHERE item_id=?',(item_id,));db.execute('DELETE FROM chunks WHERE item_id=?',(item_id,))
         return {'ok':True}
-    def restore_item(self,item_id):
+    def restore_item(self,item_id,expected_updated=None,expected_trashed_at=None):
         with self.lock,self.db() as db:
             item=self.get(item_id,include_trashed=True)
             if item['trashed_at']:
+                if expected_updated is not None and expected_updated!=item['updated'] or expected_trashed_at is not None and expected_trashed_at!=item['trashed_at']:raise ValueError('回收站资料已变化，请重新发送内容后再选择恢复。')
                 db.execute("UPDATE items SET trashed_at='' WHERE id=?",(item_id,));self._index(db,item_id,item['text'])
         return {'ok':True}
     def trash_items(self):
