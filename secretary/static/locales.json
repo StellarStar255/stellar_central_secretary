@@ -1318,6 +1318,7 @@
   "相同资料已在回收站。可恢复原归档，原建档时间和内容会保留；本次输入尚未另存。": "The same material is in the recycle bin. Restore its original archive to preserve its date and content. This input has not been saved separately.",
   "直接读取归档": "Read archive directly",
   "原文完全匹配，直接读取当前归档，未调用模型。": "Exact original-text match; read the current archive without a model call.",
+  "安排内容一致，直接读取当前归档，未调用模型。": "Matching arrangement; read the current archive without a model call.",
   "没有找到可建档的上一条文字，请在“建档：”后附上要保存的内容。": "No previous text is available to archive. Add the content after Archive:.",
   "本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。": "Connection to the local service was lost. Restart the app and try again. If you were saving, check the library first to avoid duplicates."
 }

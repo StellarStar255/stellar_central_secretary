@@ -68,6 +68,18 @@ class NoteDatesTests(unittest.TestCase):
                 self.assertEqual(fields['summary'].count(resolved),1)
             finally:service.close()
 
+    def test_optional_speaker_does_not_duplicate_summary_or_break_date_order(self):
+        from secretary.note_dates import date_summary,arrangement_text
+        original='我周六上午11:00带测试对象去复查'
+        context=resolve(original,'2026-11-13T08:00:00+08:00')
+        resolved=context.split('\n',2)[-1]
+        self.assertNotIn('我2026年',resolved)
+        legacy_context=context[:context.rfind('\n')+1]+'我'+resolved
+        cleaned=date_summary('我'+resolved+'\n\n'+resolved+'。',legacy_context)
+        self.assertEqual(cleaned.count('2026年11月14日'),1)
+        self.assertEqual(arrangement_text('我老婆周六上午复查'),'我老婆周六上午复查')
+        self.assertEqual(arrangement_text('我们周六上午复查'),'我们周六上午复查')
+
     def test_contextual_save_uses_original_message_date_and_rejects_bad_reference(self):
         with tempfile.TemporaryDirectory() as root:
             service=Service(root);service.archive.configure('codex',False)

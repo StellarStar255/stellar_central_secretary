@@ -32,6 +32,13 @@ with tempfile.TemporaryDirectory() as root:
     assert page.locator('#messages .archive-card p').inner_text().count(resolved.split('（')[0])==1
     page.screenshot(path='/tmp/stellar-date-summary-clean.png')
     assert len(service.archive.list())==1 and service.archive.get(wrapper,include_trashed=True)['trashed_at']
+    page.locator('#message-input').fill('建档：\n我'+text);page.locator('#send-button').click()
+    expect(page.locator('#messages .archive-card')).to_have_count(2)
+    expect(page.locator('#messages .archive-card').last).to_have_attribute('data-id',live['id'])
+    body=page.locator('#messages .message.assistant .message-body').last
+    assert body.inner_text().count(resolved.split('（')[0])==1
+    expect(body).not_to_contain_text('我2026年')
+    assert len(service.archive.list())==1
     page.locator('#message-input').fill(only_text)
     with page.expect_response(lambda response:response.url.endswith('/api/ingest')) as conflict:page.locator('#send-button').click()
     assert conflict.value.status==409 and conflict.value.json()['trashed_duplicate']['id']==saved['id']

@@ -4,18 +4,26 @@ from datetime import datetime, timedelta
 
 MARKER = '【日期解析】'
 TOKEN = re.compile(r'(?<![每上])(?:(本周|这周|下周|下下周|本星期|这星期|下星期|下下星期)([一二三四五六日天])|(?:周|星期|礼拜)([一二三四五六日天])|今天|明天|大后天|后天|昨天|前天)')
+DATE_START=r'(?:今天|明天|大后天|后天|昨天|前天|(?:(?:上上|下下|上|下|本|这)?周|星期|礼拜)[一二三四五六日天]|\d{4}年\d+月\d+日|\d{4}-\d{2}-\d{2}|\d+月\d+日)'
+
+
+def arrangement_text(value):
+    value=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',value.strip())
+    # Only the speaker immediately before a date is implicit. Never remove
+    # 我老婆/我们/他/她, which can identify a different person or group.
+    return re.sub(r'^我\s*(?='+DATE_START+')','',value)
 
 
 def date_summary(summary,context):
     """Display the fixed interpretation once; retain distinct model details."""
     if not summary.strip() or not context.startswith(MARKER) or len(context.split('\n',2))<3:return summary
     resolved=context.split('\n',2)[-1].strip()
-    resolved=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',resolved)
+    resolved=arrangement_text(resolved)
     def key(value):return re.sub(r'[\W_]+','',value)
     seen={key(resolved)};parts=[resolved]
     for part in re.split(r'\n\s*\n',summary.strip()):
         part=re.sub(r'^【日期解析】\s*','',part).strip()
-        part=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',part)
+        part=arrangement_text(part)
         normalized=key(part)
         if normalized and normalized not in seen:parts.append(part);seen.add(normalized)
     return '\n\n'.join(parts)
@@ -44,4 +52,5 @@ def resolve(text, reference):
     resolved = TOKEN.sub(replace, text)
     if resolved == text:
         return ''
+    resolved=re.sub(r'(?m)^我(?=\d{4}年\d+月\d+日)','',resolved)
     return MARKER + f'\n按原消息本地日期 {base.date().isoformat()}（{base.strftime("%z")}）解析；未指定的周几按最近一个同名日（含当天）。\n' + resolved

@@ -784,8 +784,8 @@ class Service:
         if not (url or name):
             from datetime import datetime
             from .archived_arrangements import lookup,content
-            from .note_dates import resolve
-            canonical=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',text)
+            from .note_dates import resolve,arrangement_text
+            canonical=arrangement_text(text)
             with self.lock:
                 matched=lookup(self.archive,canonical)
                 if matched:
@@ -956,7 +956,7 @@ class Service:
             with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
             if archived:
                 timings['archive_match']=True
-                return result(*archived,['原文完全匹配，直接读取当前归档，未调用模型。'])
+                return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'])
         with self.archive.db() as db:
             available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
         if not available:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}

@@ -33,3 +33,16 @@ class ArchiveRecoveryTests(unittest.TestCase):
   restored=self.service.archive.get(saved['id'])
   self.assertEqual(restored,saved)
   self.assertTrue(self.service.archive.retrieve('only-trash'))
+ def test_optional_speaker_reuses_arrangement_in_both_directions(self):
+  text='周六上午11:00带测试对象去复查'
+  first=self.service.ingest({'text':'建档：\n'+text,'archive_only':True})['item']
+  repeated=self.service.ingest({'text':'建档：\n我'+text,'archive_only':True})
+  self.assertTrue(repeated['reused']);self.assertEqual(repeated['item']['id'],first['id'])
+  self.assertEqual(len(self.service.archive.list()),1)
+  second='周六下午15:00测试对象复查'
+  with_speaker=self.service.ingest({'text':'我'+second,'archive_only':True})['item']
+  without_speaker=self.service.ingest({'text':second,'archive_only':True})
+  self.assertTrue(without_speaker['reused']);self.assertEqual(without_speaker['item']['id'],with_speaker['id'])
+  for different in ['她'+text,'我们'+text,text.replace('11:00','10:00'),text.replace('测试对象','另一对象')]:
+   self.assertTrue(self.service.ingest({'text':different,'archive_only':True})['created'])
+  self.assertEqual(self.service.archive.get(first['id'])['text'],'建档：\n'+text)
