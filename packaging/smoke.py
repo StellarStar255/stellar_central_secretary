@@ -181,7 +181,7 @@ with tempfile.TemporaryDirectory() as data:
                 prompt=str(body['messages'][-1]['content'])
                 content='OK' if 'Reply with exactly OK' in prompt else json.dumps({'title':'Synthetic commands','summary':'Creates a synthetic compressed archive.','category':'Test','tags':['commands']})
                 if prompt.startswith('为个人知识库生成全文检索词'):content=json.dumps({'queries':['省电']})
-                if prompt.startswith('请仅依据本次检索到的资料回答当前问题'):content='Close background applications to improve battery life. [1]'
+                if prompt.startswith(('请仅依据本次检索到的资料回答当前问题','先用一两句话直接回答当前问题')):content='Close background applications to improve battery life. [1]'
                 if body.get('stream'):
                     self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
                     self.wfile.write(('data: '+json.dumps({'choices':[{'delta':{'content':content[:20]},'finish_reason':None}]})+'\n\n').encode());self.wfile.flush()
@@ -262,6 +262,32 @@ with tempfile.TemporaryDirectory() as data:
                 assert not streamed,'The partial text must precede the final answer'
             finally:stream_release.set();streaming_thread.join(15)
             assert not stream_errors and streamed and streamed[0]['sources'][0]['item_id']==power['id'],stream_errors
+            # Verify the frozen reconnectable API, including persistence without
+            # a live browser/long HTTP request and idempotent start retries.
+            stream_release.clear();chat_id=uuid.uuid4().hex;qid=uuid.uuid4().hex;mid=uuid.uuid4().hex;job_id=uuid.uuid4().hex
+            chat={'id':chat_id,'title':'Frozen recovery fixture','updated':1,'messages':[{'id':qid,'role':'user','text':'如何省电','knowledgeQuestion':True},{'id':mid,'role':'assistant','text':'','pending':True,'questionId':qid}]}
+            request('/api/conversations',{'activeId':chat_id,'conversations':[chat]},status['token'])
+            payload={'progress_id':job_id,'chat_id':chat_id,'question_id':qid,'message_id':mid,'question':'如何省电','history':[],'force_refresh':True}
+            before=len(provider_calls)
+            request('/api/ask/start',payload,status['token']);request('/api/ask/start',payload,status['token'])
+            try:
+                for _ in range(80):
+                    if json.loads(request('/api/ask/progress',{'progress_id':job_id},status['token'])).get('partial'):break
+                    time.sleep(.1)
+                else:raise AssertionError('Frozen background question did not stream')
+            finally:stream_release.set()
+            for _ in range(100):
+                chats=json.loads((Path(data)/'conversations.json').read_text(encoding='utf-8'))['conversations']
+                answer=next(c for c in chats if c['id']==chat_id)['messages'][-1]
+                if answer.get('requestState')=='done':break
+                time.sleep(.1)
+            else:raise AssertionError('Frozen answer did not persist without a browser')
+            assert answer['sources'][0]['item_id']==power['id'] and len(provider_calls)==before+2
+            stale={**chat,'updated':int(time.time()*1000)+1000}
+            request('/api/conversations',{'activeId':chat_id,'conversations':[stale]},status['token'])
+            restored=json.loads(request('/api/ask/job',{'progress_id':job_id,'chat_id':chat_id,'message_id':mid},status['token']))
+            assert restored['message']['text']==answer['text'] and restored['message']['requestState']=='done'
+            print('PASS: frozen background question, idempotent start, streamed progress, closed-page result persistence and stale-client fencing')
             catalog=json.loads(request('/api/library/catalog',{'queries':['battery'],'offset':0},status['token']))
             assert power['id'] in [source['item_id'] for source in catalog['sources']]
             print('PASS: frozen API-worker SSE text before completion, authenticated partial progress, checked final citations and complete catalog endpoint')
