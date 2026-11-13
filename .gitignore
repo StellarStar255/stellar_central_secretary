@@ -46,6 +46,7 @@ storage_state.json
 .codex/
 .aws/
 .ssh/
+.sterminal/
 
 # Development environments and caches
 venv/
