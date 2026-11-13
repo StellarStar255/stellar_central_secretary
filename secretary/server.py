@@ -935,6 +935,12 @@ class Service:
             timings['local_reply']=True
             response=result(reply,[],[]);response['local_reply']=True
             return response
+        if not force_refresh and all(turn['question']=='【用户明确说明，作为条件而非资料事实】'+question for turn in retained):
+            from .archived_arrangements import lookup
+            with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
+            if archived:
+                timings['archive_match']=True
+                return result(*archived,['原文完全匹配，直接读取当前归档，未调用模型。'])
         with self.archive.db() as db:
             available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
         if not available:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}

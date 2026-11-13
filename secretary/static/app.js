@@ -563,6 +563,7 @@ function answerTiming(message){
  const timing=message.timings;if(!timing||!Number.isFinite(Number(timing.total_seconds)))return '';
  const seconds=key=>Math.max(0,Number(timing[key])||0).toFixed(1);
  if(timing.cache_hit)return `<details class="answer-timing"><summary>${esc(t('复用近期回答'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('问题与资料未变化，可点击重新核对强制生成。'))}</p></details>`;
+ if(timing.archive_match)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('原文完全匹配，直接读取当前归档，未调用模型。'))}</p></details>`;
  if(timing.local_reply)return `<details class="answer-timing"><summary>${esc(t('本地即时回复'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('未调用模型，也未检索知识库。'))}</p></details>`;
  const labels=[['queue_seconds','排队'],['planning_seconds','检索规划'],['retrieval_seconds','本地检索'],['expansion_seconds','补读上下文'],['image_seconds','准备图片'],['answer_seconds','模型回答']];
  return `<details class="answer-timing"><summary>${esc(t('本次用时'))} ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${labels.map(([key,label])=>esc(t(label))+' '+seconds(key)+'s').join(' · ')}</p>${timing.expanded_passages?`<p>${esc(t('本次补读片段'))}: ${Number(timing.expanded_passages)}</p>`:''}${timing.image_cache_hit?`<p>${esc(t('复用已准备的核对图片，仍交由模型检查。'))}</p>`:''}${timing.fast_followup?`<p>${esc(t('本次直接沿用已引用资料，省去检索规划请求。'))}</p>`:''}</details>`;
