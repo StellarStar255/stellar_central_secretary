@@ -32,3 +32,14 @@ class CatalogTest(unittest.TestCase):
     result=page(s.archive,['罗马史']);self.assertEqual({source['item_id'] for source in result['sources']},{exact})
     self.assertEqual(page(s.archive,['党史'])['catalog']['total'],0)
    finally:s.close()
+
+ def test_combined_chinese_synonyms_do_not_become_an_impossible_and_query(self):
+  with tempfile.TemporaryDirectory() as root:
+   s=Service(root)
+   try:
+    item=s.archive.add('罗马皇位继承','军队拥立影响罗马皇位。')[0]
+    result=page(s.archive,['罗马史 罗马历史 古罗马史 古罗马','罗马史 罗马历史 古罗马史 古罗马历史'])
+    self.assertEqual({source['item_id'] for source in result['sources']},{item})
+    self.assertEqual(result['catalog']['queries'][0],'罗马');self.assertTrue(result['retrieval_notice'])
+    self.assertEqual(page(s.archive,['罗马 帝国'])['catalog']['total'],0)
+   finally:s.close()

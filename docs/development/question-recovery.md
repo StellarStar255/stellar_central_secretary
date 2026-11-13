@@ -31,3 +31,9 @@ Existing visibility, focus and pageshow refresh remains. A wall-clock gap monito
 - `tests/test_evidence_context.py`: late sections, character/count bounds, short-source fast path and an initially unindexed adjacent page of a synthetic 51 MB PDF.
 - `scripts/check_question_recovery_ui.py` plus existing controls, citations and full-chat browser regressions.
 - Synthetic live-model evaluation uses `scripts/evaluate_library_chat.py`; no real library records are exported to test reports.
+
+## Additional findings
+
+The expanded live Codex matrix exposed a catalog query issue: multiple Chinese history synonyms were sometimes emitted as one space-separated query, causing an impossible AND match. If the original catalog is empty, shared subject terms are now considered with a scope notice; existing nonempty exact matches are preserved. Actual emitted query strings and a bounded history-suffix fallback are covered by regression tests.
+
+The first independent Linux run passed. The first Windows run identified an unclosed SQLite reader in the no-GUI convergence test; the test now explicitly closes that connection instead of suppressing cleanup errors. Native/window and browser verification continues in the dedicated validation workflow. Claude live evaluation was attempted but its account is currently paused, so no Claude quality pass is claimed.

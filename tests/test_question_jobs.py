@@ -73,3 +73,10 @@ class QuestionJobsTest(unittest.TestCase):
    with self.assertRaises(company_ai.ApprovalRequired):self.s.question_jobs.get(self.body)
    company_ai.approve(self.s.archive,self.s.model_backend(),{'acknowledged':True,'fingerprint':info['fingerprint']})
    self.assertEqual(self.finish()['requestState'],'done');self.assertEqual(ask.call_count,2)
+
+ def test_deleted_condition_edits_and_reset_boundary_are_cleaned(self):
+  from secretary.chat_cleanup import clean_chats
+  chat={'id':'chat','messages':[{'id':'q0','role':'user','text':'Older condition'},{'id':'a0','role':'assistant','text':'Older answer'},{'id':'q1','role':'user','text':'Deleted condition'},{'id':'a1','role':'assistant','text':'Private answer','sources':[{'item_id':self.item}]},{'id':'q2','role':'user','text':'Later condition'}],'contextEdits':{'q0':'Earlier edit','q1':'Private edit','q2':'Later edit'},'contextIgnored':['q1'],'contextReset':'a1'}
+  result,_=clean_chats([chat],[self.item],[]);value=result[0]
+  self.assertNotIn('q1',value['contextEdits']);self.assertNotIn('Private edit',str(value))
+  self.assertEqual(value['contextReset'],'a0');self.assertEqual(value['contextIgnored'],[])

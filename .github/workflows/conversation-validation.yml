@@ -3,6 +3,9 @@ on:
   push:
     branches: ['validation/conversation-recovery-20261113']
   workflow_dispatch:
+concurrency:
+  group: conversation-validation-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -21,6 +24,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/requirements-build.txt
       - name: Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |

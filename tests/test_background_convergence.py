@@ -1,5 +1,6 @@
 """The database must converge without a browser polling any endpoint."""
 import sqlite3,tempfile,threading,unittest
+from contextlib import closing
 from unittest.mock import patch
 from secretary import ai
 from secretary.core import Archive
@@ -22,7 +23,7 @@ class BackgroundConvergenceTest(unittest.TestCase):
       with s.lock:future=s.summary_futures[item]
       # No HTTP server, GUI, details request or status polling is started.
       release.set();future.result(3)
-     with sqlite3.connect(s.archive.root/'archive.sqlite3') as db:
+     with closing(sqlite3.connect(s.archive.root/'archive.sqlite3')) as db:
       state,summary,error=db.execute('SELECT state,summary,error FROM items WHERE id=?',(item,)).fetchone()
      self.assertEqual(state,'error' if failure else 'ready')
      self.assertEqual(bool(summary),not failure);self.assertEqual(bool(error),failure)

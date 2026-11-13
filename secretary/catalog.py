@@ -8,8 +8,15 @@ def page(archive,queries,offset=0,limit=20):
     notice=''
     if not found:
         import re
-        subjects=list(dict.fromkeys(re.sub(r'(?:的)?(?:历史|史)$|\s+history$','',query,flags=re.I).strip() for query in queries))
-        subjects=[query for query in subjects if len(query)>=2 and query not in queries]
+        subjects=[]
+        for query in queries:
+            words=re.split(r'\s+|[、，,;；|]',query)
+            stems=[re.sub(r'(?:的)?(?:历史|史)$|\s+history$','',word,flags=re.I).strip() for word in words if word]
+            if len(stems)>1 and all(re.fullmatch(r'[\u3400-\u9fff]{2,}',word) for word in stems):
+                root=min(stems,key=len)
+                if root not in ('历史','资料','记录','问题','研究','课程') and all(root in word for word in stems):subjects.extend([root]+stems)
+            elif len(stems)==1 and len(stems[0])>=2 and stems[0]!=query:subjects.append(stems[0])
+        subjects=[query for query in dict.fromkeys(subjects) if query not in queries]
         if subjects:
             queries=list(dict.fromkeys(subjects+queries))[:3]
             for query in queries:
