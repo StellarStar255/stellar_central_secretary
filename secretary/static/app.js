@@ -166,6 +166,29 @@ function sourceCard(source){
  const snippet=String(source.text||'').replace(/\s+/g,' ').trim();
  return `<div class="source-card"><button class="source" ${attrs} aria-label="${esc(t('查看资料'))}: ${esc(title)}"><span class="source-title">${esc(title)}</span>${snippet?`<span class="source-quote">${esc(snippet.slice(0,100))}${snippet.length>100?'…':''}</span>`:''}</button><div class="source-actions"><button class="source-view" ${attrs} aria-label="${esc(t('查看资料'))}: ${esc(title)}">${esc(t('查看资料'))}</button>${unavailable||changed?`<small class="source-changed">${esc(t(unavailable?(state.state==='trashed'?'已移入回收站':'资料已删除'):'资料已更新'))}</small>`:''}${url?`<span aria-hidden="true">·</span><a class="source-original" data-original-id="${esc(source.item_id)}" aria-label="${esc(t('原链接'))}: ${esc(title)}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(t('原链接'))} ↗</a>`:''}</div></div>`;
 }
+function bindInlineCitations(chat){
+ for(const article of $('#messages').querySelectorAll('[data-message]')){
+  const message=chat.messages.find(value=>value.id===article.dataset.message),root=article.querySelector('.answer-prose');
+  if(!root||!message)continue;
+  const sources=new Map(answerSources(message).map(source=>[Number(source.number),source]));
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),nodes=[];let node;
+  while(node=walker.nextNode())if(!node.parentElement?.closest('a,button,code,pre,svg,math,script,style'))nodes.push(node);
+  for(const textNode of nodes){
+   const text=textNode.textContent,fragment=document.createDocumentFragment();let end=0,changed=false;
+   for(const match of text.matchAll(/\[(\d{1,3})\]|【(\d{1,3})】/g)){
+    const source=sources.get(Number(match[1]||match[2]));if(!source)continue;
+    fragment.append(document.createTextNode(text.slice(end,match.index)));
+    const button=document.createElement('button');button.type='button';button.className='inline-citation';button.textContent=match[0];button.dataset.id=source.item_id;
+    button.setAttribute('aria-label',t('查看资料')+' ['+source.number+']: '+source.title);button.title=t('查看资料')+': '+source.title;
+    if(source.text)button.dataset.sourceSnippet=source.text.slice(0,4000);
+    if(source.origin?.name||source.origin?.page)button.dataset.sourceOrigin=JSON.stringify(source.origin);
+    const state=sourceStates[source.item_id];if(state&&state.state!=='available')button.dataset.sourceState=state.state;
+    fragment.append(button);end=match.index+match[0].length;changed=true;
+   }
+   if(changed){fragment.append(document.createTextNode(text.slice(end)));textNode.replaceWith(fragment)}
+  }
+ }
+}
 document.addEventListener('click',event=>{
  const cancel=event.target.closest?.('[data-cancel-question]');
  if(cancel&&activeQuestion&&cancel.dataset.cancelQuestion===activeQuestion.id){
@@ -224,7 +247,7 @@ function renderChat(scroll=true){
  $('#workspace').classList.toggle('empty',messages.length===0);
  const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.trashedDuplicate?`<div class="archive-recovery"><button class="secondary" data-restore-duplicate="${esc(m.id)}" ${m.restoringDuplicate?'disabled':''}>${esc(t('恢复原归档'))}</button></div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button>${m.questionId&&(m.sources?.length||m.retryable)?`<button data-recheck="${esc(m.id)}">${esc(t(m.retryable?'重试回答':'重新核对'))}</button>`:''}</div>`:''}${catalogPager(m)}${answerTiming(m)}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
- bindCatalogPages(chat);bindRechecks(chat);bindArchiveRecovery(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
+ bindCatalogPages(chat);bindRechecks(chat);bindArchiveRecovery(chat);bindInlineCitations(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
 function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,createdAt:new Date().toISOString(),...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
@@ -593,7 +616,7 @@ function bindRechecks(boundChat){
  });
 }
 function answerSources(message){
- const sources=message.sources||[],numbers=[...String(message.text||'').matchAll(/\[(\d{1,3})\]/g)].map(match=>Number(match[1]));
+ const sources=message.sources||[],numbers=[...String(message.text||'').matchAll(/\[(\d{1,3})\]|【(\d{1,3})】/g)].map(match=>Number(match[1]||match[2]));
  return numbers.length?sources.filter(source=>numbers.includes(source.number)):sources;
 }
 function hasKnowledgeContext(){
