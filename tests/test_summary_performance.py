@@ -112,7 +112,10 @@ class SummaryPerformanceTest(unittest.TestCase):
                 # Pending-only startup recovery will not schedule intentionally saved records.
                 self.assertFalse(any(item['state']=='pending' for item in service.archive.list()))
                 with patch.object(ai,'summary_fields',return_value={'summary':'Generated on request','state':'ready'}):
-                    service.queue(note['id'],force=True);wait(lambda:service.archive.get(note['id'])['state']=='ready')
+                    service.queue(note['id'],force=True)
+                    with service.lock:future=service.summary_futures.get(note['id'])
+                    if future:future.result(timeout=5)
+                    self.assertEqual(service.archive.get(note['id'])['state'],'ready')
             finally:service.close()
 
     def test_stage_timing_is_content_free_and_close_releases_waiters(self):
