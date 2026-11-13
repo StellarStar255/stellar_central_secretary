@@ -37,6 +37,26 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('#messages')).to_contain_text('Synthetic question answer.');assert ask.call_count==1 and len(service.archive.list())==4
     page.locator('#input-mode').select_option('note');page.locator('#message-input').fill('为什么命令需要引号？');page.locator('#send-button').click()
     expect(page.locator('#messages .archive-card')).to_have_count(5);assert ask.call_count==1
+    for index,mode in enumerate(['auto','library','ask'],6):
+     text='建档：\n周六上午11:00带测试对象去复查 '+mode
+     page.locator('#input-mode').select_option(mode);page.locator('#message-input').fill(text);page.locator('#send-button').click()
+     expect(page.locator('#messages .archive-card')).to_have_count(index)
+     assert ask.call_count==1,'An explicit save must not call the answering model'
+     found=[service.archive.get(item['id']) for item in service.archive.list() if service.archive.get(item['id'])['text']==text]
+     assert len(found)==1 and found[0]['title']==text.split('\n')[1],found
+     assert any(hit['item_id']==found[0]['id'] for hit in service.archive.retrieve('测试对象'))
+    page.reload();expect(page.locator('#messages .archive-card')).to_have_count(8)
+    page.locator('#input-mode').select_option('auto');page.locator('#message-input').fill('建档功能怎么用？');page.locator('#send-button').click()
+    expect(page.locator('#messages .message.assistant').last).to_contain_text('Synthetic question answer.')
+    assert ask.call_count==2 and len(service.archive.list())==8
+    page.route('**/api/ingest',lambda route:route.fulfill(status=500,content_type='application/json',body='{"error":"Synthetic save failure"}'))
+    failed='建档：\n保存失败时应保留这段测试内容'
+    page.locator('#message-input').fill(failed);page.locator('#send-button').click()
+    expect(page.locator('#messages .message.assistant').last).to_contain_text('Synthetic save failure')
+    expect(page.locator('#message-input')).to_have_value(failed)
+    expect(page.locator('#messages .archive-card')).to_have_count(8)
+    assert ask.call_count==2 and len(service.archive.list())==8
+    print('PASS: explicit 建档 saves during active dialogue in auto/library/ask; raw arrangement preserved, meaningful title, searchable and reload-persistent; archive-help questions remain questions; failed save preserves input without false success')
     assert not errors,errors
     print('PASS: real GUI auto-archives literal commands, command URLs and knowledge; no execution, fetch or retrieval; searchable persistent originals, meaningful title and manual ask/archive overrides')
    finally:browser.close()

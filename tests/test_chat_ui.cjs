@@ -193,6 +193,15 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  elements.get('#input-mode').value='note';input.value='你好呀';await form.onsubmit({preventDefault(){}});
  assert.equal(archive.length,beforeSocialArchive+1,'An explicit note still overrides a greeting');
  console.log('PASS: instant greeting UI, no accidental archive, preserved source context after thanks, explicit note override');
+ for(const selected of ['auto','library','ask']){
+  vm.runInContext('currentChat().dialogueActive=true',context);elements.get('#input-mode').value=selected;
+  const raw='建档：\n周六上午11:00带测试对象去复查 '+selected;
+  calls.length=0;elements.get('#message-input').value=raw;
+  await elements.get('#composer-form').onsubmit({preventDefault(){}});
+  const saved=calls.find(call=>call.path==='/api/ingest');assert(saved);assert.equal(saved.body.text,raw);assert.equal(saved.body.title,raw.split('\n')[1]);
+  assert(!calls.some(call=>call.path==='/api/ask'||call.path==='/api/ask/start'),'Explicit archive must not invoke conversation answering');
+ }
+ console.log('PASS: explicit 建档 saves through ingestion in auto/library/ask, preserves raw content and uses a meaningful title');
  console.log('PASS: automatic command/knowledge archiving, literal whitespace and URLs retained, no retrieval or URL fetch for commands, explicit archive/ask overrides and text-only group');
  console.log('PASS: startup, link archive, question with sources, save note, history persistence, new chat preserves archive, legacy backend and false-success rejection, delegated confirmation click, expired-token retry, persistent failure feedback');
 })().catch(e=>{console.error(e);process.exitCode=1});
@@ -225,3 +234,11 @@ for(let i=0;i<8;i++)context.anchorChat.messages.push({id:'q'+i,role:'user',text:
 context.anchorChat.messages.push({id:'current',role:'user',text:'那周二呢？'});
 const anchored=JSON.parse(vm.runInContext('JSON.stringify(knowledgeHistory(anchorChat,anchorChat.messages.at(-1)))',context));
 assert.equal(anchored.length,6);assert.equal(anchored[0].question,'我老婆的课程表');assert.equal(anchored[0].source_ids[0],'a'.repeat(32));
+
+for(const value of ['建档：\n测试安排','请帮我建档：测试安排','存档：测试安排','建立档案：测试安排','归档：测试安排']){
+ context.archiveCase=value;
+ for(const mode of ['auto','library','ask']){context.archiveMode=mode;assert.equal(vm.runInContext('resolveInputMode(archiveCase,archiveMode,false,true)',context),'note')}
+}
+for(const value of ['建档是什么？','建档功能怎么用？','为什么不能建档？','不要建档，先解释','“建档：”是什么意思？','这个课程表就是她的，依据这个判断就行']){
+ context.archiveCase=value;assert.equal(vm.runInContext('archiveInstruction(archiveCase)',context),null);assert.equal(vm.runInContext('resolveInputMode(archiveCase,"library",false,true)',context),'library');
+}

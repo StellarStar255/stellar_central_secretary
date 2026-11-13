@@ -600,12 +600,19 @@ function hasKnowledgeContext(){
  // answer, or an older mistakenly archived reply cannot turn it into a note.
  return !!chat&&(chat.dialogueActive===true||(chat.messages||[]).some(message=>message.knowledgeQuestion||message.role==='assistant'&&!message.archiveOnly&&message.sources?.length>0));
 }
+function archiveInstruction(text){
+ const lines=String(text||'').trim().split('\n'),first=lines[0]||'';
+ const command=/^(?:(?:请帮我|麻烦|帮我|请)\s*)?(?:建档|建立档案|新建档案|存档|归档|收藏|保存|记录|记住|存下|存一下)(?=一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)(?:一下)?[\s:：]*|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b[\s:：]*/i.exec(first);
+ if(!command)return null;
+ const title=(first.slice(command[0].length).trim()||lines.slice(1).find(line=>line.trim())||first).trim().slice(0,100);
+ return {title};
+}
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
+ // An explicit save request takes precedence over an ongoing conversation.
+ if(['auto','library','ask'].includes(mode)&&archiveInstruction(text))return 'note';
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
  if(mode!=='auto')return mode;
  const first=text.split('\n').find(line=>line.trim())?.trim()||'';
- const save=/^(?:(?:请|麻烦|帮我|请帮我)\s*)?(?:归档|收藏|保存|记录|记住|存下|存一下)(?:一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b/i.test(first);
- if(save)return 'note';
  if(!hasFiles&&isSocialMessage(text))return 'ask';
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
@@ -648,7 +655,7 @@ $('#composer-form').onsubmit=async event=>{
   for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file),archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(file.name+'：'+e.message)}}
   const urls=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const context=urls.reduce((value,link)=>value.replace(link,''),text).trim();const result=await api('/api/ingest',{url,context,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
-  if(mode==='note'&&text){const result=await api('/api/ingest',{text,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}
+  if(mode==='note'&&text){const instruction=archiveInstruction(text);const result=await api('/api/ingest',{text,archive_only:archiveOnly,...(instruction?{title:instruction.title}:{})});results.push(result);response.items.push(result.item.id)}
   await refresh();
   const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
   // Commands and declarative text are notes; explicit questions use retrieval.
