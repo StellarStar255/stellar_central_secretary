@@ -1271,5 +1271,8 @@
   "复用近期回答": "Recent answer reused",
   "问题与资料未变化，可点击重新核对强制生成。": "The question and sources are unchanged. Choose Check again to generate a fresh answer.",
   "已复用近期回答：问题、对话条件、资料和模型配置未变化。": "Reused a recent answer: the question, conversation conditions, sources and model configuration are unchanged.",
-  "重新核对未完成，保留上次回答。": "The fresh check did not complete; the previous answer is preserved."
+  "重新核对未完成，保留上次回答。": "The fresh check did not complete; the previous answer is preserved.",
+  "查看资料": "View item",
+  "原链接": "Original",
+  "双击打开原链接": "Double-click to open the original link"
 }

@@ -143,6 +143,17 @@ function renderSidebar(){
  bindDetails($('#recent-items'));
 }
 function originalLink(item){try{const url=new URL(item?.url||'');return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:''}catch{return ''}}
+function sourceCard(source){
+ const url=originalLink(allItems.find(item=>item.id===source.item_id)||source);
+ const attrs=`data-id="${esc(source.item_id)}"${source.text?` data-source-snippet="${esc(source.text.slice(0,4000))}"`:''}${source.origin?.name||source.origin?.page?` data-source-origin="${esc(JSON.stringify(source.origin))}"`:''}`;
+ const title=`[${source.number}] ${source.title}${source.origin?.name?` · ${source.origin.name}${source.origin.page?` · p.${source.origin.page}`:''}`:''}`;
+ const snippet=String(source.text||'').replace(/\s+/g,' ').trim();
+ return `<div class="source-card"><button class="source" ${attrs} aria-label="${esc(t('查看资料'))}: ${esc(title)}"><span class="source-title">${esc(title)}</span>${snippet?`<span class="source-quote">${esc(snippet.slice(0,100))}${snippet.length>100?'…':''}</span>`:''}</button><div class="source-actions"><button class="source-view" ${attrs} aria-label="${esc(t('查看资料'))}: ${esc(title)}">${esc(t('查看资料'))}</button>${url?`<span aria-hidden="true">·</span><a class="source-original" data-original-id="${esc(source.item_id)}" aria-label="${esc(t('原链接'))}: ${esc(title)}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(t('原链接'))} ↗</a>`:''}</div></div>`;
+}
+document.addEventListener('click',event=>{
+ const link=event.target.closest?.('.source-original[data-original-id]');
+ if(link?.dataset.originalId)void api('/api/items/'+link.dataset.originalId+'/view',{}).catch(()=>{});
+});
 function locateCitedPassage(button){
  const quote=button.dataset.sourceSnippet;if(!quote)return;
  const root=$('#detail-content'),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),nodes=[];let text='',node;
@@ -168,9 +179,9 @@ function bindDetails(container,items=allItems){container.querySelectorAll('[data
  if(origin?.page){button.onclick=()=>{const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)};return}
  if(!url){button.onclick=show;return}
  let pending;
- button.title=t('单击查看资料；双击打开原始链接');
+ button.title=t(button.classList.contains('source')?'双击打开原链接':'单击查看资料；双击打开原始链接');
  // Keep the first click from opening a modal over the second mouse click.
- button.onclick=event=>{clearTimeout(pending);if(inLibrary){if(!(event?.detail>1))show();return}if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},400)};
+ button.onclick=event=>{clearTimeout(pending);if(inLibrary){if(!(event?.detail>1))show();return}if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},200)};
  button.ondblclick=event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);window.open(url,'_blank','noopener,noreferrer');void api('/api/items/'+button.dataset.id+'/view',{}).catch(()=>{})};
 })}
 function summaryProgress(item){
@@ -188,7 +199,7 @@ function renderChat(scroll=true){
  updateInputMode();renderConversationBasis(chat);
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(s=>ui`<button class="source" data-id="${s.item_id}" ${s.text?`data-source-snippet="${esc(s.text.slice(0,4000))}"`:""} ${s.origin?.name?`data-source-origin="${esc(JSON.stringify(s.origin))}"`:""}>[${s.number}] ${esc(s.title)}${s.origin?.name?` · ${esc(s.origin.name)}${s.origin.page?` · p.${s.origin.page}`:""}`:""}<br>${s.text?`<span class="source-quote">${esc(s.text.slice(0,240))}${s.text.length>240?"…":""}</span>`:""}<span>查看来源 ↗</span></button>`).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${m.role==='assistant'&&!m.pending&&m.sources?.length&&m.questionId?`<button class="secondary" data-recheck="${esc(m.id)}">${esc(t('重新核对'))}</button>`:''}${catalogPager(m)}${answerTiming(m)}</article>`).join('');
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button></div>`:''}${m.role==='assistant'&&!m.pending&&m.sources?.length&&m.questionId?`<button class="secondary" data-recheck="${esc(m.id)}">${esc(t('重新核对'))}</button>`:''}${catalogPager(m)}${answerTiming(m)}</article>`).join('');
  if(markup===lastMessageMarkup){updateSummaryProgress();return}lastMessageMarkup=markup;$('#messages').innerHTML=markup;updateSummaryProgress();
  bindCatalogPages(chat);bindRechecks(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
