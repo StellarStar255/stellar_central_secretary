@@ -1,5 +1,6 @@
 """Local durable archive, document extraction and bilingual passage retrieval."""
 import hashlib
+from .note_dates import date_summary
 from contextlib import contextmanager
 import io
 import json
@@ -268,7 +269,7 @@ class Archive:
     def get(self, item_id, include_trashed=False):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row or row['trashed_at'] and not include_trashed: raise KeyError('资料不存在')
-        item = dict(row);item['attachment_order']=attachment_order.records(item['attachment_order']);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(item['summary'],item['additions']); return item
+        item = dict(row);item['attachment_order']=attachment_order.records(item['attachment_order']);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(date_summary(item['summary'],item['user_context']) if item['kind']=='note' else item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -443,7 +444,7 @@ class Archive:
             body=row.pop('text','')
             visual=row.pop('vision_text','');group_values=links.records(json.loads(row.pop('group_links','[]')))
             row['favorite']=bool(row['favorite']);row['pinned']=bool(row['pinned']);row['tags']=json.loads(row['tags'])
-            batches=additions.records(row.pop('additions'));row['summary']=additions.combined_summary(row['summary'],batches);row['addition_count']=len(batches)
+            batches=additions.records(row.pop('additions'));row['summary']=additions.combined_summary(date_summary(row['summary'],row['user_context']) if row['kind']=='note' else row['summary'],batches);row['addition_count']=len(batches)
             if category and row['category']!=category or kind and row['kind']!=kind:continue
             if keywords:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]

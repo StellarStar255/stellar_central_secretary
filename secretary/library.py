@@ -1,5 +1,6 @@
 """Library result ranking, filters and bounded result pages."""
 from datetime import datetime,timedelta,timezone
+from .note_dates import date_summary
 
 SORTS=('', 'relevance','created','updated','viewed')
 STATES=('', 'ready','pending','active','error','needs_content','saved')
@@ -44,7 +45,7 @@ def decode(row):
     import json
     from . import additions
     value=dict(row);value['tags']=json.loads(value['tags']);value['favorite']=bool(value['favorite']);value['pinned']=bool(value['pinned'])
-    batches=additions.records(value.pop('additions'));value['addition_count']=len(batches);value['summary']=additions.combined_summary(value['summary'],batches)
+    batches=additions.records(value.pop('additions'));value['addition_count']=len(batches);value['summary']=additions.combined_summary(date_summary(value['summary'],value['user_context']) if value['kind']=='note' else value['summary'],batches)
     return value
 
 def snippet(content,q):

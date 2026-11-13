@@ -6,6 +6,21 @@ MARKER = '【日期解析】'
 TOKEN = re.compile(r'(?<![每上])(?:(本周|这周|下周|下下周|本星期|这星期|下星期|下下星期)([一二三四五六日天])|(?:周|星期|礼拜)([一二三四五六日天])|今天|明天|大后天|后天|昨天|前天)')
 
 
+def date_summary(summary,context):
+    """Display the fixed interpretation once; retain distinct model details."""
+    if not summary.strip() or not context.startswith(MARKER) or len(context.split('\n',2))<3:return summary
+    resolved=context.split('\n',2)[-1].strip()
+    resolved=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',resolved)
+    def key(value):return re.sub(r'[\W_]+','',value)
+    seen={key(resolved)};parts=[resolved]
+    for part in re.split(r'\n\s*\n',summary.strip()):
+        part=re.sub(r'^【日期解析】\s*','',part).strip()
+        part=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',part)
+        normalized=key(part)
+        if normalized and normalized not in seen:parts.append(part);seen.add(normalized)
+    return '\n\n'.join(parts)
+
+
 def resolve(text, reference):
     if not text or len(text) > 1000 or re.search(r'每(?:个)?(?:周|星期|礼拜)|每逢|每到|通常|一般|例如|比如|[？?]|[“”「」]|```|\d+月\d+日|\d{4}-\d{2}-\d{2}', text):
         return ''

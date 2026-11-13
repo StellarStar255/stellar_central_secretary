@@ -31,11 +31,41 @@ class NoteDatesTests(unittest.TestCase):
                 self.assertTrue(service.archive.retrieve(dated.split('（')[0].splitlines()[-1]))
                 with patch.object(ai,'summarize',return_value={'summary':'安排复查。','tags':[]}) as summarize:
                     fields=ai.summary_fields(item,'codex')
-                self.assertIn(dated,fields['summary']);self.assertIn(dated,summarize.call_args.args[0])
+                self.assertIn(dated.split('\n')[-1],fields['summary']);self.assertIn(dated,summarize.call_args.args[0])
                 self.assertNotIn('网页正文',fields['summary'])
                 repeated=service.ingest({'text':text,'title':'Other title','archive_only':True})['item']
                 self.assertEqual(repeated['user_context'],item['user_context'])
                 self.assertEqual(repeated['created'],item['created'])
+            finally:service.close()
+
+    def test_summary_deduplicates_date_interpretation_without_losing_extra_details(self):
+        from secretary.note_dates import date_summary
+        context=resolve('建档：\n明天上午11:00带测试对象去复查','2026-11-13T08:00:00+08:00')
+        resolved=context.split('\n')[-1]
+        generated=resolved.replace('11:00带','11:00，带')+'。'
+        legacy='【日期解析】\n'+resolved+'\n\n'+generated+'\n\n地点：测试门诊。'
+        cleaned=date_summary(legacy,context)
+        self.assertEqual(cleaned.count('2026年11月14日'),1)
+        self.assertIn('地点：测试门诊。',cleaned)
+        self.assertNotIn('【日期解析】',cleaned)
+        self.assertEqual(date_summary(cleaned,context),cleaned)
+        self.assertEqual(date_summary('普通摘要',''),'普通摘要')
+
+    def test_legacy_summary_is_cleaned_on_read_without_rewriting_stored_record(self):
+        from secretary.library import dashboard,query
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root);service.archive.configure('codex',False)
+            try:
+                item=service.ingest({'text':'建档：\n周六上午11:00测试对象复查','archive_only':True})['item']
+                resolved=item['user_context'].split('\n')[-1]
+                legacy='【日期解析】\n'+resolved+'\n\n'+resolved+'。'
+                service.archive.update(item['id'],state='ready',summary=legacy)
+                for record in [service.archive.get(item['id']),service.archive.list()[0],query(service.archive)['items'][0],dashboard(service.archive,[item['id']])['items'][0]]:
+                    self.assertEqual(record['summary'].count(resolved),1)
+                    self.assertEqual(record['created'],item['created'])
+                with service.archive.db() as db:self.assertEqual(db.execute('SELECT summary FROM items WHERE id=?',(item['id'],)).fetchone()[0],legacy)
+                with patch.object(ai,'summarize',return_value={'summary':resolved+'。','tags':[]}):fields=ai.summary_fields(service.archive.get(item['id']),'codex')
+                self.assertEqual(fields['summary'].count(resolved),1)
             finally:service.close()
 
     def test_contextual_save_uses_original_message_date_and_rejects_bad_reference(self):

@@ -10,6 +10,9 @@ with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False)
  text='周六上午11:00带测试对象去复查'
  live=service.ingest({'text':text,'archive_only':True})['item']
+ resolved=live['user_context'].split('\n',2)[-1]
+ service.archive.update(live['id'],state='ready',summary='【日期解析】\n'+resolved+'\n\n'+resolved.replace('11:00带','11:00，带')+'。')
+ live=service.archive.get(live['id'])
  wrapper,_=service.archive.add('Deleted wrapper','建档：\n'+text)
  service.trash_item(wrapper,service.archive.get(wrapper)['updated'])
  only_text='建档：\n周六上午11:00测试对象复查 only-trash'
@@ -25,6 +28,9 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#message-input').fill('建档：\n'+text);page.locator('#send-button').click()
     expect(page.locator('#messages .archive-card')).to_have_count(1)
     expect(page.locator('#messages .archive-card')).to_have_attribute('data-id',live['id'])
+    assert page.locator('#messages .message.assistant .message-body').inner_text().count(resolved.split('（')[0])==1
+    assert page.locator('#messages .archive-card p').inner_text().count(resolved.split('（')[0])==1
+    page.screenshot(path='/tmp/stellar-date-summary-clean.png')
     assert len(service.archive.list())==1 and service.archive.get(wrapper,include_trashed=True)['trashed_at']
     page.locator('#message-input').fill(only_text)
     with page.expect_response(lambda response:response.url.endswith('/api/ingest')) as conflict:page.locator('#send-button').click()

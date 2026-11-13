@@ -350,7 +350,7 @@ def summary_fields(item, backend, full_pdf=False):
     context=item.get('user_context','').strip()
     if context:
         if item.get('kind')=='note' and context.startswith('【日期解析】'):
-            scope_note='【日期解析】\n'+context.split('\n',2)[-1]
+            scope_note=''
             item['text']=context+'\n\n【原始笔记】\n'+item['text']
         else:
             context_note='【用户说明归档】仅根据用户提供的说明整理，尚未读取网页正文，不推断页面内容。' if not item['text'].strip() else '【附用户说明】用户说明与网页正文分开提供。'
@@ -362,6 +362,10 @@ def summary_fields(item, backend, full_pdf=False):
         raise ValueError('摘要格式不正确，请重试')
     tags=[str(t)[:60] for t in tags[:6]]
     if scope_tag:tags=list(dict.fromkeys(tags[:5]+[scope_tag]))
-    return dict(title=str(result.get('title') or item['title'])[:300], summary=(scope_note+'\n\n' if scope_note else '')+result['summary'],
+    summary=(scope_note+'\n\n' if scope_note else '')+result['summary']
+    if item.get('kind')=='note':
+        from .note_dates import date_summary
+        summary=date_summary(summary,context)
+    return dict(title=str(result.get('title') or item['title'])[:300], summary=summary,
                 category=str(result.get('category') or '未分类')[:80],
                 tags=tags, state='ready', error='')
