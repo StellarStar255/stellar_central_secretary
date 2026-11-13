@@ -43,7 +43,10 @@ with tempfile.TemporaryDirectory() as root:
      expect(page.locator('#messages .archive-card')).to_have_count(index)
      assert ask.call_count==1,'An explicit save must not call the answering model'
      found=[service.archive.get(item['id']) for item in service.archive.list() if service.archive.get(item['id'])['text']==text]
-     assert len(found)==1 and found[0]['title']==text.split('\n')[1],found
+     assert len(found)==1 and '年' in found[0]['title'] and '月' in found[0]['title'],found
+     assert found[0]['user_context'].startswith('【日期解析】')
+     resolved=found[0]['user_context'].split('\n',2)[-1]
+     expect(page.locator('#messages .message.assistant').last).to_contain_text(resolved)
      assert any(hit['item_id']==found[0]['id'] for hit in service.archive.retrieve('测试对象'))
     page.reload();expect(page.locator('#messages .archive-card')).to_have_count(8)
     page.locator('#input-mode').select_option('auto');page.locator('#message-input').fill('建档功能怎么用？');page.locator('#send-button').click()
@@ -56,6 +59,30 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('#message-input')).to_have_value(failed)
     expect(page.locator('#messages .archive-card')).to_have_count(8)
     assert ask.call_count==2 and len(service.archive.list())==8
+    page.unroute('**/api/ingest')
+    page.locator('#new-chat').click();page.locator('#input-mode').select_option('library')
+    arrangement='周六上午11:00带测试对象去复查 contextual-save'
+    page.locator('#message-input').fill(arrangement);page.locator('#send-button').click()
+    expect(page.locator('#messages .message.assistant').last).to_contain_text('Synthetic question answer.')
+    with page.expect_request(lambda request:request.url.endswith('/api/ingest')) as saved_request:
+     page.locator('#message-input').fill('建档');page.locator('#send-button').click()
+    expect(page.locator('#messages .archive-card')).to_have_count(1)
+    payload=saved_request.value.post_data_json;assert payload['text']==arrangement and payload.get('note_reference')
+    contextual=service.archive.get(service.archive.list(q='contextual-save')[0]['id'])
+    assert contextual['text']==arrangement and contextual['user_context'].startswith('【日期解析】')
+    expect(page.locator('#messages .message.assistant').last).to_contain_text(contextual['user_context'].split('\n',2)[-1])
+    page.screenshot(path='/tmp/stellar-contextual-save.png')
+    page.locator('#new-chat').click();page.locator('#message-input').fill('建档');page.locator('#send-button').click()
+    expect(page.locator('#messages .message.assistant').last).to_contain_text('没有找到可建档的上一条文字')
+    assert len(service.archive.list())==9
+    page.route('**/api/ingest',lambda route:route.abort('connectionrefused'))
+    disconnected='建档：网络中断时保留测试内容'
+    page.locator('#message-input').fill(disconnected);page.locator('#send-button').click()
+    expect(page.locator('#messages .message.assistant').last).to_contain_text('本地服务连接中断')
+    expect(page.locator('#message-input')).to_have_value(disconnected)
+    expect(page.locator('#messages .archive-card')).to_have_count(0)
+    assert len(service.archive.list())==9
+    print('PASS: bare 建档 saves the prior user arrangement, retains the original timestamp, shows its resolved date, and never archives an empty command in a new chat')
     print('PASS: explicit 建档 saves during active dialogue in auto/library/ask; raw arrangement preserved, meaningful title, searchable and reload-persistent; archive-help questions remain questions; failed save preserves input without false success')
     assert not errors,errors
     print('PASS: real GUI auto-archives literal commands, command URLs and knowledge; no execution, fetch or retrieval; searchable persistent originals, meaningful title and manual ask/archive overrides')

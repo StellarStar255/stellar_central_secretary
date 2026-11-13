@@ -137,7 +137,7 @@ async function api(path,body,retry=true,companyRetry=true){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/semantic/test','/api/model-api/test','/api/model-connection/test','/api/update/check'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/storage/')||path.startsWith('/api/backups/')||path.endsWith('/pdf-read')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
  let response;
  try{response=await fetch(path,body===undefined?{signal:controller.signal}:{method:'POST',headers:{'Content-Type':'application/json','X-Knowledge-Token':token},body:JSON.stringify(body),signal:controller.signal})}
- catch(e){throw Error(e.name==='AbortError'?t('本地服务响应超时，请检查程序是否仍在运行。'):e.message)}
+ catch(e){throw Error(e.name==='AbortError'?t('本地服务响应超时，请检查程序是否仍在运行。'):e instanceof TypeError||/Failed to fetch|NetworkError|Load failed/i.test(e.message)?t('本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。'):e.message)}
  finally{clearTimeout(timer)}
  const data=await response.json();
  if(response.status===403&&body!==undefined&&retry){const status=await api('/api/status');token=status.token;return api(path,body,false,companyRetry)}
@@ -227,7 +227,7 @@ function renderChat(scroll=true){
  bindCatalogPages(chat);bindRechecks(chat);bindDetails($('#messages'),[...allItems,...messages.flatMap(m=>answerSources(m).map(source=>({...source,id:source.item_id})))]);$('#messages').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const message=messages.find(m=>m.id===b.dataset.copy);navigator.clipboard.writeText(message.text).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败，请手动选择文字')))});
  if(scroll||atBottom)container.scrollTop=container.scrollHeight;
 }
-function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
+function addMessage(chat,role,text,extras={}){const message={id:uid(),role,text,createdAt:new Date().toISOString(),...extras};chat.messages.push(message);chat.updated=Date.now();saveChats();if(chat.id===activeId)renderChat();return message}
 function updateMessage(chat,message,values){if(values.sources)values.sources=values.sources.map(source=>({...source,revision:source.revision||allItems.find(item=>item.id===source.item_id)?.updated||''}));const live=conversations.find(c=>c.id===chat.id),target=live?.messages.find(m=>m.id===message.id);if(!target)return;Object.assign(target,values);live.updated=Math.max(Date.now(),(live.updated||0)+1);saveChats();if(live.id===activeId)renderChat()}
 let refreshPromise=null,refreshAgain=false,activeWork=false,lastHistoryPoll=0;
 function refresh(){if(refreshPromise){refreshAgain=true;return refreshPromise}refreshPromise=(async()=>{do{refreshAgain=false;await refreshNow()}while(refreshAgain)})().finally(()=>{refreshPromise=null});return refreshPromise}
@@ -419,6 +419,7 @@ async function confirmLogin(id){
 }
 
 function archiveReply(result){const i=result.item;
+ if(i.kind==='note'&&i.user_context?.startsWith('【日期解析】')&&!i.summary)return t('已归档：')+'\n\n'+i.user_context.split('\n').slice(2).join('\n');
  if(i.state==='saved')return t('已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。');
  if(i.has_group_links&&i.state==='processing'&&i.error==='正在读取本组链接…')return t('本组链接已归为一档，正在后台读取可访问的正文。');
  if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请双击项目里的「启动知识秘书.command」重启服务，再刷新此页面。');
@@ -605,7 +606,23 @@ function archiveInstruction(text){
  const command=/^(?:(?:请帮我|麻烦|帮我|请)\s*)?(?:建档|建立档案|新建档案|存档|归档|收藏|保存|记录|记住|存下|存一下)(?=一下|这些|这段|以下|这个|这条|这份|我的|命令|笔记|[:：\s]|$)(?:一下)?[\s:：]*|^(?:(?:please|can you|could you)\s+)?(?:save|archive|store|remember|note(?:\s+down)?)\b[\s:：]*/i.exec(first);
  if(!command)return null;
  const title=(first.slice(command[0].length).trim()||lines.slice(1).find(line=>line.trim())||first).trim().slice(0,100);
- return {title};
+ const content=[first.slice(command[0].length).trim(),...lines.slice(1)].join('\n').trim();
+ return {title,content,reference:!content||/^(?:这(?:个|条|段|份)|以上|上述)(?:内容|安排|笔记|资料)?[。！!\s]*$/.test(content)};
+}
+function archiveNote(text,chat,current){
+ const instruction=archiveInstruction(text);
+ if(!instruction)return {text};
+ if(!instruction.reference)return {text,title:instruction.title};
+ const messages=chat.messages||[],end=current?messages.indexOf(current):messages.length;
+ for(let i=end-1;i>=Math.max(0,end-12);i--){
+  const message=messages[i];if(message.role!=='user')continue;
+  const value=String(message.text||'').trim(),previous=archiveInstruction(value);
+  if(previous?.reference)continue;
+  if(!value||message.files?.length||message.images?.length||isSocialMessage(value)||/[?？]\s*$/.test(value))break;
+  if(value.length>20000)break;
+  return {text:value,title:(previous?.title||value.split('\n').find(line=>line.trim())||'').slice(0,100),...(message.createdAt?{note_reference:message.createdAt}:{})};
+ }
+ throw Error(t('没有找到可建档的上一条文字，请在“建档：”后附上要保存的内容。'));
 }
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
  // An explicit save request takes precedence over an ongoing conversation.
@@ -655,7 +672,7 @@ $('#composer-form').onsubmit=async event=>{
   for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file),archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(file.name+'：'+e.message)}}
   const urls=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const context=urls.reduce((value,link)=>value.replace(link,''),text).trim();const result=await api('/api/ingest',{url,context,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
-  if(mode==='note'&&text){const instruction=archiveInstruction(text);const result=await api('/api/ingest',{text,archive_only:archiveOnly,...(instruction?{title:instruction.title}:{})});results.push(result);response.items.push(result.item.id)}
+  if(mode==='note'&&text){const note=archiveNote(text,chat,userMessage);const result=await api('/api/ingest',{...note,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}
   await refresh();
   const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
   // Commands and declarative text are notes; explicit questions use retrieval.

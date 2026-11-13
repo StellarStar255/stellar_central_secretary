@@ -1308,5 +1308,11 @@
   "相邻 PDF 页面没有可提取文字，可按页 OCR 后再核对。": "Adjacent PDF pages contain no extractable text. Read them with OCR to check further.",
   "部分相邻 PDF 页面未能读取，本次仅依据已取得的内容回答。": "Some adjacent PDF pages could not be read. This answer uses only the content obtained.",
   "完整主题词未命中，已按主体关键词补查；请核对清单范围。": "The full topic term had no matches. Subject keywords were also checked; review the scope of this list.",
-  "对话记录无法读取，请从备份恢复对话。": "Conversation records could not be read. Restore them from a backup."
+  "对话记录无法读取，请从备份恢复对话。": "Conversation records could not be read. Restore them from a backup.",
+  "建档时间": "Archived at",
+  "本地时间": "Local time",
+  "未记录": "Not recorded",
+  "已归档：": "Archived:",
+  "没有找到可建档的上一条文字，请在“建档：”后附上要保存的内容。": "No previous text is available to archive. Add the content after Archive:.",
+  "本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。": "Connection to the local service was lost. Restart the app and try again. If you were saving, check the library first to avoid duplicates."
 }

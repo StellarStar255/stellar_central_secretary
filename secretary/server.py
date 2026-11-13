@@ -770,9 +770,27 @@ class Service:
                 except Exception as exc: warning = '链接已收藏，正文抓取失败：'+str(exc)[:300]+'。可手动补充正文。'
         if not (url or text or name): raise ValueError('请添加链接、文字或文件')
         if len(text)>2_000_000: raise ValueError('正文超过 200 万字，请拆分后导入')
+        note_reference=None
+        if not (url or name) and body.get('note_reference') is not None:
+            from datetime import datetime, timezone, timedelta
+            try:
+                raw=body['note_reference']
+                if not isinstance(raw,str) or len(raw)>80:raise ValueError()
+                note_reference=datetime.fromisoformat(raw)
+                if note_reference.tzinfo is None or note_reference>datetime.now(timezone.utc)+timedelta(minutes=5):raise ValueError()
+            except (ValueError,TypeError):raise ValueError('原消息时间无效，请重新输入要建档的内容')
         if text and not (url or name or title):
             title=next((line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('```')),'未命名笔记')[:100]
         item_id, created = self.archive.add(title, text, url, name, data, warning)
+        if created and not (url or name):
+            from .note_dates import resolve
+            from datetime import datetime
+            reference=(note_reference or datetime.fromisoformat(self.archive.get(item_id)['created'])).astimezone().isoformat()
+            resolved=resolve(text,reference)
+            if resolved:
+                self.archive.save_context(item_id,resolved)
+                dated_title=resolve(title,reference)
+                if dated_title:self.archive.update(item_id,title=dated_title.split('\n',2)[-1][:300])
         if browser_import or '公司网络或 VPN' in warning:company_ai.mark(self.archive,item_id)
         with self.lock:
             if url and context.strip() and (item_id in self.busy or item_id in self.captures):raise ValueError('资料正在处理，请稍后再补充链接说明')
@@ -1177,7 +1195,7 @@ def handler(service):
                 if preview_match:
                     from .rich_text import searchable_text
                     item=service.material_attachments(service.archive.get(preview_match[1]));text=searchable_text(item['text'])
-                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'pdf_coverage':pdf_reading.coverage(item),'all_attachments':item['all_attachments'],'deleted_attachment_count':item['deleted_attachment_count']})
+                    return self.send(200,{**{key:item[key] for key in ('id','title','url','filename','created','updated','kind','tags','favorite','pinned','error')},'summary':item['summary'][:12000],'summary_truncated':len(item['summary'])>12000,'text':text[:6000],'truncated':len(text)>6000,'pdf_coverage':pdf_reading.coverage(item),'all_attachments':item['all_attachments'],'deleted_attachment_count':item['deleted_attachment_count']})
                 if path.startswith('/api/items/'):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':

@@ -127,3 +127,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .question-stop{display:block;margin-top:.6rem;padding:.15rem 0;border:0;background:none;color:var(--muted);font-size:.85rem;cursor:pointer}.question-stop:hover{color:var(--text)}.source-changed{font-size:.75rem;color:var(--muted)}#model-readiness{margin:1rem 0}#model-readiness p{font-size:.9rem}
 
 .basis-row{display:flex;gap:.6rem;align-items:baseline}.basis-row p{flex:1;min-width:0}.basis-row>div{display:flex;gap:.4rem;flex-shrink:0}.basis-row button,.basis-editor button{border:0;background:none;color:var(--muted);font-size:.8rem;padding:.2rem;cursor:pointer}.basis-row button:hover,.basis-editor button:hover{color:var(--text)}.basis-editor textarea{box-sizing:border-box;width:100%;font:inherit;resize:vertical;margin:.5rem 0}.basis-editor>div{display:flex;gap:.6rem}
+
+.record-timestamps{font-size:.8rem;line-height:1.7;margin:4px 0 14px;overflow-wrap:anywhere}.record-timestamps>div{display:flex;gap:.6em;flex-wrap:wrap}.record-timestamps>div>span:first-child{flex-shrink:0}.record-timestamps time{font-variant-numeric:tabular-nums}

@@ -13,6 +13,8 @@ with tempfile.TemporaryDirectory() as folder:
  server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  linked,_=service.archive.add('Robot camera source','Original robot camera details',url=base+'/tutorial?lang=en#fixture')
  service.archive.update(linked,summary='【网页已加载内容归档】 仅包含已加载内容。\n\nUseful robot camera overview.',tags=['网页片段'],state='ready')
+ created_fixture='2025-01-02T03:04:05+00:00';updated_fixture='2026-02-03T04:05:06+00:00'
+ with service.archive.db() as db:db.execute('UPDATE items SET created=?,updated=? WHERE id=?',(created_fixture,updated_fixture,linked))
  for index in range(105):service.archive.add('Other record '+str(index),'Unique robot camera reference '+str(index))
  try:
   def fake_summary(item,*args,**kwargs):
@@ -24,7 +26,7 @@ with tempfile.TemporaryDirectory() as folder:
   with sync_playwright() as pw,patch.object(ai,'summary_fields',side_effect=fake_summary):
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
-    page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);expect(page.locator('#count')).to_have_text('106');page.locator('#library-open').click()
+    page=browser.new_page(viewport={'width':1440,'height':1000},timezone_id='Asia/Shanghai');errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);expect(page.locator('#count')).to_have_text('106');page.locator('#library-open').click()
     for shortcut in ('Meta+k','Control+k'):
      page.keyboard.press(shortcut);expect(page.locator('#library-dialog')).not_to_be_visible()
      page.keyboard.press(shortcut);expect(page.locator('#library-dialog')).to_be_visible();expect(page.locator('#search')).to_be_focused()
@@ -37,6 +39,12 @@ with tempfile.TemporaryDirectory() as folder:
     with page.expect_popup() as opened:row.dblclick(delay=60)
     popup=opened.value;popup.wait_for_load_state();assert popup.url==base+'/tutorial?lang=en#fixture';popup.close();expect(page.locator('#detail-dialog')).not_to_be_visible()
     row.click();expect(page.locator('#preview-title')).to_have_text('Robot camera source')
+    expect(page.locator('#preview-timestamps [data-record-created]')).to_have_text('2025-01-02 11:04:05')
+    expect(page.locator('#preview-timestamps [data-record-created]')).to_have_attribute('datetime',created_fixture)
+    expect(page.locator('#preview-timestamps [data-record-created]')).to_have_attribute('title','本地时间 · UTC+08:00')
+    expect(page.locator('#preview-timestamps [data-record-updated]')).to_have_text('2026-02-03 12:05:06')
+    assert 'Invalid Date' not in page.evaluate('()=>StellarLibraryPreview.timestamps({created:"invalid",updated:""})')
+    page.screenshot(path='/tmp/stellar-preview-timestamps.png')
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
     expect(page.locator('#edit-title')).to_contain_text('Robot camera source');page.locator('#detail-dialog .dialog-head button').click()
     page.locator('#preview-summary').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();page.locator('#detail-dialog .dialog-head button').click()
@@ -49,7 +57,9 @@ with tempfile.TemporaryDirectory() as folder:
     page.keyboard.press('Meta+k');expect(page.locator('#library-dialog')).to_be_visible();expect(page.locator('#search')).to_have_value('robot camera')
     expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>');expect(page.locator('#items .library-row').first).to_contain_text('Robot camera 新标题 <draft>')
     after_rename=service.archive.get(linked);assert after_rename['title']=='Robot camera 新标题 <draft>'
-    for key in ('text','summary','tags','state','filename','url'):assert after_rename[key]==before_rename[key],key
+    for key in ('created','text','summary','tags','state','filename','url'):assert after_rename[key]==before_rename[key],key
+    expect(page.locator('#preview-timestamps [data-record-created]')).to_have_attribute('datetime',created_fixture)
+    expect(page.locator('#preview-timestamps [data-record-updated]')).to_have_attribute('datetime',after_rename['updated'])
     page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera saved via double click')
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible()
     assert service.archive.get(linked)['title']=='Robot camera saved via double click'
@@ -80,6 +90,12 @@ with tempfile.TemporaryDirectory() as folder:
     failed,_=service.archive.add('Failed fixture','Failure original source');service.archive.update(failed,state='error',error='proxy connection refused')
     failed_row=page.locator('[data-task-key="summary:'+failed+'"]');expect(failed_row).to_contain_text('网络或代理连接未成功',timeout=5000);failed_row.get_by_role('button',name='重新尝试').click();expect(failed_row).to_contain_text('处理完成',timeout=8000);assert service.archive.get(failed)['summary']=='Synthetic retry result'
     page.screenshot(path='/tmp/secretary-tasks-workflow.png');page.evaluate("document.querySelector('#tasks-dialog').close()")
+    page.locator('#library-dialog').evaluate('node=>node.close()');page.locator('#settings-open').click();page.locator('#ui-language').select_option('en')
+    expect(page.locator('html')).to_have_attribute('lang','en');page.locator('#settings-dialog .dialog-head button').click()
+    page.locator('#library-open').click();page.locator('#search').fill('robot camera');page.locator('#items [data-id="'+linked+'"]').click()
+    expect(page.locator('#preview-timestamps')).to_contain_text('Archived at')
+    expect(page.locator('#preview-timestamps [data-record-created]')).to_have_text('2025-01-02 11:04:05')
+    print('PASS: preview shows full archive timestamp and independent updated timestamp in local timezone; rename preserves archive time, refreshes updated time, and English labels work')
     assert not errors,errors
     print('PASS: compact scope badges, inline preview title edit, Enter save, Esc cancel, refresh preserves draft, persisted rename without source changes, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
    except Exception:

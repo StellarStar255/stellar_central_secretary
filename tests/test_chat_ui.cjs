@@ -242,3 +242,10 @@ for(const value of ['建档：\n测试安排','请帮我建档：测试安排','
 for(const value of ['建档是什么？','建档功能怎么用？','为什么不能建档？','不要建档，先解释','“建档：”是什么意思？','这个课程表就是她的，依据这个判断就行']){
  context.archiveCase=value;assert.equal(vm.runInContext('archiveInstruction(archiveCase)',context),null);assert.equal(vm.runInContext('resolveInputMode(archiveCase,"library",false,true)',context),'library');
 }
+context.contextSaveChat={messages:[{id:'arrangement',role:'user',text:'周六上午11:00带测试对象去复查',createdAt:'2026-11-13T08:00:00Z'},{id:'reply',role:'assistant',text:'模型推测的其他安排'},{id:'failed-save',role:'user',text:'建档'},{id:'failed',role:'assistant',text:'Failed to fetch',error:true},{id:'current-save',role:'user',text:'建档'}]};
+const contextualNote=JSON.parse(vm.runInContext('JSON.stringify(archiveNote("建档",contextSaveChat,contextSaveChat.messages.at(-1)))',context));
+assert.equal(contextualNote.text,'周六上午11:00带测试对象去复查');assert.equal(contextualNote.note_reference,'2026-11-13T08:00:00Z');assert(!contextualNote.text.includes('模型'));
+assert.throws(()=>vm.runInContext('archiveNote("建档",{messages:[]})',context),/没有找到/);
+assert.throws(()=>vm.runInContext('archiveNote("建档",{messages:[{role:"user",text:"你好呀"}]})',context),/没有找到/);
+assert.equal(vm.runInContext('archiveNote("建档：新内容",contextSaveChat).text',context),'建档：新内容');
+console.log('PASS: contextual archive uses the previous user material and its timestamp, skips failed bare-save attempts, never saves model guesses, and rejects empty context');
