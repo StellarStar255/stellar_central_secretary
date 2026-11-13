@@ -8,6 +8,11 @@ from playwright.sync_api import sync_playwright,expect
 from secretary import ai,model_api
 from secretary.server import Service,handler
 
+class BrowserFixtureServer(ThreadingHTTPServer):
+ # Chromium requests many independent scripts in parallel. A tiny accept
+ # backlog can reset a queued resource connection on busy CI runners.
+ request_queue_size=128
+
 key=uuid.uuid4().hex;requests=[]
 class Provider(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -25,7 +30,7 @@ class Provider(BaseHTTPRequestHandler):
 provider=ThreadingHTTPServer(('127.0.0.1',0),Provider);threading.Thread(target=provider.serve_forever,daemon=True).start();base_api=f'http://127.0.0.1:{provider.server_port}/v1'
 with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False);service.archive.add('Synthetic source','Synthetic searchable reference material')
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=BrowserFixtureServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with sync_playwright() as pw:
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
