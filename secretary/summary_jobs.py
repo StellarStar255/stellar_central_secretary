@@ -42,10 +42,11 @@ class SummaryJobs:
             try:self.on_finished(key,stage)
             except Exception:pass
     @contextmanager
-    def session(self,key,chars=0,short=False,wait_timeout=None,interactive=False):
+    def session(self,key,chars=0,short=False,wait_timeout=None,interactive=False,cancel_event=None):
         with self.lock:
             if key not in self.jobs or self.jobs[key]['ended'] is not None:self.enqueue(key,chars,short)
             if interactive:self.jobs[key]['lane']='interactive'
+            if cancel_event is not None:self.jobs[key]['cancel']=cancel_event
             lane=self.lanes[self.jobs[key]['lane']]
         event=self.jobs[key]['cancel'];acquired=False;failed=True;waiting=time.monotonic()
         try:

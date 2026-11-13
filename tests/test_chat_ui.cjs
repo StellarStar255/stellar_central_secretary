@@ -218,3 +218,10 @@ context.legendChart={...chartFixture,legend:[{label:'系列 <甲>',color:'#12345
 const withLegend=vm.runInContext('readerChart(JSON.stringify(legendChart))',context);
 assert(withLegend.includes('reader-chart-legend')&&withLegend.includes('系列 &lt;甲&gt;')&&withLegend.includes('查看图表数据与说明'));
 assert(withLegend.includes('&lt;script&gt;test&lt;/script&gt;')&&!withLegend.includes('<script>'));
+
+// Keep the last sourced topic available after a stretch of general conversation.
+context.anchorChat={messages:[{id:'anchor-q',role:'user',text:'我老婆的课程表',knowledgeQuestion:true},{id:'anchor-a',role:'assistant',text:'课表内容。[1]',sources:[{item_id:'a'.repeat(32),number:1}]}]};
+for(let i=0;i<8;i++)context.anchorChat.messages.push({id:'q'+i,role:'user',text:'闲聊第'+i+'轮',knowledgeQuestion:true},{id:'a'+i,role:'assistant',text:'普通对话'});
+context.anchorChat.messages.push({id:'current',role:'user',text:'那周二呢？'});
+const anchored=JSON.parse(vm.runInContext('JSON.stringify(knowledgeHistory(anchorChat,anchorChat.messages.at(-1)))',context));
+assert.equal(anchored.length,6);assert.equal(anchored[0].question,'我老婆的课程表');assert.equal(anchored[0].source_ids[0],'a'.repeat(32));

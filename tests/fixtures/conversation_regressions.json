@@ -1,0 +1,66 @@
+[
+  {
+    "name": "schedule_today",
+    "question": "我老婆今天下午有课吗？",
+    "queries": [
+      "课程表"
+    ],
+    "topic": "course",
+    "quick": false
+  },
+  {
+    "name": "schedule_clarification",
+    "question": "这个课程表就是她的，依据这个判断就行",
+    "topic": "course",
+    "quick": true
+  },
+  {
+    "name": "weekday_ellipsis",
+    "question": "那周二呢？",
+    "topic": "course",
+    "quick": true
+  },
+  {
+    "name": "relative_day_ellipsis",
+    "question": "那明天上午呢？",
+    "topic": "course",
+    "quick": true
+  },
+  {
+    "name": "monday_schedule",
+    "question": "星期一我老婆有课吗？",
+    "queries": [
+      "课程表"
+    ],
+    "topic": "course",
+    "quick": false
+  },
+  {
+    "name": "new_history_topic",
+    "question": "罗马皇位如何继承？",
+    "queries": [
+      "罗马"
+    ],
+    "topic": "rome",
+    "quick": false
+  },
+  {
+    "name": "new_person",
+    "question": "那周二我女儿有课吗？",
+    "queries": [
+      "女儿"
+    ],
+    "topic": "daughter",
+    "quick": false
+  },
+  {
+    "name": "all_roman_sources",
+    "question": "列出所有罗马史资料",
+    "queries": [
+      "罗马"
+    ],
+    "topic": "rome",
+    "quick": false,
+    "catalog": true
+  }
+]

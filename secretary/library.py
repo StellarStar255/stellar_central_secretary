@@ -115,4 +115,8 @@ def dashboard(archive,ids,active_ids=()):
         recent=[row[0] for row in db.execute("SELECT id FROM items WHERE trashed_at='' ORDER BY created DESC LIMIT 30")]
         keys=list(set(recent)|set(requested))
         rows=db.execute('SELECT '+COLUMNS+" FROM items WHERE trashed_at='' AND id IN ("+','.join('?' for _ in keys)+') ORDER BY created DESC',keys).fetchall() if keys else []
-    return {'items':[decode(row) for row in rows],'total':total,'categories':categories}
+        states={}
+        for item in requested:
+            row=db.execute('SELECT updated,trashed_at FROM items WHERE id=?',(item,)).fetchone()
+            states[item]={'state':'missing'} if row is None else {'state':'trashed' if row['trashed_at'] else 'available','revision':row['updated']}
+    return {'items':[decode(row) for row in rows],'total':total,'categories':categories,'source_states':states}

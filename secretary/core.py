@@ -458,7 +458,7 @@ class Archive:
         if not tokens: return []
         match = ' OR '.join('"'+t+'"' for t in tokens)
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('''SELECT c.id,c.item_id,c.position,c.text,c.origin,i.title,i.url,i.filename,bm25(search) AS score
+            rows=[dict(r) for r in db.execute('''SELECT c.id,c.item_id,c.position,c.text,c.origin,i.title,i.url,i.filename,i.updated AS revision,bm25(search) AS score
             FROM search JOIN chunks c ON c.id=search.chunk_id JOIN items i ON i.id=c.item_id
             WHERE search MATCH ? AND i.trashed_at='' ORDER BY (c.origin!='{}') DESC,score LIMIT ?''', (match,limit*5))]
             result=[];seen=set()

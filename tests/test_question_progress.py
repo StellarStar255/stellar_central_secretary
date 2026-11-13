@@ -34,3 +34,16 @@ class QuestionProgressTest(unittest.TestCase):
                     service.ask_library('你好呀',progress=lambda name,count:stages.append((name,count)))
                 self.assertEqual(stages,[('preparing',None)])
             finally:service.close()
+
+
+class QuestionCancellationTest(unittest.TestCase):
+    def test_cancel_before_start_and_terminal_progress_cannot_be_resurrected(self):
+        progress=QuestionProgress();key='d'*32
+        self.assertTrue(progress.cancel(key))
+        with self.assertRaises(ValueError):progress.begin(key)
+        self.assertTrue(progress.event(key).is_set())
+        progress.update(key,'done');progress.partial(key,'Late unverified answer')
+        self.assertEqual(progress.snapshot(key)['stage'],'cancelled')
+        self.assertNotIn('partial',progress.snapshot(key))
+        other='e'*32;progress.begin(other);progress.update(other,'done')
+        self.assertFalse(progress.cancel(other));self.assertFalse(progress.event(other).is_set())

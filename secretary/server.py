@@ -103,6 +103,8 @@ class Service:
         self.question_progress=QuestionProgress()
         from .answer_cache import AnswerCache
         self.answer_cache=AnswerCache()
+        from .visual_cache import VisualCache
+        self.visual_cache=VisualCache()
         self.desktop = {'enabled':False, 'menu_bar':False, 'dock':False}
         self.interface_request={}
         self.video_request={};self.video_probes={}
@@ -880,9 +882,10 @@ class Service:
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id);self.questions-=1
 
-    def ask_library(self,question,history=None,progress=None,context=None,force_refresh=False):
+    def ask_library(self,question,history=None,progress=None,context=None,force_refresh=False,cancel=None):
         from . import knowledge_chat
         def stage(name,count=None):
+            if cancel is not None and cancel.is_set():raise ai.ModelCancelledError('问答已停止。')
             if progress:progress(name,count)
         started=time.monotonic();timings={'model_calls':0}
         def measured(name,action):
@@ -894,12 +897,15 @@ class Service:
             timings['model_calls']+=1
             return knowledge_chat.plan(question,turns,backend)
         def result(answer,passages,notice):
+            if cancel is not None and cancel.is_set():raise ai.ModelCancelledError('问答已停止。')
             timings['total_seconds']=round(time.monotonic()-started,3)
             return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice)),'timings':timings}
         if not question.strip():raise ValueError('请输入问题')
         turns=knowledge_chat.history(history)
         from .conversation_context import turns as context_turns
-        turns=context_turns(context)+turns
+        retained=context_turns(context)
+        from .conversation_context import live_history
+        turns=live_history(self.archive,retained+turns)
         stage('preparing')
         reply=knowledge_chat.social_reply(question)
         if reply:
@@ -924,7 +930,7 @@ class Service:
         try:
             waiting=time.monotonic()
             stage('queued')
-            with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True,interactive=True):
+            with self.summary_jobs.session('question-'+secrets.token_hex(8),len(question),short=True,interactive=True,cancel_event=cancel):
                 timings['queue_seconds']=round(time.monotonic()-waiting,3)
                 queries=knowledge_chat.quick_plan(question,turns)
                 timings['fast_followup']=queries is not None
@@ -952,11 +958,14 @@ class Service:
                 from .answer_cache import files as source_files
                 original_signature=source_files(self.archive,[p['item_id'] for p in passages])
                 stage('images',len({p['item_id'] for p in passages}))
-                images,visual_status=measured('image_seconds',lambda:knowledge_chat.visual_evidence(self.archive,passages,backend))
+                images,visual_status,image_hit=measured('image_seconds',lambda:self.visual_cache.prepare(self.archive,passages,backend,lambda:knowledge_chat.visual_evidence(self.archive,passages,backend),force=force_refresh))
+                timings['image_cache_hit']=image_hit and bool(images)
+                from .conversation_context import for_sources
+                answer_turns=for_sources(turns,[p['item_id'] for p in passages])
                 timings['model_calls']+=1
                 stage('answering',len({p['item_id'] for p in passages}))
                 with ai.text_progress(lambda text:stage('partial',text)):
-                    answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,turns,passages,backend,images,visual_status))
+                    answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,answer_turns,passages,backend,images,visual_status))
             response=result(answer,passages,notice)
             # Do not cache a response if any indexed record changed during generation.
             if original_signature is not None and original_signature==source_files(self.archive,[p['item_id'] for p in passages]) and cache_key==answer_key(self.archive,question,turns,backend,self.semantic.generation):
@@ -1341,6 +1350,7 @@ def handler(service):
                 if path=='/api/library/catalog':
                     from .catalog import page
                     return self.send(200,page(service.archive,body.get('queries'),body.get('offset',0),body.get('limit',20)))
+                if path=='/api/ask/cancel':return self.send(200,{'cancelled':service.question_progress.cancel(body.get('progress_id'))})
                 if path=='/api/ask/progress':return self.send(200,service.question_progress.snapshot(body.get('progress_id')))
                 if path=='/api/ask':
                     question=str(body.get('question',''))[:4000]
@@ -1350,7 +1360,7 @@ def handler(service):
                         if progress_id is None:return self.send(200,service.ask_library(question,body.get('history'),context=body.get('context'),force_refresh=body.get('force_refresh') is True))
                         service.question_progress.begin(progress_id)
                         try:
-                            answer=service.ask_library(question,body.get('history'),lambda name,count:service.question_progress.partial(progress_id,count) if name=='partial' else service.question_progress.update(progress_id,name,count),context=body.get('context'),force_refresh=body.get('force_refresh') is True)
+                            answer=service.ask_library(question,body.get('history'),lambda name,count:service.question_progress.partial(progress_id,count) if name=='partial' else service.question_progress.update(progress_id,name,count),context=body.get('context'),force_refresh=body.get('force_refresh') is True,cancel=service.question_progress.event(progress_id))
                         except Exception:
                             service.question_progress.update(progress_id,'error');raise
                         service.question_progress.update(progress_id,'done')

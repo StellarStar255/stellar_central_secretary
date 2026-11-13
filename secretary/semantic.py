@@ -184,7 +184,7 @@ class SemanticIndex:
         query_vectors=embed(value,queries[:4],timeout=8)
         candidates={}
         with self.archive.db() as db:
-            for row in db.execute("""SELECT c.*,i.title,i.url,i.filename,v.vector,v.dimensions,v.digest FROM semantic_vectors v
+            for row in db.execute("""SELECT c.*,i.title,i.url,i.filename,i.updated AS revision,v.vector,v.dimensions,v.digest FROM semantic_vectors v
                 JOIN chunks c ON c.id=v.chunk_id JOIN items i ON i.id=c.item_id
                 WHERE v.signature=? AND i.trashed_at=''""",(sig,)):
                 if digest(row)!=row['digest']:continue
@@ -195,7 +195,7 @@ class SemanticIndex:
                 if not scores:raise ValueError('嵌入模型维度已变化，请重建语义索引')
                 score=max(scores)
                 if score>=value['min_score']:
-                    hit={key:row[key] for key in ('id','item_id','position','text','origin','title','url','filename')}
+                    hit={key:row[key] for key in ('id','item_id','position','text','origin','title','url','filename','revision')}
                     hit['origin']=json.loads(hit['origin']);hit['semantic_score']=score
                     origin=hit['origin'];key=(hit['item_id'],origin.get('batch_id'),origin.get('attachment_id'),origin.get('page'))
                     candidate=(score,hit['id'],hit)

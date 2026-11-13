@@ -12,7 +12,7 @@ class ImprovementsTest(unittest.TestCase):
   self.item,_=self.s.archive.add('Timetable','课程表：周四14:00有课。')
  def tearDown(self):self.s.close();self.temp.cleanup()
  def ask(self,**kwargs):
-  with patch('secretary.ai.run',side_effect=['{"queries":["课程表"]}','周四14:00有课。[1]']) as model:
+  with patch('secretary.ai.run',side_effect=lambda prompt,*args,**kw:'{"queries":["课程表"]}' if prompt.startswith('为个人知识库生成全文检索词') else '周四14:00有课。[1]') as model:
    result=self.s.ask_library('周四有课吗？',**kwargs)
   return result,model.call_count
  def test_cache_and_explicit_refresh_and_record_changes(self):
@@ -44,7 +44,7 @@ class ImprovementsTest(unittest.TestCase):
    self.s.ask_library('周四有课吗？',history=[{'question':str(i),'answer':'Recent small talk','source_ids':[]} for i in range(6)],context=context)
   payload=json.loads(model.call_args.args[0].split('\n',1)[1]);self.assertIn(context[0]['statement'],payload['history'][0]['question'])
   self.assertEqual(payload['history'][0]['answer'],'')
-  _,count=self.ask(context=context);self.assertEqual(count,2)
+  _,count=self.ask(context=context);self.assertEqual(count,1)
   _,count=self.ask(context=context);self.assertEqual(count,0)
   _,count=self.ask(context=[{'statement':'更正为下周适用','source_ids':[self.item]}]);self.assertEqual(count,2)
   with self.assertRaises(ValueError):self.s.ask_library('Hi',context=[{'statement':'x','source_ids':['bad']}])
