@@ -29,6 +29,6 @@ def clean_chats(chats,deleted_items,deleted_messages):
             if not chat['messages']:continue
             user=next((message for message in chat['messages'] if message.get('role')=='user'),{})
             files=user.get('files',[])
-            chat['title']=(user.get('text') or (files[0] if isinstance(files,list) and files else '') or 'Conversation')[:36]
+            if not chat.get('titleCustom'):chat['title']=(user.get('text') or (files[0] if isinstance(files,list) and files else '') or 'Conversation')[:36]
         result.append(chat)
     return result,removed

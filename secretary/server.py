@@ -137,9 +137,27 @@ class Service:
                     if not isinstance(message,dict) or message.get('role') not in ('user','assistant') or not isinstance(message.get('id'),str) or not isinstance(message.get('text',''),str):raise ValueError('消息格式无效')
                 if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):
                     from .question_jobs import preserve
-                    merged[chat['id']]=preserve(chat,merged.get(chat['id'],{}))
+                    previous=merged.get(chat['id'],{})
+                    merged[chat['id']]=preserve(chat,previous)
+                    if previous.get('titleCustom'):
+                        for field in ('title','titleCustom','titleVersion'):
+                            if field in previous:merged[chat['id']][field]=previous[field]
             result={'conversations':sorted(merged.values(),key=lambda c:c.get('updated',0),reverse=True),'activeId':active}
             return self.clean_chat_history(result,path,saved)
+
+    def rename_chat(self,chat_id,title,expected_title=None):
+        if not isinstance(title,str) or not 1<=len(title.strip())<=100:raise ValueError('对话名称需为 1–100 个字符')
+        path=self.archive.root/'conversations.json'
+        with self.lock:
+            saved=self.question_jobs.read()
+            chat=next((chat for chat in saved['conversations'] if chat['id']==chat_id),None)
+            if chat is None:raise KeyError('对话不存在，请刷新后重试')
+            if expected_title is not None and expected_title!=chat['title']:raise ValueError('对话名称已在其他窗口修改，请重新打开后再编辑')
+            updated=max(int(time.time()*1000),chat.get('updated',0)+1)
+            original=json.loads(json.dumps(saved))
+            chat.update(title=title.strip(),titleCustom=True,titleVersion=updated,updated=updated)
+            self.clean_chat_history(saved,path,original)
+            return {'chat':{key:chat[key] for key in ('id','title','titleCustom','titleVersion','updated')}}
 
     def clean_chat_history(self,result,path,saved):
         refs=self.archive.deletion_refs()
@@ -1394,6 +1412,8 @@ def handler(service):
                 if path=='/api/browser-extension/open':return self.send(200,extension_install.open_folder(service.archive.root))
                 if path=='/api/settings':return self.send(200,service.save_settings(body))
                 if path=='/api/conversations':return self.send(200,service.chat_history(body))
+                chat_title=re.fullmatch(r'/api/conversations/([^/]+)/title',path)
+                if chat_title:return self.send(200,service.rename_chat(urllib.parse.unquote(chat_title[1]),body.get('title'),body.get('expected_title')))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
                 if path=='/api/library/catalog':

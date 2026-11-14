@@ -108,6 +108,7 @@ let libraryCategories=[],libraryTotal=0;let token='', allItems=[], selectedId=''
 let activeQuestion=null,sourceStates={},inputModeTouched=false,basisDraft=null;
 const storageKey='stellar.conversations.v1';
 let conversations=[], activeId='';
+let renameChatTarget=null;
 let sharedChatsReady=false,historyLoaded=false,sharedChatSaves=Promise.resolve();
 try { const saved=JSON.parse(localStorage.getItem(storageKey)||'{}'); conversations=Array.isArray(saved.conversations)?saved.conversations:[];activeId=saved.activeId||''; } catch {}
 const uid=()=>crypto.randomUUID();
@@ -119,6 +120,7 @@ function mergeQuestionMessages(remote){
  const fields=['text','sources','catalog','timings','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestVersion','requestApproval'];
  for(const saved of remote.conversations||[]){
   const local=conversations.find(c=>c.id===saved.id);if(!local)continue;
+  if(saved.titleCustom&&(saved.titleVersion||0)>=(local.titleVersion||0)){for(const field of ['title','titleCustom','titleVersion'])local[field]=saved[field]}
   for(const message of saved.messages||[]){
    if(!message.requestId)continue;
    const target=local.messages.find(m=>m.id===message.id);if(!target||(target.requestVersion||0)>(message.requestVersion||0))continue;
@@ -149,9 +151,40 @@ async function busy(button,action,label=t('处理中…')){const old=button.text
 function displayCategory(value){return value==='未分类'?t('未分类'):value}
 function date(value){return new Date(value).toLocaleDateString(StellarI18n.locale,{month:'short',day:'numeric'})}
 function newChat(){activeId='';$('#archive-only').checked=false;if(['note','group','ask'].includes($('#input-mode').value))$('#input-mode').value='auto';for(const file of attachedFiles)releaseAttachment(file);attachedFiles=[];$('#message-input').value='';resizeInput();renderAttachments();renderChat();renderSidebar();saveChats();$('#message-input').focus()}
+function displayChatTitle(chat){
+ if(chat.titleCustom)return chat.title;
+ const first=(chat.messages||[]).find(m=>m.role==='user');
+ const raw=String(first?.text||chat.title||'').trim();
+ if(!/^https?:\/\/\S+$/.test(raw))return chat.title;
+ try{const url=new URL(raw);const ids=(chat.messages||[]).flatMap(m=>m.items||[]);const item=allItems.find(i=>ids.includes(i.id)&&i.title&&!/^https?:\/\//i.test(i.title));
+  if(item)return item.title;
+  const host=url.hostname.replace(/^www\./,'');return /^(chatgpt\.com|chat\.openai\.com)$/.test(host)?t('ChatGPT 对话'):host==='claude.ai'?t('Claude 对话'):host+' · '+t('网页');
+ }catch{return chat.title}
+}
+function openChatRename(id){
+ const chat=conversations.find(c=>c.id===id);if(!chat)return;
+ renameChatTarget={id,expectedTitle:chat.title,saving:false};
+ $('#chat-rename-input').value=displayChatTitle(chat);$('#chat-rename-error').textContent='';
+ $('#chat-rename-dialog').showModal();$('#chat-rename-input').focus();$('#chat-rename-input').select();
+}
+function closeChatRename(){if(renameChatTarget?.saving)return;$('#chat-rename-dialog').close();renameChatTarget=null}
+$('#chat-rename-close').onclick=closeChatRename;$('#chat-rename-cancel').onclick=closeChatRename;
+$('#chat-rename-dialog').addEventListener('cancel',event=>{if(renameChatTarget?.saving)event.preventDefault();else renameChatTarget=null});
+$('#chat-rename-form').onsubmit=async event=>{
+ event.preventDefault();const target=renameChatTarget;if(!target||target.saving)return;
+ const title=$('#chat-rename-input').value.trim();if(!title||title.length>100){$('#chat-rename-error').textContent=t('对话名称需为 1–100 个字符');return}
+ target.saving=true;$('#chat-rename-save').disabled=true;$('#chat-rename-error').textContent='';
+ try{await sharedChatSaves;const result=await api('/api/conversations/'+encodeURIComponent(target.id)+'/title',{title,expected_title:target.expectedTitle});
+  const chat=conversations.find(c=>c.id===target.id);if(chat)Object.assign(chat,result.chat);
+  writeLocalChats();renderSidebar();target.saving=false;closeChatRename();toast(t('对话名称已保存'));
+ }catch(error){$('#chat-rename-error').textContent=error.message}
+ finally{target.saving=false;$('#chat-rename-save').disabled=false}
+};
+let lastChatClick={id:'',at:0};
 function renderSidebar(){
- $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}</button>`).join('');
- $('#conversations').querySelectorAll('button').forEach(b=>b.onclick=()=>{activeId=b.dataset.chat;restoreInputMode();saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))});
+ $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<div class="conversation-row ${c.id===activeId?'active':''}"><button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}" title="${esc(displayChatTitle(c))}">${esc(displayChatTitle(c))}</button><button class="chat-rename" data-rename-chat="${esc(c.id)}" title="${esc(t('重命名对话'))}" aria-label="${esc(t('重命名对话'))}">✎</button></div>`).join('');
+ $('#conversations').querySelectorAll('[data-chat]').forEach(b=>{b.onclick=()=>{const now=Date.now(),double=lastChatClick.id===b.dataset.chat&&now-lastChatClick.at<400;lastChatClick={id:b.dataset.chat,at:now};if(double){lastChatClick.at=0;openChatRename(b.dataset.chat);return}if(activeId===b.dataset.chat)return;activeId=b.dataset.chat;restoreInputMode();saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))}});
+ $('#conversations').querySelectorAll('[data-rename-chat]').forEach(b=>b.onclick=()=>openChatRename(b.dataset.renameChat));
  $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
  bindDetails($('#recent-items'));
 }

@@ -1320,5 +1320,15 @@
   "原文完全匹配，直接读取当前归档，未调用模型。": "Exact original-text match; read the current archive without a model call.",
   "安排内容一致，直接读取当前归档，未调用模型。": "Matching arrangement; read the current archive without a model call.",
   "没有找到可建档的上一条文字，请在“建档：”后附上要保存的内容。": "No previous text is available to archive. Add the content after Archive:.",
-  "本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。": "Connection to the local service was lost. Restart the app and try again. If you were saving, check the library first to avoid duplicates."
+  "本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。": "Connection to the local service was lost. Restart the app and try again. If you were saving, check the library first to avoid duplicates.",
+  "重命名对话": "Rename chat",
+  "对话名称": "Chat name",
+  "保存名称": "Save name",
+  "对话名称需为 1–100 个字符": "Use 1–100 characters for the chat name",
+  "对话名称已在其他窗口修改，请重新打开后再编辑": "This chat was renamed in another window. Reopen the editor to try again.",
+  "对话不存在，请刷新后重试": "Chat not found. Refresh and try again.",
+  "对话名称已保存": "Chat name saved",
+  "ChatGPT 对话": "ChatGPT conversation",
+  "Claude 对话": "Claude conversation",
+  "网页": "Web page"
 }
