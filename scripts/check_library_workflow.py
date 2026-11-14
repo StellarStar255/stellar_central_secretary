@@ -62,8 +62,9 @@ with tempfile.TemporaryDirectory() as folder:
     expect(page.locator('#preview-timestamps [data-record-updated]')).to_have_attribute('datetime',after_rename['updated'])
     page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera saved via double click')
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible()
+    expect(page.locator('#edit-title')).to_contain_text('Robot camera saved via double click')
     assert service.archive.get(linked)['title']=='Robot camera saved via double click'
-    expect(page.locator('#edit-title')).to_contain_text('Robot camera saved via double click');page.locator('#detail-dialog .dialog-head button').click()
+    page.locator('#detail-dialog .dialog-head button').click()
     # Restore the fixture title for subsequent persistence checks.
     page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera 新标题 <draft>');page.locator('#preview-title-save').click();expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>')
     page.reload();page.locator('#library-open').click();page.locator('#search').fill('robot camera');page.locator('#items [data-id="'+linked+'"]').click();expect(page.locator('#preview-title')).to_have_text('Robot camera 新标题 <draft>')
