@@ -114,6 +114,8 @@ class Service:
         self.semantic=SemanticIndex(self.archive)
         from .question_jobs import QuestionJobs
         self.question_jobs=QuestionJobs(self)
+        from .mobile import Mobile
+        self.mobile=Mobile(self)
     def notify_summary_finished(self,item_id,stage):
         if re.fullmatch('[a-f0-9]{32}',item_id) and stage in ('done','error') and self.archive.settings()['completion_notifications']:
             try:self.archive.get(item_id)
@@ -1074,6 +1076,7 @@ class Service:
         from .knowledge_chat import citations
         return {'answer':answer, 'sources':citations(answer,passages)}
     def close(self):
+        self.mobile.stop()
         self.semantic.close()
         self.pdf_jobs.close()
         with self.lock:
@@ -1168,6 +1171,7 @@ def handler(service):
             if not self.trusted(): return self.send(403, {'error':'不允许的主机'})
             parsed = urllib.parse.urlsplit(self.path); path = parsed.path
             try:
+                if path=='/api/mobile':return self.send(200,service.mobile.status())
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
@@ -1279,7 +1283,7 @@ def handler(service):
                     if not urllib.parse.parse_qs(parsed.query).get('lang'):
                         return self.send(302,b'',extra={'Location':path+'?lang='+service.archive.settings()['ui_language']})
                     return self.send(200,(STATIC/'tutorial.html').read_bytes(),'text/html; charset=utf-8',policy="default-src 'self'; script-src 'self'; style-src 'self'; object-src blob:; frame-src blob:; connect-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-                assets = {'/':'index.html', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/attachment-order-ui.js':'attachment-order-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/semantic-ui.js':'semantic-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
+                assets = {'/':'index.html','/mobile-ui.js':'mobile-ui.js', '/app.js':'app.js','/company-ai.js':'company-ai.js','/local-paths.js':'local-paths.js','/extension-ui.js':'extension-ui.js','/attachment-recovery-ui.js':'attachment-recovery-ui.js','/backup-ui.js':'backup-ui.js','/storage-ui.js':'storage-ui.js','/pdf-ui.js':'pdf-ui.js','/uploads.js':'uploads.js','/drafts.js':'drafts.js','/image-viewer.js':'image-viewer.js','/video-viewer.js':'video-viewer.js','/notes-ui.js':'notes-ui.js','/note-attachments.js':'note-attachments.js','/archive-actions.js':'archive-actions.js','/bundle-ui.js':'bundle-ui.js','/attachment-order-ui.js':'attachment-order-ui.js','/additions-ui.js':'additions-ui.js','/model-api-ui.js':'model-api-ui.js','/semantic-ui.js':'semantic-ui.js','/model-proxy-ui.js':'model-proxy-ui.js','/tasks-ui.js':'tasks-ui.js','/library-preview.js':'library-preview.js','/library-management.js':'library-management.js', '/style.css':'style.css','/tutorial.js':'tutorial.js','/tutorial.css':'tutorial.css','/i18n.js':'i18n.js','/i18n-data.js':'i18n-data.js'}
                 if path not in assets: return self.send(404, {'error':'不存在'})
                 file = STATIC/assets[path]
                 return self.send(200, file.read_bytes(), {'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[file.suffix[1:]])
@@ -1401,6 +1405,11 @@ def handler(service):
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                     return
                 if path=='/api/browser/close':return self.send(200,service.close_capture_browsers())
+                if path=='/api/mobile/enable':return self.send(200,service.mobile.enable())
+                if path=='/api/mobile/disable':service.mobile.stop(disable=True);return self.send(200,service.mobile.status())
+                if path=='/api/mobile/invite':return self.send(200,service.mobile.invitation())
+                if path=='/api/mobile/decide':return self.send(200,service.mobile.decide(body))
+                if path=='/api/mobile/revoke':return self.send(200,service.mobile.revoke(body.get('id')))
                 if path=='/api/ingest': return self.send(200, service.ingest(body))
                 if path=='/api/language':
                     service.archive.set_language(body.get('language'));return self.send(200,{'ok':True,'language':body['language']})

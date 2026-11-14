@@ -22,7 +22,7 @@ if QT_DESKTOP:
     for package in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6'):datas+=copy_metadata(package)
 a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
              binaries=[(str(node), 'playwright/driver')]+collect_dynamic_libs('pillow_heif'), datas=datas,
-             hiddenimports=collect_submodules('secretary') + collect_submodules('pypdf')
+             hiddenimports=collect_submodules('qrcode') + collect_submodules('zeroconf') + collect_submodules('ifaddr') + collect_submodules('secretary') + collect_submodules('pypdf')
                            + collect_submodules('pillow_heif') + ['_pillow_heif','cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython']+(['PySide6'] if not QT_DESKTOP else []))
 if WINDOWS:
@@ -40,4 +40,4 @@ if MAC:
                  icon=str(ROOT/'secretary/static/icons/app.icns'),
                  bundle_identifier='io.github.stellarstar255.stellar-secretary',
                  info_plist={'CFBundleDisplayName': '知识秘书', 'NSHighResolutionCapable': True,
-                             'CFBundleShortVersionString': __version__})
+                             'CFBundleShortVersionString': __version__, 'NSLocalNetworkUsageDescription':'连接已配对的手机，共用本机知识库。', 'NSBonjourServices':['_stellar-sec._tcp']})

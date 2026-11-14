@@ -58,3 +58,9 @@ build/
 dist/
 .venv-build/
 .venv-release/
+
+# Xcode personal state and provisioning output
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/*.ipa
+ios/**/*.mobileprovision

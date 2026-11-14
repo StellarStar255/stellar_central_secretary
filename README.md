@@ -14,6 +14,12 @@ A local knowledge library for links, AI conversations, PDFs, documents and notes
 
 The demo uses fictional documents and a prewritten summary. Waiting is accelerated; it does not show actual model latency.
 
+## iPhone companion (source trial)
+
+The optional **Phone connection** setting enables a separate authenticated HTTPS LAN listener. Install the native app in `ios/`, scan the Mac QR from the app, compare the six digits, and approve on the computer. The companion supports note/link/image/file capture, library search, cited text and questions. Bonjour reconnects to the paired computer while the app is open; pending captures survive offline periods and are retried without duplication. Keep the computer awake on the same reachable LAN. Remote access, cloud sync and background delivery with the app closed are not included.
+
+The listener is off by default; paired devices can be revoked on the desktop. Phone attachments are limited to 10 MB. Links are initially bookmarked; complete webpage capture on the computer. See [iPhone build, installation and validation instructions](ios/README.md). This is not an App Store or TestFlight release.
+
 ## Chat with your library
 
 Choose **Library chat** in the composer, or select **Chat with your library** on the welcome screen. Ask about saved material and continue with follow-up questions. Up to six recent successful question/answer pairs provide context; starting a new chat clears that context.

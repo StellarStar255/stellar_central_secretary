@@ -994,3 +994,5 @@ globalThis.StellarSessionRecovery={gaps:0,lastGapSeconds:0,check(now=Date.now())
  return true;
 }};
 setInterval(()=>StellarSessionRecovery.check(),3000);
+
+globalThis.StellarMobile?.bind({api,toast});

@@ -4,3 +4,6 @@ playwright>=1.49,<2
 Pillow>=11,<13
 pillow-heif>=1.8.1,<2
 pypdfium2>=5.14,<6
+cryptography>=44,<47
+zeroconf>=0.140,<1
+qrcode>=8,<9
