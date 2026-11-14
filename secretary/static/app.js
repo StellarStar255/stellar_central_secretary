@@ -180,12 +180,20 @@ $('#chat-rename-form').onsubmit=async event=>{
  }catch(error){$('#chat-rename-error').textContent=error.message}
  finally{target.saving=false;$('#chat-rename-save').disabled=false}
 };
+const hiddenRecentKey='stellar.hidden-recent-items.v1';
+let hiddenRecentItems=new Set();
+try{const ids=JSON.parse(localStorage.getItem(hiddenRecentKey)||'[]');if(Array.isArray(ids))hiddenRecentItems=new Set(ids.filter(id=>typeof id==='string'))}catch{}
+function hideRecentItem(id){
+ const next=new Set(hiddenRecentItems);next.add(id);
+ try{localStorage.setItem(hiddenRecentKey,JSON.stringify([...next]));hiddenRecentItems=next;renderSidebar();toast(t('已从最近归档隐藏，资料仍保留在知识库中。'))}catch{toast(t('无法保存隐藏状态，请稍后重试。'))}
+}
 let lastChatClick={id:'',at:0};
 function renderSidebar(){
  $('#conversations').innerHTML=(historyLoaded?conversations:[]).map(c=>`<div class="conversation-row ${c.id===activeId?'active':''}"><button class="conversation ${c.id===activeId?'active':''}" data-chat="${esc(c.id)}" title="${esc(displayChatTitle(c))}">${esc(displayChatTitle(c))}</button><button class="chat-rename" data-rename-chat="${esc(c.id)}" title="${esc(t('重命名对话'))}" aria-label="${esc(t('重命名对话'))}">✎</button></div>`).join('');
  $('#conversations').querySelectorAll('[data-chat]').forEach(b=>{b.onclick=()=>{const now=Date.now(),double=lastChatClick.id===b.dataset.chat&&now-lastChatClick.at<400;lastChatClick={id:b.dataset.chat,at:now};if(double){lastChatClick.at=0;openChatRename(b.dataset.chat);return}if(activeId===b.dataset.chat)return;activeId=b.dataset.chat;restoreInputMode();saveChats();renderChat();renderSidebar();document.body.classList.remove('mobile-sidebar');void refresh().catch(error=>toast(error.message))}});
  $('#conversations').querySelectorAll('[data-rename-chat]').forEach(b=>b.onclick=()=>openChatRename(b.dataset.renameChat));
- $('#recent-items').innerHTML=allItems.slice(0,6).map(i=>`<button class="recent-item" data-id="${i.id}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button>`).join('');
+ $('#recent-items').innerHTML=allItems.filter(i=>!hiddenRecentItems.has(i.id)).slice(0,6).map(i=>`<div class="recent-row"><button class="recent-item" data-id="${esc(i.id)}" title="${esc(i.title)}"><span>${i.kind==='link'?'↗':i.kind==='file'?'▧':'✎'}</span>${esc(i.title)}</button><button class="recent-dismiss" data-hide-recent="${esc(i.id)}" title="${esc(t('从最近归档隐藏'))}" aria-label="${esc(t('从最近归档隐藏'))} · ${esc(i.title)}">×</button></div>`).join('');
+ $('#recent-items').querySelectorAll('[data-hide-recent]').forEach(button=>button.onclick=event=>{event.stopPropagation();hideRecentItem(button.dataset.hideRecent)});
  bindDetails($('#recent-items'));
 }
 function originalLink(item){try{const url=new URL(item?.url||'');return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password?url.href:''}catch{return ''}}

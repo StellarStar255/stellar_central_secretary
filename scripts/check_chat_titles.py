@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright,expect
 class FixtureServer(ThreadingHTTPServer):request_queue_size=128
 with tempfile.TemporaryDirectory() as temp:
  service=Service(temp);service.archive.configure('codex',False)
+ item,_=service.archive.add('Sidebar test note','Keep this original text');service.archive.update(item,state='ready')
  chats=[{'id':'url','title':'https://chatgpt.com/c/example','updated':2,'messages':[{'id':'q','role':'user','text':'https://chatgpt.com/c/example'}]}, {'id':'other','title':'Other topic','updated':1,'messages':[{'id':'q2','role':'user','text':'Other topic'}]}]
  service.chat_history({'conversations':chats,'activeId':'url'})
  server=FixtureServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -17,6 +18,13 @@ with tempfile.TemporaryDirectory() as temp:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
    page=browser.new_page(viewport={'width':1280,'height':900});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}')
+   recent=page.locator('#recent-items [data-id="'+item+'"]');expect(recent).to_be_visible()
+   dismiss=page.locator('[data-hide-recent="'+item+'"]');expect(dismiss).to_have_css('opacity','0')
+   recent.hover();expect(dismiss).to_have_css('opacity','1');dismiss.click()
+   expect(recent).to_have_count(0);expect(page.locator('#detail-dialog')).not_to_be_visible()
+   assert service.archive.get(item)['text']=='Keep this original text'
+   page.reload();expect(page.locator('[data-chat="url"]')).to_be_visible();expect(recent).to_have_count(0)
+   assert service.archive.get(item)['state']=='ready'
    expect(page.locator('[data-chat="url"]')).to_have_text('ChatGPT 对话')
    page.locator('[data-rename-chat="other"]').click(force=True)
    page.locator('#chat-rename-input').fill('Cancelled');page.locator('#chat-rename-cancel').click()
@@ -40,5 +48,5 @@ with tempfile.TemporaryDirectory() as temp:
    expect(page.locator('[data-chat="url"]')).to_have_text('Research notes');page.screenshot(path='/tmp/stellar-chat-titles.png')
    assert not errors,errors
    browser.close()
-  print('PASS: friendly URL title, rename inactive chat, cancel, persistent save, escaping, double-click, conflict and draft preservation')
+  print('PASS: recent item hover dismissal survives reload without deleting archive; friendly URL title, rename inactive chat, cancel, persistent save, escaping, double-click, conflict and draft preservation')
  finally:server.shutdown();server.server_close();service.close()
