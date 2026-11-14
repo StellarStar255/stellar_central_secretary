@@ -1,4 +1,4 @@
-import base64,json,secrets,ssl,tempfile,unittest,urllib.request,urllib.error
+import base64,json,os,secrets,ssl,tempfile,unittest,urllib.request,urllib.error
 from unittest.mock import patch
 from secretary.server import Service
 from secretary.mobile import digest
@@ -60,7 +60,8 @@ class MobileTest(unittest.TestCase):
   fingerprint=self.m.fingerprint;self.m.stop(disable=True);self.s.close();self.s=Service(self.temp.name);self.m=self.s.mobile
   self.assertIsNotNone(self.m.device(self.credential));self.m.certificate();self.assertEqual(self.m.fingerprint,fingerprint)
   self.assertTrue(self.m.ingest(self.m.device(self.credential),{'request_id':'persist','content':{'text':'Persist unique note'}})['duplicate'])
-  self.assertNotIn(self.credential,self.m.path.read_text());self.assertEqual(self.m.path.stat().st_mode&0o777,0o600)
+  self.assertNotIn(self.credential,self.m.path.read_text())
+  if os.name!='nt':self.assertEqual(self.m.path.stat().st_mode&0o777,0o600)
  def test_ask_returns_citations_without_settings_or_credentials(self):
   self.approve()
   with patch.object(self.s,'ask_library',return_value={'answer':'Synthetic answer','sources':[],'private':'no'}) as ask:

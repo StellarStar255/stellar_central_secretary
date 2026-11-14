@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 from . import browser_reader,web_reader
+from .background_process import hidden_console
 
 
 def terminate_job(proc):
@@ -27,7 +28,7 @@ def run(kind,url,profile,notify,cancelled,login_complete,**options):
     if cancelled.is_set():raise browser_reader.CaptureCancelled('已停止读取，已有资料保持不变。')
     command=[sys.executable,'--capture-worker'] if getattr(sys,'frozen',False) else [sys.executable,'-m','secretary.capture_worker']
     proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-                          text=True,encoding='utf-8',start_new_session=True,cwd=str(Path(__file__).resolve().parent.parent))
+                          text=True,encoding='utf-8',start_new_session=True,cwd=str(Path(__file__).resolve().parent.parent),**hidden_console())
     events=queue.Queue();finished=threading.Event()
     def receive():
         try:

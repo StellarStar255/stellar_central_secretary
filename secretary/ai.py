@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from . import network
+from .background_process import hidden_console
 from .rich_text import searchable_text
 
 CLI_BACKENDS=('codex','claude','gemini')
@@ -117,7 +118,7 @@ def _run_api(prompt,config,images,timeout=240):
         env=network.child_env(policy=policy)
     else:env={**os.environ,'PYTHONUTF8':'1','PYTHONIOENCODING':'utf-8'}
     check_cancelled();report('starting_model')
-    proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',env=env,start_new_session=True,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0,cwd=str(Path(__file__).resolve().parent.parent))
+    proc=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,encoding='utf-8',env=env,start_new_session=True,cwd=str(Path(__file__).resolve().parent.parent),**hidden_console())
     report('waiting_model')
     with _process_lock:
         proc._stellar_cancel=_job_cancel.get();_processes.add(proc);cancelled=is_cancelled(generation)
@@ -179,7 +180,7 @@ def run(prompt, backend, images=None, timeout=240, reasoning_effort=None):
             cmd += ['--','-'] if images else ['-']
         check_cancelled();report('starting_model')
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, cwd=cwd, env=env, start_new_session=True)
+                                text=True, cwd=cwd, env=env, start_new_session=True,**hidden_console())
         report('waiting_model')
         with _process_lock:
             proc._stellar_cancel=_job_cancel.get();_processes.add(proc);was_cancelled=is_cancelled(generation)
