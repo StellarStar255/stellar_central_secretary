@@ -145,6 +145,24 @@ class Service:
             result={'conversations':sorted(merged.values(),key=lambda c:c.get('updated',0),reverse=True),'activeId':active}
             return self.clean_chat_history(result,path,saved)
 
+    def catalog_page(self,body):
+        from .catalog import page
+        if not body.get('chat_id'):
+            return page(self.archive,body.get('queries'),body.get('offset',0),body.get('limit',20))
+        with self.lock:
+            saved=self.question_jobs.read();data=json.loads(json.dumps(saved))
+            chat=next((c for c in data['conversations'] if c['id']==body['chat_id']),None)
+            message=next((m for m in (chat or {}).get('messages',[]) if m['id']==body.get('message_id') and m['role']=='assistant'),None)
+            if not message or not message.get('catalog') or message.get('pending') or message.get('requestState')=='running' or message.get('requestId')!=body.get('request_id') or message.get('requestVersion',0)!=body.get('request_version',0):
+                raise ValueError('资料清单已更新，请刷新后重试。')
+            result=page(self.archive,message['catalog']['queries'],body.get('offset',0),message['catalog']['limit'])
+            message.update(text=result['answer'],sources=result['sources'],catalog=result['catalog'])
+            chat['updated']=max(int(time.time()*1000),chat.get('updated',0)+1)
+            if message.get('requestId'):
+                message['requestVersion']=chat['updated'];result['request_version']=message['requestVersion']
+            self.clean_chat_history(data,self.archive.root/'conversations.json',saved)
+            return result
+
     def rename_chat(self,chat_id,title,expected_title=None):
         if not isinstance(title,str) or not 1<=len(title.strip())<=100:raise ValueError('对话名称需为 1–100 个字符')
         path=self.archive.root/'conversations.json'
@@ -1416,9 +1434,7 @@ def handler(service):
                 if chat_title:return self.send(200,service.rename_chat(urllib.parse.unquote(chat_title[1]),body.get('title'),body.get('expected_title')))
                 if path=='/api/desktop/heartbeat':return self.send(200,service.desktop_heartbeat(body))
                 if path=='/api/interface':return self.send(200,service.switch_interface(body.get('mode'),body.get('panel')))
-                if path=='/api/library/catalog':
-                    from .catalog import page
-                    return self.send(200,page(service.archive,body.get('queries'),body.get('offset',0),body.get('limit',20)))
+                if path=='/api/library/catalog':return self.send(200,service.catalog_page(body))
                 if path=='/api/ask/start':return self.send(200,service.question_jobs.start(body))
                 if path=='/api/ask/job':return self.send(200,service.question_jobs.get(body))
                 if path=='/api/ask/cancel':return self.send(200,{'cancelled':service.question_progress.cancel(body.get('progress_id'))})

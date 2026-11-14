@@ -43,3 +43,31 @@ class CatalogTest(unittest.TestCase):
     self.assertEqual(result['catalog']['queries'][0],'罗马');self.assertTrue(result['retrieval_notice'])
     self.assertEqual(page(s.archive,['罗马 帝国'])['catalog']['total'],0)
    finally:s.close()
+
+ def test_paged_server_answers_survive_stale_snapshots_and_restart(self):
+  import copy
+  with tempfile.TemporaryDirectory() as root:
+   s=Service(root)
+   try:
+    for i in range(45):s.archive.add('Catalog fixture '+str(i),'Catalog fixture body '+str(i))
+    result=page(s.archive,['Catalog fixture'])
+    chat={'id':'chat','title':'List','updated':1,'messages':[{'id':'q','role':'user','text':'List records'},{'id':'a','role':'assistant','text':result['answer'],'catalog':result['catalog'],'sources':result['sources'],'requestId':'a'*32,'requestVersion':1,'requestState':'done'}]}
+    # Simulate the durable answer produced by the question worker.
+    import json
+    (s.archive.root/'conversations.json').write_text(json.dumps({'conversations':[chat],'activeId':'chat'}))
+    body={'chat_id':'chat','message_id':'a','request_id':'a'*32,'request_version':1,'offset':20,'queries':['ignored client query'],'limit':50}
+    changed=s.catalog_page(body)
+    self.assertEqual(changed['catalog']['offset'],20);self.assertEqual(changed['catalog']['limit'],20)
+    self.assertEqual(changed['catalog']['queries'],['Catalog fixture'])
+    stale=copy.deepcopy(chat);stale['updated']=10**15
+    s.chat_history({'conversations':[stale],'activeId':'chat'})
+    saved=s.chat_history()['conversations'][0]['messages'][1]
+    self.assertEqual(saved['catalog']['offset'],20);self.assertEqual(saved['requestVersion'],changed['request_version'])
+    with self.assertRaises(ValueError):s.catalog_page(body)
+    s.close();s=Service(root)
+    self.assertEqual(s.chat_history()['conversations'][0]['messages'][1]['catalog']['offset'],20)
+    body.update(request_version=changed['request_version'],offset=40)
+    self.assertEqual(s.catalog_page(body)['catalog']['offset'],40)
+    s.trash_item(changed['sources'][0]['item_id'])
+    self.assertEqual(s.catalog_page({'queries':['Catalog fixture']})['catalog']['total'],44)
+   finally:s.close()

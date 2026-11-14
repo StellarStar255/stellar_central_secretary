@@ -641,7 +641,7 @@ function bindCatalogPages(boundChat){
   const chat=conversations.find(c=>c.id===boundChat.id);if(!chat)return;
   const message=chat.messages.find(m=>m.id===button.dataset.catalog);if(!message?.catalog)return;
   button.disabled=true;
-  try{const data=await api('/api/library/catalog',{queries:message.catalog.queries,offset:Number(button.dataset.offset),limit:message.catalog.limit});updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog})}catch(error){toast(error.message);button.disabled=false}
+  try{await sharedChatSaves;const data=await api('/api/library/catalog',{chat_id:chat.id,message_id:message.id,request_id:message.requestId,request_version:message.requestVersion||0,queries:message.catalog.queries,offset:Number(button.dataset.offset),limit:message.catalog.limit});updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog,...(data.request_version?{requestVersion:data.request_version}:{})})}catch(error){toast(error.message);button.disabled=false}
  });
 }
 function bindRechecks(boundChat){

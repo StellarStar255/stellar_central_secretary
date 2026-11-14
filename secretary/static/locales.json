@@ -1333,5 +1333,6 @@
   "网页": "Web page",
   "从最近归档隐藏": "Hide from recently archived",
   "已从最近归档隐藏，资料仍保留在知识库中。": "Hidden from recently archived. The item remains in your library.",
-  "无法保存隐藏状态，请稍后重试。": "Could not save this preference. Please try again."
+  "无法保存隐藏状态，请稍后重试。": "Could not save this preference. Please try again.",
+  "资料清单已更新，请刷新后重试。": "The record list has changed. Refresh and try again."
 }
