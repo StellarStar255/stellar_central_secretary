@@ -19,7 +19,7 @@ class BackgroundProcessTest(unittest.TestCase):
  def test_cli_model_launch_preserves_prompt_and_captures_output_in_background(self):
   output=json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'Fixture answer'}})
   proc=self.process(output)
-  with patch.object(ai,'executable',return_value='fixture-codex'),patch.object(ai,'hidden_console',return_value={'creationflags':123}),patch.object(ai.subprocess,'Popen',return_value=proc) as launch:
+  with patch.object(ai.network,'child_env',return_value={}),patch.object(ai,'executable',return_value='fixture-codex'),patch.object(ai,'hidden_console',return_value={'creationflags':123}),patch.object(ai.subprocess,'Popen',return_value=proc) as launch:
    self.assertEqual(ai.run('Private fixture prompt','codex'),'Fixture answer')
   self.assertEqual(launch.call_args.kwargs['creationflags'],123);self.assertIs(launch.call_args.kwargs['stdout'],subprocess.PIPE)
   proc.communicate.assert_called_once_with('Private fixture prompt',timeout=240)
