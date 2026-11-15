@@ -10,7 +10,22 @@ from secretary.server import Service
 ROOT=Path(__file__).resolve().parent.parent
 if __name__=='__main__':
  with tempfile.TemporaryDirectory(prefix='stellar-ios-fixture-') as folder:
-  service=Service(folder);service.archive.configure('codex',False);mobile=service.mobile;mobile.enable(advertise=True,bind='0.0.0.0');port=mobile.server.server_port
+  service=Service(folder);service.archive.configure('codex',False);mobile=service.mobile
+  connections={'tls':0,'status':0};connection_changed=threading.Condition()
+  original_handler=mobile.handler
+  def counted_handler():
+   base=original_handler()
+   class Counting(base):
+    def setup(self):
+     super().setup()
+     with connection_changed:connections['tls']+=1
+    def do_GET(self):
+     if self.path=='/status':
+      with connection_changed:connections['status']+=1;connection_changed.notify_all()
+     super().do_GET()
+   return Counting
+  mobile.handler=counted_handler
+  mobile.enable(advertise=True,bind='0.0.0.0');port=mobile.server.server_port
   item,_=service.archive.add('Reference fixture','Reference fixture body')
   class Handler(BaseHTTPRequestHandler):
    def log_message(self,*args):pass
@@ -24,6 +39,12 @@ if __name__=='__main__':
      mobile.decide({'id':pending[0]['id'],'approve':True});value={'ok':True}
     elif self.path=='/offline':mobile.stop();value={'ok':True}
     elif self.path=='/online':mobile.enable(advertise=True,bind='0.0.0.0');value={'ok':True}
+    elif self.path=='/connections':
+     with connection_changed:value=dict(connections)
+    elif self.path.startswith('/wait-status?after='):
+     previous=int(self.path.split('=',1)[1])
+     with connection_changed:
+      connection_changed.wait_for(lambda:connections['status']>previous,timeout=8);value=dict(connections)
     elif self.path=='/count':value={'count':len(service.archive.list())}
     else:self.send_error(404);return
     data=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
@@ -42,5 +63,5 @@ if __name__=='__main__':
     if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
     result.check_returncode()
     assert len(service.archive.list())==3
-    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
+    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, foreground TLS reuse, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
   finally:control.shutdown();control.server_close();mobile.stop(disable=True);service.close()

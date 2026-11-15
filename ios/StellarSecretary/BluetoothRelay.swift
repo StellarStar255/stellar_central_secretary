@@ -30,6 +30,8 @@ final class BluetoothRelay:NSObject,CBCentralManagerDelegate,CBPeripheralDelegat
     private var central:CBCentralManager?
     private var peripheralManager:CBPeripheralManager?
     private var peripheral:CBPeripheral?
+    private var verifiedPeripheral:CBPeripheral?
+    private var tryVerifiedPeer=false
     private var writeCharacteristic:CBCharacteristic?
     private var notifyCharacteristic:CBMutableCharacteristic?
     private var listener:NWListener?
@@ -89,6 +91,10 @@ final class BluetoothRelay:NSObject,CBCentralManagerDelegate,CBPeripheralDelegat
     }
     private func scan() {
         guard !stopped,central?.state == .poweredOn,peripheral==nil else {return}
+        if tryVerifiedPeer,let known=verifiedPeripheral {
+            tryVerifiedPeer=false;report("reconnect-known")
+            connect(known,timeout:3);return
+        }
         central?.scanForPeripherals(withServices:[serviceUUID],options:[CBCentralManagerScanOptionAllowDuplicatesKey:false])
     }
     func endpoint(timeout:TimeInterval=18) async throws -> String {
@@ -111,9 +117,18 @@ final class BluetoothRelay:NSObject,CBCentralManagerDelegate,CBPeripheralDelegat
         peripheral=nil;writeCharacteristic=nil;clearLinks()
         if central.state == .unsupported || central.state == .poweredOff {let values=waiters.values;waiters.removeAll();for value in values {value.resume(throwing:PairingTransportFailure.unreachable)}}
     }}
+    func rememberVerifiedPeer() {queue.async {
+        if let peripheral=self.peripheral,self.links[peripheral.identifier] != nil {self.verifiedPeripheral=peripheral}
+    }}
+    func reconnectKnownPeer() {queue.async {
+        self.tryVerifiedPeer=true;self.startOnQueue()
+    }}
     func centralManager(_ central:CBCentralManager,didDiscover peripheral:CBPeripheral,advertisementData:[String:Any],rssi RSSI:NSNumber) {
-        guard self.peripheral==nil else {return};report("discovered");self.peripheral=peripheral;peripheral.delegate=self;central.stopScan();central.connect(peripheral)
-        queue.asyncAfter(deadline:.now()+12) { [weak self,weak peripheral] in
+        guard self.peripheral==nil else {return};report("discovered");connect(peripheral,timeout:12)
+    }
+    private func connect(_ peripheral:CBPeripheral,timeout:TimeInterval) {
+        self.peripheral=peripheral;peripheral.delegate=self;central?.stopScan();central?.connect(peripheral)
+        queue.asyncAfter(deadline:.now()+timeout) { [weak self,weak peripheral] in
             guard let self,let peripheral,self.peripheral === peripheral,self.links[peripheral.identifier]==nil else {return};self.central?.cancelPeripheralConnection(peripheral)
         }
     }
@@ -241,7 +256,7 @@ final class BluetoothRelay:NSObject,CBCentralManagerDelegate,CBPeripheralDelegat
     private func drop(_ peer:UUID) {links.removeValue(forKey:peer);for (id,channel) in channels where channel.peer==peer {close(id,notify:false)}}
     private func clearLinks() {for peer in Array(links.keys) {drop(peer)}}
     func stop() {queue.async {
-        self.stopped=true;self.central?.stopScan();if let peripheral=self.peripheral {self.central?.cancelPeripheralConnection(peripheral)}
+        self.stopped=true;self.verifiedPeripheral=nil;self.central?.stopScan();if let peripheral=self.peripheral {self.central?.cancelPeripheralConnection(peripheral)}
         self.peripheralManager?.stopAdvertising();self.peripheralManager?.removeAllServices();self.listener?.cancel();self.clearLinks()
         for value in self.waiters.values {value.resume(throwing:CancellationError())};self.waiters.removeAll()
     }}

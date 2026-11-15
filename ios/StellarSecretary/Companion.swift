@@ -83,6 +83,7 @@ enum CredentialStore {
     private var flushing = false
     private var discovering = false
     private var connecting = false
+    private var mayRetryConnection = false
     private var discoveredURLs: [String] = []
     private var sessionEndpoint = ""
     private var wifiRelay: WiFiRelay?
@@ -157,10 +158,11 @@ enum CredentialStore {
         } + discoveredURLs).prefix(16))
         Task { await connect() }
     }
-    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil) async throws -> [String:Any] {
+    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil) async throws -> [String:Any] {
         guard let pair = pair ?? paired, let url = URL(string:sessionEndpoint + path), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
         var request = URLRequest(url:url);if path == "/status" { request.timeoutInterval = 12 };if path == "/pair" { request.timeoutInterval = 15 };request.setValue("Bearer " + pair.credential,forHTTPHeaderField:"Authorization")
         if let body { request.httpMethod = "POST";request.httpBody = try JSONSerialization.data(withJSONObject:body);request.setValue("application/json",forHTTPHeaderField:"Content-Type");if path == "/ask" { request.timeoutInterval = 300 } }
+        if let timeout { request.timeoutInterval = timeout }
         let (data,response) = try await session.data(for:request)
         let result = try JSONSerialization.jsonObject(with:data) as? [String:Any] ?? [:]
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
@@ -205,17 +207,32 @@ enum CredentialStore {
             throw NSError(domain:"Pairing",code:2,userInfo:[NSLocalizedDescriptionKey:"配对已超时，请刷新二维码后重新扫码"])
         } catch { pairingDiagnostic("failed",error:error);waiting = false;code = "";candidate = nil;self.error = PairingConnectionFailure.message(error);if let paired { configure(paired) } else { session?.invalidateAndCancel();session = nil };status = "配对未完成" }
     }
+    private func canRefreshSession(after error:Error) -> Bool {
+        let value=error as NSError
+        return value.domain==NSURLErrorDomain && [-1001,-1004,-1005,-1009,-1200].contains(value.code)
+    }
     func resumeConnection() async {
-        guard let pair=paired,!waiting,!pairingInFlight,!busy,!flushing else {return}
-        // Foreground requests get a fresh HTTP pool. Background suspension may
-        // have outlived the gateway's idle timeout while BLE itself stayed up.
+        guard let pair=paired,!waiting,!pairingInFlight,!connecting,!busy,!flushing else {return}
+        let start=Date()
+        bluetoothRelay?.reconnectKnownPeer()
+        // A short app switch must not tear down a working pinned TLS session.
+        if online,session != nil {
+            await connect(quickResume:true)
+            if online {
+                pairingDiagnostic("resume-reused-ms-\(Int(Date().timeIntervalSince(start)*1000))")
+                return
+            }
+            guard mayRetryConnection else {return}
+        }
+        guard !Task.isCancelled else {return}
         session?.invalidateAndCancel();session=nil;online=false
         status="正在连接 \(pair.info.name)…"
         await connect()
+        pairingDiagnostic("resume-\(online ? "connected":"pending")-ms-\(Int(Date().timeIntervalSince(start)*1000))")
     }
-    func connect() async {
+    func connect(quickResume:Bool=false) async {
         guard !waiting, !pairingInFlight, !connecting, var pair = paired else { return }
-        connecting = true;defer { connecting = false }
+        connecting = true;mayRetryConnection=false;defer { connecting = false }
         do {
             let urls = Array(NSOrderedSet(array: [pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? [pair.info.url]
             let endpoint = online && session != nil ? sessionEndpoint : try await transport(pair.info,urls:Array(urls.prefix(9)),preferred:pair.transport)
@@ -223,7 +240,15 @@ enum CredentialStore {
             let nearby = endpoint.hasPrefix("https://127.0.0.1:")
             if !nearby { pair.info.url = endpoint }
             if session == nil || sessionEndpoint != endpoint { configure(pair,endpoint:endpoint) }
-            let value = try await request("/status",using:pair)
+            let value:[String:Any]
+            do {value = try await request("/status",using:pair,timeout:quickResume ? 3:nil)}
+            catch {
+                guard quickResume,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
+                // A genuinely stale socket gets one fresh, still-pinned TLS
+                // session on the same carrier before rediscovering the Mac.
+                configure(pair,endpoint:endpoint)
+                value = try await request("/status",using:pair,timeout:6)
+            }
             guard !Task.isCancelled, !pairingInFlight, paired?.info.server_id == pair.info.server_id else { return }
             guard value["server_id"] as? String == pair.info.server_id else { throw URLError(.serverCertificateUntrusted) }
             if let urls = value["urls"] as? [String], urls.count <= 8 {
@@ -236,11 +261,13 @@ enum CredentialStore {
             let wireless = await wifiRelay?.ownsEndpoint(endpoint) ?? false
             let bluetooth = await bluetoothRelay?.ownsEndpoint(endpoint) ?? false
             pair.transport = bluetooth ? "bluetooth" : wireless ? "wifi" : "direct"
-            if bluetooth {wifiRelay?.suspendDiscovery()}
+            if bluetooth {bluetoothRelay?.rememberVerifiedPeer();wifiRelay?.suspendDiscovery()}
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             paired = pair;try CredentialStore.save(pair)
             online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush()
         } catch {
+            if Task.isCancelled {return}
+            mayRetryConnection=canRefreshSession(after:error)
             pairingDiagnostic("connect-failed",error:error)
             wifiRelay?.rediscover()
             online = false;status = "Mac 离线 · 正在自动重连，内容将保留在手机"

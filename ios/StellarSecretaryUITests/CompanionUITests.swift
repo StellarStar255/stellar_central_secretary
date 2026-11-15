@@ -40,6 +40,13 @@ final class CompanionUITests: XCTestCase {
         app.terminate();app.launch()
         XCTAssertTrue(app.navigationBars["随手归档"].waitForExistence(timeout:20))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20),app.debugDescription)
+        // A short app switch must validate the existing connection rather
+        // than paying for another TLS handshake and device discovery.
+        let before=try fixture("/connections")
+        XCUIDevice.shared.press(.home);app.activate()
+        let after=try fixture("/wait-status?after=\(before["status"] as! Int)")
+        XCTAssertGreaterThan(after["status"] as! Int,before["status"] as! Int)
+        XCTAssertEqual(after["tls"] as? Int,before["tls"] as? Int,"Short foreground resume must reuse the pinned TLS connection")
         let editor = app.textViews["归档内容"];editor.tap();editor.typeText("Mobile fixture unique note")
         app.buttons["保存到知识库"].tap()
         let empty = NSPredicate(format:"value == ''");expectation(for:empty,evaluatedWith:editor);waitForExpectations(timeout:20)
