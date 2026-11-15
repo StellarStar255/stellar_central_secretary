@@ -142,6 +142,23 @@ class MobileTest(unittest.TestCase):
   with socket.socket() as occupied:
    occupied.setsockopt(socket.SOL_SOCKET,getattr(socket,"SO_EXCLUSIVEADDRUSE",socket.SO_REUSEADDR),1);occupied.bind(('127.0.0.1',port));occupied.listen()
    self.m.enable(advertise=False,bind='127.0.0.1');self.assertNotEqual(self.m.server.server_port,port)
+ def test_saved_port_falls_back_on_windows_exclusive_bind_error(self):
+  import errno
+  from http.server import ThreadingHTTPServer
+  port=self.m.server.server_port;self.m.stop()
+  original=ThreadingHTTPServer.server_bind;attempts=[]
+  failure=PermissionError(errno.EACCES,'Exclusive port');failure.winerror=10013
+  def bind(server):
+   attempts.append(server.server_address[1])
+   if len(attempts)==1:raise failure
+   return original(server)
+  with patch.object(ThreadingHTTPServer,'server_bind',bind):self.m.enable(advertise=False,bind='127.0.0.1')
+  self.assertEqual(attempts,[port,0]);self.assertIsNotNone(self.m.server)
+  self.m.stop()
+  with patch.object(ThreadingHTTPServer,'server_bind',side_effect=failure):
+   with self.assertRaises(PermissionError):self.m.enable(port=port,advertise=False,bind='127.0.0.1')
+  with patch.object(ThreadingHTTPServer,'server_bind',side_effect=PermissionError(errno.EACCES,'Other permission error')):
+   with self.assertRaises(PermissionError):self.m.enable(advertise=False,bind='127.0.0.1')
  def test_nearby_bridge_starts_only_with_discovery_and_stops_with_gateway(self):
   self.m.stop()
   with patch('secretary.mobile.addresses',return_value=[]),patch('secretary.peer_bridge.start') as start,patch('secretary.peer_bridge.stop') as stop:

@@ -83,7 +83,9 @@ class Mobile:
             requested=port or self.state.get('port',0)
             try:server=Gateway(('::' if dual else bind,requested),self.handler())
             except OSError as exc:
-                if port or not requested or exc.errno!=errno.EADDRINUSE:raise
+                # Winsock reports an exclusively occupied port as WSAEACCES.
+                occupied=exc.errno==errno.EADDRINUSE or getattr(exc,'winerror',None)==10013
+                if port or not requested or not occupied:raise
                 server=Gateway(('::' if dual else bind,0),self.handler())
             self.server=server;self.state['port']=server.server_port
             threading.Thread(target=server.serve_forever,daemon=True,name='mobile-https').start()
