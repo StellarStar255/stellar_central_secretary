@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory() as root:
    # stale-QR invalidation rather than relying on random ephemeral port changes.
    manager.stop()
    with socket.socket() as occupied:
-    occupied.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);occupied.bind(('127.0.0.1',old_port));occupied.listen()
+    occupied.setsockopt(socket.SOL_SOCKET,getattr(socket,"SO_EXCLUSIVEADDRUSE",socket.SO_REUSEADDR),1);occupied.bind(('127.0.0.1',old_port));occupied.listen()
     enable(bind='127.0.0.1',advertise=False);assert manager.server.server_port!=old_port
    expect(page.locator('#mobile-qr')).not_to_be_visible(timeout=10000);expect(page.locator('#mobile-qr-expiry')).to_have_text('二维码已失效，请刷新')
    page.locator('#mobile-invite').click();expect(page.locator('#mobile-qr')).to_be_visible()

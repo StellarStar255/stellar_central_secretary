@@ -140,7 +140,7 @@ class MobileTest(unittest.TestCase):
   import socket
   port=self.m.server.server_port;self.m.stop()
   with socket.socket() as occupied:
-   occupied.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);occupied.bind(('127.0.0.1',port));occupied.listen()
+   occupied.setsockopt(socket.SOL_SOCKET,getattr(socket,"SO_EXCLUSIVEADDRUSE",socket.SO_REUSEADDR),1);occupied.bind(('127.0.0.1',port));occupied.listen()
    self.m.enable(advertise=False,bind='127.0.0.1');self.assertNotEqual(self.m.server.server_port,port)
  def test_nearby_bridge_starts_only_with_discovery_and_stops_with_gateway(self):
   self.m.stop()
