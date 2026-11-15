@@ -75,3 +75,133 @@ final class PairingNetworkTests: XCTestCase {
         } catch { XCTAssertTrue(error is PairingTransportFailure) }
     }
 }
+
+final class WiFiRelayTests: XCTestCase {
+    func testLargeTransferAndHalfClosePreserveEveryByte() async throws {
+        let queue=DispatchQueue(label:"fixture.wifi.echo")
+        let echo=try NWListener(using:.tcp)
+        var sockets:[NWConnection]=[]
+        let ready=expectation(description:"Echo ready")
+        echo.stateUpdateHandler={ state in if case .ready=state {ready.fulfill()} }
+        echo.newConnectionHandler={ socket in
+            sockets.append(socket)
+            socket.start(queue:queue)
+            func read() {
+                socket.receive(minimumIncompleteLength:1,maximumLength:16384) {data,_,done,error in
+                    if error != nil {socket.cancel();return}
+                    socket.send(content:data,contentContext:done ? .finalMessage:.defaultMessage,isComplete:true,completion:.contentProcessed {error in
+                        if error != nil {socket.cancel()} else if !done {read()}
+                    })
+                }
+            };read()
+        }
+        echo.start(queue:queue);defer {echo.cancel();for socket in sockets {socket.cancel()}}
+        await fulfillment(of:[ready],timeout:3)
+        // Only the synthetic test binds to loopback. Production uses Wi-Fi-only parameters.
+        let parameters=NWParameters.tcp;parameters.requiredLocalEndpoint = .hostPort(host:"127.0.0.1",port:.any)
+        let relay=try WiFiRelay(serverID:UUID().uuidString.replacingOccurrences(of:"-",with:""),upstreamPort:echo.port!.rawValue,serverParameters:parameters)
+        let bound=expectation(description:"Relay ready")
+        relay.listener.stateUpdateHandler={state in if case .ready=state {bound.fulfill()} }
+        relay.start();defer {relay.stop()}
+        await fulfillment(of:[bound],timeout:3)
+        let payload=Data((0..<1_048_576).map {UInt8($0 % 251)})
+        let received=expectation(description:"All opaque bytes returned")
+        let client=NWConnection(host:"127.0.0.1",port:relay.listener.port!,using:.tcp)
+        var output=Data()
+        client.stateUpdateHandler={state in
+            if case .ready=state {
+                client.send(content:payload,contentContext:.finalMessage,isComplete:true,completion:.contentProcessed {_ in})
+            }
+        }
+        func read() {
+            client.receive(minimumIncompleteLength:1,maximumLength:32768) {data,_,done,error in
+                if let data {output.append(data)}
+                if done || error != nil {received.fulfill()} else {read()}
+            }
+        }
+        client.start(queue:queue);read();defer {client.cancel()}
+        await fulfillment(of:[received],timeout:15)
+        XCTAssertEqual(output,payload)
+    }
+}
+
+import Foundation
+import Security
+import CryptoKit
+private final class FixtureTrust: NSObject,URLSessionDelegate {
+    let expected:String
+    private let lock=NSLock()
+    private var count=0
+    var challenges:Int {lock.lock();defer {lock.unlock()};return count}
+    init(_ expected:String) {self.expected=expected}
+    func urlSession(_ session:URLSession,didReceive challenge:URLAuthenticationChallenge,completionHandler:@escaping(URLSession.AuthChallengeDisposition,URLCredential?)->Void) {
+        lock.lock();count += 1;lock.unlock()
+        guard let trust=challenge.protectionSpace.serverTrust,let certificate=(SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else {completionHandler(.cancelAuthenticationChallenge,nil);return}
+        let actual=SHA256.hash(data:SecCertificateCopyData(certificate) as Data).map{String(format:"%02x",$0)}.joined()
+        completionHandler(actual==expected ? .useCredential:.cancelAuthenticationChallenge,actual==expected ? URLCredential(trust:trust):nil)
+    }
+}
+extension WiFiRelayTests {
+    func testRealGatewayTLSAndAuthenticatedStatusThroughRelay() async throws {
+        let env=ProcessInfo.processInfo.environment
+        guard let value=env["STELLAR_TLS_FIXTURE_PORT"],let port=UInt16(value),let pin=env["STELLAR_TLS_FIXTURE_PIN"],let credential=env["STELLAR_TLS_FIXTURE_CREDENTIAL"] else {throw XCTSkip("Run scripts/check_wifi_tls.py for the isolated TLS fixture")}
+        let parameters=NWParameters.tcp;parameters.requiredLocalEndpoint = .hostPort(host:"127.0.0.1",port:.any)
+        let relay=try WiFiRelay(serverID:String(repeating:"e",count:32),upstreamPort:port,serverParameters:parameters)
+        let ready=expectation(description:"TLS relay ready")
+        relay.listener.stateUpdateHandler={state in if case .ready=state {ready.fulfill()}}
+        relay.start();defer {relay.stop()};await fulfillment(of:[ready],timeout:3)
+        let configuration=URLSessionConfiguration.ephemeral;configuration.connectionProxyDictionary=[:]
+        let trust=FixtureTrust(pin)
+        let session=URLSession(configuration:configuration,delegate:trust,delegateQueue:nil);defer {session.invalidateAndCancel()}
+        for _ in 0..<3 {
+            var request=URLRequest(url:URL(string:"https://127.0.0.1:\(relay.listener.port!.rawValue)/status")!);request.timeoutInterval=5
+            request.setValue("Bearer "+credential,forHTTPHeaderField:"Authorization")
+            let (data,response)=try await session.data(for:request)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode,200)
+            let object=try JSONSerialization.jsonObject(with:data) as? [String:Any]
+            XCTAssertEqual(object?["connected"] as? Bool,true)
+        }
+        XCTAssertEqual(trust.challenges,1,"Foreground requests must reuse one pinned TLS connection")
+    }
+}
+
+final class BluetoothFramingTests:XCTestCase {
+    func testFramesSurviveEveryNegotiatedChunkBoundary() throws {
+        let id=UUID().uuidString,payload=Data((0..<32768).map {UInt8($0 % 251)})
+        let frame=try XCTUnwrap(BluetoothRelay.frame(2,id:id,payload:payload))
+        let size=UInt32(frame.count)
+        var packet=Data([UInt8((size>>24)&255),UInt8((size>>16)&255),UInt8((size>>8)&255),UInt8(size&255)]);packet.append(frame)
+        for mtu in [1,20,182,512] {
+            var decoder=BluetoothFrameBuffer(),result:[Data]=[]
+            for offset in stride(from:0,to:packet.count,by:mtu) {result += try decoder.append(packet.subdata(in:offset..<min(offset+mtu,packet.count)))}
+            XCTAssertEqual(result,[frame])
+        }
+    }
+    func testMalformedRadioLengthsCannotAllocateUnboundedData() {
+        for invalid in [Data([255,255,255,255]),Data([0,0,0,1]),Data(count:65619)] {
+            var decoder=BluetoothFrameBuffer();XCTAssertThrowsError(try decoder.append(invalid))
+        }
+        XCTAssertNil(BluetoothRelay.frame(2,id:UUID().uuidString,payload:Data(count:32769)))
+    }
+}
+
+extension PairingNetworkTests {
+    func testRestoredGatewayIsFoundWhileOtherDiscoveryContinues() async throws {
+        let queue=DispatchQueue(label:"fixture.restored")
+        let reservation=try NWListener(using:.tcp)
+        let ready=expectation(description:"Reserved port")
+        reservation.stateUpdateHandler={state in if case .ready=state {ready.fulfill()}}
+        reservation.newConnectionHandler={$0.cancel()};reservation.start(queue:queue)
+        await fulfillment(of:[ready],timeout:3)
+        let port=reservation.port!
+        let cancelled=expectation(description:"Reservation closed")
+        reservation.stateUpdateHandler={state in if case .cancelled=state {cancelled.fulfill()}}
+        reservation.cancel();await fulfillment(of:[cancelled],timeout:3)
+        let listener=try NWListener(using:.tcp,on:port);listener.newConnectionHandler={$0.cancel()}
+        queue.asyncAfter(deadline:.now()+0.2) {listener.start(queue:queue)}
+        defer {listener.cancel()}
+        let url="https://127.0.0.1:\(port.rawValue)"
+        let result=try await PairingNetworkProbe.reachableWhileDiscovering([url],timeout:5)
+        XCTAssertEqual(result,url)
+    }
+}

@@ -37,6 +37,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_stellar-sec._tcp</string>
+		<string>_stellar-wifi._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>扫描 Mac 显示的配对二维码。</string>
@@ -51,5 +52,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>发现附近的 Mac，与 Wi-Fi 配合连接已配对知识库。</string>
 </dict>
 </plist>

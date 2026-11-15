@@ -32,6 +32,12 @@ if __name__=='__main__':
    with patch.object(service,'ask_library',return_value={'answer':'Synthetic fixture answer [1]','sources':[{'number':1,'item_id':item,'title':'Reference fixture'}]}):
     env={**os.environ,'DEVELOPER_DIR':'/Applications/Xcode.app/Contents/Developer'}
     command=['xcodebuild','-project','ios/StellarSecretary.xcodeproj','-scheme','StellarSecretary','-configuration','Debug','-destination','platform=iOS Simulator,id='+sys.argv[1],'-derivedDataPath','build/ios','-resultBundlePath',str(Path('/tmp')/('stellar-ios-results-'+os.urandom(4).hex())),'CODE_SIGN_IDENTITY=-','CODE_SIGNING_ALLOWED=YES','test']
+    # Each run owns a synthetic simulator library and outbox. A previous failed
+    # run must not leave drafts scoped to an unrelated fixture server ID.
+    inventory=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','--json'],env=env))
+    device=next(d for values in inventory['devices'].values() for d in values if d['udid']==sys.argv[1])
+    assert device['name']=='Stellar Secretary Trial','Use the dedicated trial simulator only'
+    subprocess.run(['xcrun','simctl','uninstall',sys.argv[1],'io.github.stellarstar255.secretary.companion'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     result=subprocess.run(command,cwd=ROOT,env=env)
     if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
     result.check_returncode()

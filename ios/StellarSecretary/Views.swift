@@ -14,7 +14,17 @@ import AVFoundation
                           let data = Data(base64Encoded:value), let raw = String(data:data,encoding:.utf8) else { return }
                     Task { await model.pair(raw) }
                 }
-                .task(id:scene) { while scene == .active && !Task.isCancelled { await model.connect();try? await Task.sleep(for:.seconds(10)) } }
+                .onChange(of:scene) { _,phase in
+                    pairingDiagnostic("scene-"+String(describing:phase))
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--wifi-only") || ProcessInfo.processInfo.arguments.contains("--bluetooth-only") { UIApplication.shared.isIdleTimerDisabled = phase == .active }
+                    #endif
+                }
+                 .task(id:scene) {
+                    guard scene == .active else {return}
+                    await model.resumeConnection()
+                    while scene == .active && !Task.isCancelled {try? await Task.sleep(for:.seconds(10));guard !Task.isCancelled else {return};await model.connect()}
+                }
         }
     }
 }

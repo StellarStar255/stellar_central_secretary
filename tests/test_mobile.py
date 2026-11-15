@@ -133,3 +133,30 @@ class MobileTest(unittest.TestCase):
     with context.wrap_socket(raw,server_hostname=host) as tls:
      tls.sendall(b'GET /status HTTP/1.0\r\nHost: fixture\r\n\r\n')
      self.assertIn(b'401',tls.recv(2048))
+ def test_gateway_reuses_port_after_restart(self):
+  port=self.m.server.server_port;self.m.stop();self.m.enable(advertise=False,bind='127.0.0.1')
+  self.assertEqual(self.m.server.server_port,port)
+ def test_gateway_chooses_new_port_if_saved_port_in_use(self):
+  import socket
+  port=self.m.server.server_port;self.m.stop()
+  with socket.socket() as occupied:
+   occupied.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);occupied.bind(('127.0.0.1',port));occupied.listen()
+   self.m.enable(advertise=False,bind='127.0.0.1');self.assertNotEqual(self.m.server.server_port,port)
+ def test_nearby_bridge_starts_only_with_discovery_and_stops_with_gateway(self):
+  self.m.stop()
+  with patch('secretary.mobile.addresses',return_value=[]),patch('secretary.peer_bridge.start') as start,patch('secretary.peer_bridge.stop') as stop:
+   self.m.enable(advertise=False,bind='127.0.0.1');start.assert_not_called();self.m.stop()
+   self.m.enable(advertise=True,bind='127.0.0.1');start.assert_called_once_with(self.m.state['server_id'],self.m.server.server_port)
+   bridge=start.return_value;self.m.stop();stop.assert_called_with(bridge)
+ def test_persistent_tls_requests_recheck_revocation(self):
+  import http.client
+  self.approve();context=ssl.create_default_context(cafile=str(self.m.root/'certificate.pem'));context.check_hostname=False
+  connection=http.client.HTTPSConnection('127.0.0.1',self.m.server.server_port,context=context,timeout=3)
+  try:
+   for _ in range(3):
+    connection.request('GET','/status',headers={'Authorization':'Bearer '+self.credential});response=connection.getresponse();self.assertEqual(response.status,200);response.read()
+   original=connection.sock
+   self.m.state['devices'].clear()
+   connection.request('GET','/status',headers={'Authorization':'Bearer '+self.credential});response=connection.getresponse();self.assertEqual(response.status,401);self.assertEqual(response.getheader('Connection'),'close');response.read()
+   self.assertIsNotNone(original)
+  finally:connection.close()

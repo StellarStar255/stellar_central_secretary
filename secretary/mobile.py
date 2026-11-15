@@ -1,5 +1,5 @@
 """Opt-in, paired LAN companion. Never exposes desktop routes or settings."""
-import base64,hashlib,io,ipaddress,json,os,secrets,socket,ssl,subprocess,sys,threading,time,uuid
+import errno,base64,hashlib,io,ipaddress,json,os,secrets,socket,ssl,subprocess,sys,threading,time,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -34,6 +34,7 @@ def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 class Mobile:
     def __init__(self,service):
         self.service=service;self.root=service.archive.root/'mobile';self.path=self.root/'state.json'
+        self.peer_bridge=None
         self.lock=threading.RLock();self.server=None;self.discovery=None;self.info=None;self.pending={};self.invite=None;self.error='';self.operations=threading.BoundedSemaphore(2);self.monitor_stop=threading.Event();self.published_ips=[]
         self.state=json.loads(self.path.read_text()) if self.path.exists() else {'server_id':uuid.uuid4().hex,'devices':{},'receipts':{},'enabled':False}
         if self.state.get('enabled'):
@@ -79,11 +80,18 @@ class Mobile:
                     try:super().process_request_thread(request,address)
                     finally:server.slots.release()
                 def handle_error(server,request,address):pass
-            server=Gateway(('::' if dual else bind,port),self.handler());self.server=server
+            requested=port or self.state.get('port',0)
+            try:server=Gateway(('::' if dual else bind,requested),self.handler())
+            except OSError as exc:
+                if port or not requested or exc.errno!=errno.EADDRINUSE:raise
+                server=Gateway(('::' if dual else bind,0),self.handler())
+            self.server=server;self.state['port']=server.server_port
             threading.Thread(target=server.serve_forever,daemon=True,name='mobile-https').start()
             try:
                 if advertise:
                     self.publish(addresses());self.monitor_stop=threading.Event()
+                    from . import peer_bridge
+                    self.peer_bridge=peer_bridge.start(self.state['server_id'],server.server_port)
                     threading.Thread(target=self.watch_network,args=(self.monitor_stop,),daemon=True,name='mobile-discovery').start()
                 self.state['enabled']=True;self.error='';self.save()
             except Exception:
@@ -115,13 +123,18 @@ class Mobile:
             with self.lock:
                 if stop.is_set() or not self.server:return
                 try:
-                    ips=addresses(include_alternates=True)
+                    from . import peer_bridge
+                    if sys.platform=='darwin' and (self.peer_bridge is None or self.peer_bridge.poll() is not None):
+                        self.peer_bridge=peer_bridge.start(self.state['server_id'],self.server.server_port)
+                    ips=addresses()
                     if ips!=self.published_ips or (self.discovery and hasattr(self.discovery,'poll') and self.discovery.poll() is not None):self.publish(ips)
                     self.error=''
                 except Exception:self.error='局域网发现暂不可用，请检查 Wi-Fi 与系统的本地网络权限'
     def stop(self,disable=False):
         with self.lock:
             self.monitor_stop.set()
+            from . import peer_bridge
+            peer_bridge.stop(self.peer_bridge);self.peer_bridge=None
             server,self.server=self.server,None
             self.clear_discovery()
             if self.discovery:
@@ -134,7 +147,7 @@ class Mobile:
     def status(self):
         with self.lock:
             now=time.time();self.pending={key:value for key,value in self.pending.items() if value['expires']>now}
-            return {'enabled':self.server is not None,'server_id':self.state['server_id'],'name':socket.gethostname(),'port':self.server.server_port if self.server else None,'addresses':addresses(include_alternates=True) if self.server else [],'error':self.error,
+            return {'nearby_active':self.peer_bridge is not None and self.peer_bridge.poll() is None,'enabled':self.server is not None,'server_id':self.state['server_id'],'name':socket.gethostname(),'port':self.server.server_port if self.server else None,'addresses':addresses(include_alternates=True) if self.server else [],'error':self.error,
                 'pending':[{'id':key,'name':value['name'],'code':value['code']} for key,value in self.pending.items()],
                 'devices':[{'id':key,'name':value['name'],'created':value['created']} for key,value in self.state['devices'].items()]}
     def invitation(self):
@@ -211,6 +224,7 @@ class Mobile:
     def handler(self):
         manager=self
         class Handler(BaseHTTPRequestHandler):
+            protocol_version="HTTP/1.1"
             def log_message(self,*args):pass
             def setup(self):
                 self.request.settimeout(10)
@@ -220,13 +234,17 @@ class Mobile:
                 try:super().finish()
                 finally:self.connection.close()
             def send(self,status,value):
-                data=json.dumps(value,ensure_ascii=False).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(data)));self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+                if status>=400:self.close_connection=True
+                data=json.dumps(value,ensure_ascii=False).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(data)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('Connection','close' if self.close_connection else 'keep-alive');self.end_headers()
                 try:self.wfile.write(data)
                 except OSError:pass
             def do_GET(self):self.route(False)
             def do_POST(self):self.route(True)
             def route(self,post):
                 try:
+                    if manager.server is None:
+                        self.close_connection=True
+                        return self.send(503,{'error':'手机连接已关闭'})
                     # Native clients only. Browser origins (including null) have no LAN API access.
                     if self.headers.get('Origin') is not None:return self.send(403,{'error':'请使用已配对的手机 App'})
                     parsed=urlsplit(self.path);body={}

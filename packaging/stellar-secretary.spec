@@ -20,8 +20,13 @@ datas += copy_metadata('pillow-heif')
 datas += [item for item in collect_data_files('playwright') if Path(item[0]) != node]
 if QT_DESKTOP:
     for package in ('PySide6','PySide6_Essentials','PySide6_Addons','shiboken6'):datas+=copy_metadata(package)
+extra_binaries = []
+if MAC:
+    import runpy
+    build = runpy.run_path(str(ROOT/'packaging/build_peer_bridge.py'))['build']
+    extra_binaries.append((str(build(ROOT)), 'native'))
 a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
-             binaries=[(str(node), 'playwright/driver')]+collect_dynamic_libs('pillow_heif'), datas=datas,
+             binaries=extra_binaries+[(str(node), 'playwright/driver')]+collect_dynamic_libs('pillow_heif'), datas=datas,
              hiddenimports=collect_submodules('qrcode') + collect_submodules('zeroconf') + collect_submodules('ifaddr') + collect_submodules('secretary') + collect_submodules('pypdf')
                            + collect_submodules('pillow_heif') + ['_pillow_heif','cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython']+(['PySide6'] if not QT_DESKTOP else []))
@@ -40,4 +45,4 @@ if MAC:
                  icon=str(ROOT/'secretary/static/icons/app.icns'),
                  bundle_identifier='io.github.stellarstar255.stellar-secretary',
                  info_plist={'CFBundleDisplayName': '知识秘书', 'NSHighResolutionCapable': True,
-                             'CFBundleShortVersionString': __version__, 'NSLocalNetworkUsageDescription':'连接已配对的手机，共用本机知识库。', 'NSBonjourServices':['_stellar-sec._tcp']})
+                             'CFBundleShortVersionString': __version__, 'NSLocalNetworkUsageDescription':'连接已配对的手机，共用本机知识库。', 'NSBluetoothAlwaysUsageDescription':'发现并连接附近已配对的手机。', 'NSBonjourServices':['_stellar-sec._tcp','_stellar-wifi._tcp']})

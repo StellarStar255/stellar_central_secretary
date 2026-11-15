@@ -10,7 +10,8 @@ final class PairingNetworkProbe: @unchecked Sendable {
     private var finished = false
     init(url: URL, timeout: TimeInterval = 5) throws {
         guard let host = url.host, let number = UInt16(exactly: url.port ?? 443), let port = NWEndpoint.Port(rawValue: number) else { throw PairingCodeError.invalid }
-        connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
+        let parameters=NWParameters.tcp;parameters.preferNoProxies=true
+        connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: parameters)
         self.timeout = timeout
     }
     func check() async throws {
@@ -58,6 +59,21 @@ final class PairingNetworkProbe: @unchecked Sendable {
             try Task.checkCancellation()
             throw failure
         }
+    }
+    static func reachableWhileDiscovering(_ urls:[String],timeout:TimeInterval=12) async throws -> String {
+        let deadline=Date().addingTimeInterval(timeout)
+        var last:Error=PairingTransportFailure.timedOut
+        repeat {
+            try Task.checkCancellation()
+            do {return try await firstReachable(urls,timeout:min(2,max(0.1,deadline.timeIntervalSinceNow)))}
+            catch {
+                try Task.checkCancellation();last=error
+                if let failure=error as? PairingTransportFailure,case .denied=failure {throw error}
+            }
+            if deadline.timeIntervalSinceNow<=0 {break}
+            try await Task.sleep(nanoseconds:500_000_000)
+        } while Date()<deadline
+        throw last
     }
     private func finish(_ result: Result<Void, Error>) {
         guard !finished else { return };finished = true

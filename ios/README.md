@@ -7,14 +7,17 @@ Native SwiftUI companion for iOS 17 or later. The Mac keeps the library and perf
 1. Start the updated desktop source with your existing library. In **Models & settings → Phone connection**, enable the connection. Keep the Mac awake on the same LAN as the phone.
 2. Open `StellarSecretary.xcodeproj` in Xcode. Select your own development team in the **StellarSecretary → Signing & Capabilities** settings. Connect the iPhone to the Mac, trust the computer, and enable Developer Mode when requested by iOS.
 3. Select the phone as the run destination and run **StellarSecretary**. This is a development installation, not an App Store or TestFlight release.
-4. Allow local network and camera access. Scan the Mac QR using the app, compare the six digits, and approve the request on the Mac.
+4. Allow local network, Bluetooth (if requested) and camera access. Scan the Mac QR using the app, compare the six digits, and approve the request on the Mac.
 5. Capture notes, links, screenshots or files (10 MB maximum), search the library, ask questions and open cited text. URL captures initially save the link; complete webpage reading on the desktop.
 
 Credentials are saved in the phone Keychain; the QR contains a short-lived invitation and the server certificate fingerprint. Only the fingerprint-matching TLS server is trusted. Desktop APIs, settings, model credentials and arbitrary file downloads are not exposed by the companion listener. Pairing and revocation are available only through the desktop UI. The listener is off by default.
 
 ## Reconnection and offline behavior
 
-- Bonjour discovers the paired server while the app is open. The server refreshes advertised addresses when network interfaces change. Networks that isolate clients may prevent connection.
+- The Mac source needs its nearby carrier built once: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer .venv/bin/python packaging/build_peer_bridge.py`. Packaged Mac builds include this component automatically.
+- Ordinary LAN access races a Network-framework TCP carrier with Apple peer-to-peer Wi-Fi enabled. The client scopes connections to discovered Wi-Fi/AWDL interfaces, excluding USB Ethernet as a substitute. It stops browsing before connecting to avoid disrupting AWDL traffic. A CoreBluetooth GATT carrier provides an independent fallback without IP routing. The phone remembers the last verified carrier and prioritizes it on reopening; USB link-local addresses do not take priority. Bluetooth transfers are slower than Wi-Fi, so Wi-Fi remains useful for larger attachments. Keep Wi-Fi enabled on both devices; availability still depends on permissions and radio/network conditions. These paths do not require changing global VPN or proxy settings.
+- Both carriers preserve end-to-end TLS certificate pinning and the same Mac-approved device credentials. Nearby peers do not gain access merely by being discovered. The relay only forwards to the mobile gateway, never desktop APIs.
+- Reopening the app starts discovery and reconnects with the saved credentials. A working transport remains selected during uploads and questions. The mobile gateway reuses its port on restart when available, and refreshes discovery when interfaces change.
 - Pending captures are stored on the phone with data protection, excluded from backup, scoped to the paired server ID and retried on connection. Stable request IDs prevent replayed requests from creating duplicates.
 - Keep the Mac awake and the desktop service running. The first trial does not provide cloud sync, remote access, full offline search, background delivery while the app is closed, system share-sheet extensions, or reminder notifications.
 - A locally saved file is not guaranteed to survive deleting the app. Do not uninstall with unsent captures.
@@ -25,10 +28,12 @@ Credentials are saved in the phone Keychain; the QR contains a short-lived invit
 ```sh
 .venv/bin/python -m unittest tests.test_mobile -v
 .venv/bin/python scripts/check_mobile_ui.py
-# Create/boot a dedicated iPhone simulator first; this test uses synthetic data only.
+# Create/boot a dedicated simulator named "Stellar Secretary Trial"; synthetic data only.
 .venv/bin/python scripts/check_mobile_ios.py SIMULATOR_UDID
 ```
 
 The simulator test runs a loopback control fixture on port 18769 and an authenticated TLS listener with a temporary synthetic knowledge base. It never opens the user's library. Keep screenshots, pairing payloads and generated result bundles outside Git.
+
+The native transport fixture additionally checks BLE framing across GATT MTUs and repeated authenticated requests over one pinned TLS connection: `.venv/bin/python scripts/check_wifi_tls.py`.
 
 Apple references: [Local-network privacy](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy), [Server trust authentication](https://developer.apple.com/documentation/foundation/performing-manual-server-trust-authentication).
