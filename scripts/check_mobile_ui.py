@@ -1,5 +1,5 @@
 """Validate desktop pairing controls against an isolated HTTPS companion."""
-import json,os,secrets,ssl,sys,tempfile,threading,urllib.request
+import json,os,secrets,socket,ssl,sys,tempfile,threading,urllib.request
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 from unittest.mock import patch
@@ -26,7 +26,13 @@ with tempfile.TemporaryDirectory() as root:
    page.screenshot(path='/tmp/stellar-mobile-desktop.png')
    page.locator('[data-revoke]').click();expect(page.locator('#mobile-devices')).to_contain_text('尚未配对手机');assert manager.device(credential) is None
    page.locator('#mobile-invite').click();expect(page.locator('#mobile-qr')).to_be_visible()
-   old_port=manager.server.server_port;manager.stop();enable(bind='127.0.0.1',advertise=False);assert manager.server.server_port!=old_port
+   old_port=manager.server.server_port;manager.stop();enable(bind='127.0.0.1',advertise=False);assert manager.server.server_port==old_port
+   # A free saved port is reused; force a real conflict to test migration and
+   # stale-QR invalidation rather than relying on random ephemeral port changes.
+   manager.stop()
+   with socket.socket() as occupied:
+    occupied.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);occupied.bind(('127.0.0.1',old_port));occupied.listen()
+    enable(bind='127.0.0.1',advertise=False);assert manager.server.server_port!=old_port
    expect(page.locator('#mobile-qr')).not_to_be_visible(timeout=10000);expect(page.locator('#mobile-qr-expiry')).to_have_text('二维码已失效，请刷新')
    page.locator('#mobile-invite').click();expect(page.locator('#mobile-qr')).to_be_visible()
    page.locator('#mobile-disable').click();expect(page.locator('#mobile-state')).to_have_text('手机连接已关闭');expect(page.locator('#mobile-qr')).not_to_be_visible()
