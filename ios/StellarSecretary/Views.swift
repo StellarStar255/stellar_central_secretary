@@ -9,6 +9,7 @@ import AVFoundation
         WindowGroup {
             ContentView().environmentObject(model)
                 .onOpenURL { url in
+                    pairingDiagnostic("url-received")
                     guard url.scheme == "stellar-secretary", url.host == "pair", let value = URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "data"})?.value,
                           let data = Data(base64Encoded:value), let raw = String(data:data,encoding:.utf8) else { return }
                     Task { await model.pair(raw) }
@@ -20,6 +21,7 @@ import AVFoundation
 struct ContentView: View {
     @EnvironmentObject var model: Companion
     @State private var scan = false
+    @State private var pairingTask: Task<Void, Never>?
     var body: some View {
         Group {
             if model.paired == nil {
@@ -41,7 +43,15 @@ struct ContentView: View {
                     DeviceView().tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }
                 }.tint(.orange)
             }
-        }.sheet(isPresented:$scan) { ScannerView { raw in scan = false;Task { await model.pair(raw) } }.ignoresSafeArea() }
+        }.fullScreenCover(isPresented:$scan) {
+            ScannerView(scanned: { raw, failed in
+                pairingTask = Task {
+                    await model.pair(raw, requestAccepted: { scan = false })
+                    if scan { failed(model.error.isEmpty ? "连接未完成，请重试" : model.error) }
+                    pairingTask = nil
+                }
+            }, cancelled: { pairingTask?.cancel();pairingTask = nil;scan = false }).ignoresSafeArea()
+        }
     }
 }
 struct ConnectionBanner: View {
@@ -124,24 +134,108 @@ struct DeviceView: View {
     var body: some View { NavigationStack { Form { Section("已配对的 Mac") { Text(model.paired?.info.name ?? "");ConnectionBanner();Button("重新连接") { Task { await model.connect() } } };Section { Text("连接同一局域网时，App 打开后会自动寻找已配对的 Mac。电脑休眠或网络隔离时可能无法连接。手机不下载 AI 模型，检索和问答由电脑完成。").font(.callout).foregroundStyle(.secondary) };Section { Button("解除手机上的配对",role:.destructive) { confirm = true } } }.navigationTitle("连接").confirmationDialog("解除配对？待发送内容仍保留在手机，Mac 端可移除此设备。",isPresented:$confirm,titleVisibility:.visible) { Button("解除配对",role:.destructive) { model.disconnect() } } } }
 }
 struct ScannerView: UIViewControllerRepresentable {
-    var scanned: (String)->Void
-    func makeUIViewController(context:Context)->ScannerController { let controller = ScannerController();controller.scanned = scanned;return controller }
-    func updateUIViewController(_ controller:ScannerController,context:Context) {}
+    var scanned: (String, @escaping (String) -> Void) -> Void
+    var cancelled: () -> Void
+    func makeUIViewController(context: Context) -> ScannerController {
+        let controller = ScannerController();controller.scanned = scanned;controller.cancelled = cancelled;return controller
+    }
+    func updateUIViewController(_ controller: ScannerController, context: Context) {}
 }
 final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
-    var scanned: ((String)->Void)?
+    var scanned: ((String, @escaping (String) -> Void) -> Void)?
+    var cancelled: (() -> Void)?
     private let capture = AVCaptureSession()
-    private let queue = DispatchQueue(label:"companion.camera")
+    private let queue = DispatchQueue(label: "companion.camera")
     private var preview: AVCaptureVideoPreviewLayer?
-    private var completed = false
-    override func viewDidLoad() { super.viewDidLoad();view.backgroundColor = .black;AVCaptureDevice.requestAccess(for:.video) { granted in DispatchQueue.main.async { if granted { self.setup() } else { self.showError("请在系统设置中允许相机访问，然后重新扫码") } } } }
-    private func showError(_ text:String) { let label = UILabel();label.text = text;label.textColor = .white;label.numberOfLines = 0;label.textAlignment = .center;label.frame = view.bounds.insetBy(dx:25,dy:100);label.autoresizingMask = [.flexibleWidth,.flexibleHeight];view.addSubview(label) }
-    private func setup() {
-        guard let camera = AVCaptureDevice.default(for:.video), let input = try? AVCaptureDeviceInput(device:camera), capture.canAddInput(input) else { showError("无法使用相机；模拟器请通过配对测试链接连接");return }
-        capture.addInput(input);let output = AVCaptureMetadataOutput();guard capture.canAddOutput(output) else { return };capture.addOutput(output);output.setMetadataObjectsDelegate(self,queue:.main);output.metadataObjectTypes = [.qr]
-        let preview = AVCaptureVideoPreviewLayer(session:capture);preview.videoGravity = .resizeAspectFill;view.layer.insertSublayer(preview,at:0);self.preview = preview;queue.async { self.capture.startRunning() }
+    private var processing = false
+    private var configured = false
+    private var visible = false
+    private var requestingPermission = false
+    private var observers: [NSObjectProtocol] = []
+    private let hint = UILabel()
+    private let retry = UIButton(type: .system)
+    private let settings = UIButton(type: .system)
+
+    override func viewDidLoad() {
+        super.viewDidLoad();view.backgroundColor = .black;view.accessibilityIdentifier = "pairing-scanner"
+        let preview = AVCaptureVideoPreviewLayer(session: capture);preview.videoGravity = .resizeAspectFill
+        view.layer.insertSublayer(preview, at: 0);self.preview = preview
+        let cancel = UIButton(type: .system);cancel.setTitle("取消扫码", for: .normal);cancel.tintColor = .white
+        cancel.accessibilityIdentifier = "scanner-cancel";cancel.addTarget(self, action: #selector(cancelScan), for: .touchUpInside)
+        cancel.translatesAutoresizingMaskIntoConstraints = false;view.addSubview(cancel)
+        hint.text = "将相机对准 Mac 的手机配对二维码";hint.textColor = .white;hint.numberOfLines = 0
+        hint.textAlignment = .center;hint.accessibilityIdentifier = "scanner-status"
+        retry.setTitle("重试扫码", for: .normal);retry.addTarget(self, action: #selector(retryScan), for: .touchUpInside);retry.isHidden = true
+        settings.setTitle("打开系统设置", for: .normal);settings.addTarget(self, action: #selector(openSettings), for: .touchUpInside);settings.isHidden = true
+        let stack = UIStackView(arrangedSubviews: [hint,retry,settings]);stack.axis = .vertical;stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let card = UIView();card.backgroundColor = UIColor.black.withAlphaComponent(0.75);card.layer.cornerRadius = 16
+        card.translatesAutoresizingMaskIntoConstraints = false;card.addSubview(stack);view.addSubview(card)
+        NSLayoutConstraint.activate([
+            cancel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),cancel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),cancel.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),card.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -20)
+        ])
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: capture, queue: .main) { [weak self] _ in
+            self?.showError("相机暂时被占用，请稍后重试")
+        })
+        observers.append(center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: capture, queue: .main) { [weak self] _ in
+            guard let self, self.visible, !self.processing else { return };self.prepareCamera()
+        })
+        observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: capture, queue: .main) { [weak self] _ in
+            self?.showError("相机启动失败，请重试或检查相机权限")
+        })
+        observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.visible, !self.processing else { return };self.prepareCamera()
+        })
     }
+    deinit { for observer in observers { NotificationCenter.default.removeObserver(observer) } }
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated);visible = true;prepareCamera() }
+    override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated);visible = false;queue.async { self.capture.stopRunning() } }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews();preview?.frame = view.bounds }
-    override func viewWillDisappear(_ animated:Bool) { super.viewWillDisappear(animated);queue.async { self.capture.stopRunning() } }
-    func metadataOutput(_ output:AVCaptureMetadataOutput,didOutput metadataObjects:[AVMetadataObject],from connection:AVCaptureConnection) { guard !completed, let value = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue else { return };completed = true;queue.async { self.capture.stopRunning() };scanned?(value) }
+    private func prepareCamera() {
+        guard visible, !processing else { return }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: settings.isHidden = true;startCamera()
+        case .notDetermined:
+            guard !requestingPermission else { return };requestingPermission = true
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] _ in DispatchQueue.main.async { self?.requestingPermission = false;self?.prepareCamera() } }
+        default: showError("未获相机权限。请在系统设置中允许知识秘书使用相机。");settings.isHidden = false
+        }
+    }
+    private func startCamera() {
+        retry.isHidden = true;hint.text = "将相机对准 Mac 的手机配对二维码"
+        queue.async { [weak self] in
+            guard let self else { return }
+            if !self.configured {
+                guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                      let input = try? AVCaptureDeviceInput(device: camera) else { DispatchQueue.main.async { self.showError("无法使用后置相机，请检查相机权限后重试") };return }
+                self.capture.beginConfiguration();self.capture.sessionPreset = .high
+                guard self.capture.canAddInput(input) else { self.capture.commitConfiguration();DispatchQueue.main.async { self.showError("相机当前不可用，请重试") };return }
+                self.capture.addInput(input)
+                let output = AVCaptureMetadataOutput()
+                guard self.capture.canAddOutput(output) else { self.capture.removeInput(input);self.capture.commitConfiguration();DispatchQueue.main.async { self.showError("无法启动二维码识别，请重试") };return }
+                self.capture.addOutput(output);output.setMetadataObjectsDelegate(self, queue: .main)
+                guard output.availableMetadataObjectTypes.contains(.qr) else { self.capture.removeOutput(output);self.capture.removeInput(input);self.capture.commitConfiguration();DispatchQueue.main.async { self.showError("此相机无法识别二维码") };return }
+                output.metadataObjectTypes = [.qr];self.capture.commitConfiguration();self.configured = true
+            }
+            if !self.capture.isRunning { self.capture.startRunning() }
+        }
+    }
+    private func showError(_ message: String) { guard visible else { return };hint.text = message;retry.isHidden = false }
+    @objc private func retryScan() { processing = false;prepareCamera() }
+    @objc private func cancelScan() { cancelled?() }
+    @objc private func openSettings() { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        guard visible, !processing else { return }
+        let values = metadataObjects.compactMap { ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }
+        guard !values.isEmpty else { return }
+        guard let value = values.first(where: { (try? PairInfo.pairingCode($0)) != nil }) else { hint.text = PairingCodeError.invalid.localizedDescription;return }
+        processing = true;retry.isHidden = true;hint.text = "已识别配对码，正在连接 Mac…"
+        queue.async { self.capture.stopRunning() }
+        scanned?(value, { [weak self] message in
+            guard let self, self.visible else { return };self.showError(message)
+        })
+    }
 }

@@ -4,14 +4,13 @@ import CryptoKit
 import PhotosUI
 import AVFoundation
 
-struct PairInfo: Codable {
-    var v: Int
-    var server_id: String
-    var name: String
-    var url: String
-    var fingerprint: String
-    var secret: String?
+func pairingDiagnostic(_ stage: String, error: Error? = nil) {
+    #if DEBUG
+    let details = error.map { " domain=\(($0 as NSError).domain) code=\(($0 as NSError).code)" } ?? ""
+    FileHandle.standardError.write(Data(("STELLAR_PAIRING " + stage + details + "\n").utf8))
+    #endif
 }
+
 struct PairedMac: Codable { var info: PairInfo; var credential: String }
 struct Draft: Codable, Identifiable {
     var id = UUID().uuidString
@@ -109,15 +108,19 @@ enum CredentialStore {
         guard (200...299).contains(status) else { throw NSError(domain:"Companion",code:status,userInfo:[NSLocalizedDescriptionKey:result["error"] as? String ?? "连接未完成，请重试"]) }
         return result
     }
-    func pair(_ raw: String) async {
+    func pair(_ raw: String, requestAccepted: (() -> Void)? = nil) async {
         guard !waiting else { return }
+        pairingDiagnostic("begin")
         do {
-            let info = try JSONDecoder().decode(PairInfo.self,from:Data(raw.utf8))
-            guard info.v == 1, info.fingerprint.count == 64, info.fingerprint.allSatisfy({$0.isHexDigit}), let url = URL(string:info.url), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil, info.secret != nil else { throw NSError(domain:"Pairing",code:1,userInfo:[NSLocalizedDescriptionKey:"请扫描电脑端的手机配对二维码"]) }
+            let info = try PairInfo.pairingCode(raw)
+            pairingDiagnostic("code-valid")
             let credential = (0..<48).map { _ in UInt8.random(in:0...255) };let value = Data(credential).base64EncodedString()
             let pair = PairedMac(info:info,credential:value);candidate = pair;configure(pair);error = ""
+            pairingDiagnostic("request-start")
             let result = try await request("/pair",body:["secret":info.secret!,"credential":value,"name":UIDevice.current.name],using:pair)
             code = result["code"] as? String ?? "";waiting = true;status = "请在 Mac 上核对数字并允许配对"
+            pairingDiagnostic("awaiting-mac-approval")
+            requestAccepted?()
             let deadline = Date().addingTimeInterval(300)
             while waiting && Date() < deadline {
                 try await Task.sleep(for:.seconds(2));let response = try await request("/pair/status",using:pair)
@@ -126,7 +129,7 @@ enum CredentialStore {
                 }
             }
             throw NSError(domain:"Pairing",code:2,userInfo:[NSLocalizedDescriptionKey:"配对已超时，请刷新二维码后重新扫码"])
-        } catch { waiting = false;code = "";candidate = nil;self.error = error.localizedDescription;if let paired { configure(paired) };status = "配对未完成" }
+        } catch { pairingDiagnostic("failed",error:error);waiting = false;code = "";candidate = nil;self.error = error.localizedDescription;if let paired { configure(paired) };status = "配对未完成" }
     }
     func connect() async {
         guard !waiting, let pair = paired else { return }

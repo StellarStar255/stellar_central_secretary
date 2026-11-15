@@ -794,7 +794,8 @@ class Service:
                 browser_import=True
                 url = str(capture.get('url', '')); validate_url(url)
                 text = str(capture.get('text', '')).strip(); title = str(capture.get('title', '')).strip()
-                if not text: raise ValueError('采集文件没有正文')
+                archive_only=archive_only or capture.get('archive_only') is True
+                if not text and not archive_only: raise ValueError('采集文件没有正文')
             else:
                 try: text, warning = extract(name, data)
                 except Exception as exc: text, warning = '', '原件已保存，正文解析失败：'+str(exc)[:300]
@@ -1410,7 +1411,11 @@ def handler(service):
                 if path=='/api/mobile/invite':return self.send(200,service.mobile.invitation())
                 if path=='/api/mobile/decide':return self.send(200,service.mobile.decide(body))
                 if path=='/api/mobile/revoke':return self.send(200,service.mobile.revoke(body.get('id')))
-                if path=='/api/ingest': return self.send(200, service.ingest(body))
+                if path=='/api/ingest':
+                    if body.get('browser_extension') is True:
+                        from .extension_chat import ingest
+                        return self.send(200, ingest(service,body))
+                    return self.send(200, service.ingest(body))
                 if path=='/api/language':
                     service.archive.set_language(body.get('language'));return self.send(200,{'ok':True,'language':body['language']})
                 if path=='/api/appearance':

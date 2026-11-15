@@ -24,7 +24,7 @@ def preserve(incoming,previous):
             for key in ('requestId','requestState','requestApproval','requestVersion'):message.pop(key,None)
     present={m['id'] for m in result['messages']}
     for old in previous.get('messages',[]):
-        if old.get('requestId') and old['id'] not in present:
+        if (old.get('requestId') or old.get('externalArchive')) and old['id'] not in present:
             user=known.get(old.get('questionId'))
             if user and user['id'] not in present:result['messages'].append(copy.deepcopy(user));present.add(user['id'])
             result['messages'].append(copy.deepcopy(old));present.add(old['id'])

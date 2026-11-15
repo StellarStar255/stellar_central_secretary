@@ -64,3 +64,7 @@ ios/**/xcuserdata/
 ios/**/*.xcuserstate
 ios/**/*.ipa
 ios/**/*.mobileprovision
+
+# Swift package test output
+ios/.build/
+ios/.swiftpm/

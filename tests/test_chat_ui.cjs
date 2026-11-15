@@ -249,3 +249,12 @@ assert.throws(()=>vm.runInContext('archiveNote("建档",{messages:[]})',context)
 assert.throws(()=>vm.runInContext('archiveNote("建档",{messages:[{role:"user",text:"你好呀"}]})',context),/没有找到/);
 assert.equal(vm.runInContext('archiveNote("建档：新内容",contextSaveChat).text',context),'建档：新内容');
 console.log('PASS: contextual archive uses the previous user material and its timestamp, skips failed bare-save attempts, never saves model guesses, and rejects empty context');
+
+const beforeExtensionFixture=vm.runInContext('({conversations,activeId})',context),storedBeforeExtensionFixture=stored.get('stellar.conversations.v1');
+vm.runInContext(`conversations=[{id:'extension-fixture',title:'Current',updated:1000,messages:[{id:'existing-user',role:'user',text:'Existing'}]}];activeId='extension-fixture';mergeChats({conversations:[{id:'extension-fixture',title:'Current',updated:1,messages:[{id:'extension-event',role:'assistant',text:'Saved',externalArchive:true,items:['a'.repeat(32)]}]}]});`,context);
+assert.equal(vm.runInContext('currentChat().messages.length',context),2);
+vm.runInContext(`mergeChats({conversations:[{id:'extension-fixture',title:'Current',updated:1,messages:[{id:'extension-event',role:'assistant',text:'Saved',externalArchive:true,items:['a'.repeat(32)]}]}]});`,context);
+assert.equal(vm.runInContext('currentChat().messages.length',context),2);
+assert(vm.runInContext("externalArchiveCard('a'.repeat(32))",context).includes('class="source"'));
+context.beforeExtensionFixture=beforeExtensionFixture;vm.runInContext('conversations=beforeExtensionFixture.conversations;activeId=beforeExtensionFixture.activeId',context);stored.set('stellar.conversations.v1',storedBeforeExtensionFixture);
+console.log('PASS: external capture receipt survives newer local chat and merges once as compact card');

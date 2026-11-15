@@ -16,7 +16,7 @@
   const list=original.messages||[],drop=new Set();
   list.forEach((message,index)=>{
    const refs=[...(Array.isArray(message.items)?message.items:[]),...(Array.isArray(message.sources)?message.sources:[]).map(source=>source?.item_id),...(Array.isArray(message.images)?message.images:[]).map(image=>image?.item_id)];
-   if(messages.has(JSON.stringify([original.id,message.id]))||refs.some(id=>items.has(id))){drop.add(index);if(message.role==='assistant'&&index&&list[index-1].role==='user')drop.add(index-1)}
+   if(messages.has(JSON.stringify([original.id,message.id]))||refs.some(id=>items.has(id))){drop.add(index);if(message.role==='assistant'&&!message.externalArchive&&index&&list[index-1].role==='user')drop.add(index-1)}
   });
   if(!drop.size&&!affected.has(original.id))return [original];
   const kept=list.filter((_,index)=>!drop.has(index));if(!kept.length)return [];

@@ -14,7 +14,7 @@ def clean_chats(chats,deleted_items,deleted_messages):
             if isinstance(message.get('images'),list):refs.extend(image.get('item_id') for image in message['images'] if isinstance(image,dict) and isinstance(image.get('item_id'),str))
             if (chat['id'],message['id']) in removed or deleted_items.intersection(refs):
                 drop.add(index)
-                if message.get('role')=='assistant' and index and messages[index-1].get('role')=='user':drop.add(index-1)
+                if message.get('role')=='assistant' and not message.get('externalArchive') and index and messages[index-1].get('role')=='user':drop.add(index-1)
         if drop:
             affected.add(chat['id'])
             removed.update((chat['id'],messages[index]['id']) for index in drop)

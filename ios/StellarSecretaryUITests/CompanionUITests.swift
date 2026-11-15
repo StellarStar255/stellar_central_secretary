@@ -7,6 +7,22 @@ final class CompanionUITests: XCTestCase {
             failure = error;if let data { result = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:] };done.fulfill()
         }.resume();wait(for:[done],timeout:15);if let failure { throw failure };return result
     }
+    @MainActor func testScannerStaysVisibleUntilCancel() throws {
+        let app = XCUIApplication();app.launch()
+        if app.tabBars.buttons["连接"].exists {
+            app.tabBars.buttons["连接"].tap();app.buttons["解除手机上的配对"].tap();app.buttons["解除配对"].tap()
+        }
+        addUIInterruptionMonitor(withDescription: "Camera permission") { alert in
+            for name in ["Allow", "允许", "OK", "好"] { if alert.buttons[name].exists { alert.buttons[name].tap();return true } };return false
+        }
+        app.buttons["扫描 Mac 配对码"].tap()
+        let cancel = app.buttons["scanner-cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        // Permission failure or unavailable simulator camera must keep the scanner visible.
+        let closed = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: cancel)
+        closed.isInverted = true;wait(for: [closed], timeout: 3)
+        cancel.tap();XCTAssertTrue(app.buttons["扫描 Mac 配对码"].waitForExistence(timeout: 10))
+    }
     @MainActor func testPairCaptureSearchAndOfflineOutbox() throws {
         continueAfterFailure = false
         let app = XCUIApplication();app.launch()
