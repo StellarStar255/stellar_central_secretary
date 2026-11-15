@@ -86,3 +86,40 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(info['url'],f'https://172.23.1.2:{port}')
   self.assertEqual(info['urls'],[f'https://{ip}:{port}' for ip in ['172.23.1.2','100.83.1.2','169.254.1.2']])
   self.assertEqual(info['fingerprint'],self.m.fingerprint)
+ def test_phone_photo_ocr_summary_chat_and_replay(self):
+  import io,time
+  from PIL import Image
+  self.approve();self.s.archive.configure('codex',True)
+  self.s.chat_history({'activeId':'phone-chat','conversations':[{'id':'phone-chat','title':'Phone','updated':1,'messages':[]}]})
+  stream=io.BytesIO();Image.new('RGB',(48,32),'white').save(stream,'JPEG');raw=stream.getvalue()
+  body={'request_id':'photo-source','content':{'filename':'Photo.jpeg','data':base64.b64encode(raw).decode()}}
+  fields={'title':'Fixture image','summary':'Synthetic image summary','category':'Test','tags':['Photo'],'vision_text':'Synthetic visible text','state':'ready','error':''}
+  with patch('secretary.local_ocr.recognize',return_value='Synthetic OCR text'),patch('secretary.ai.analyze_material',return_value=(fields,'')) as model:
+   status,result=self.request('/ingest',body,self.credential);self.assertEqual(status,200);self.assertTrue(result['chat_synced'])
+   ident=result['item']['id'];deadline=time.monotonic()+3
+   while self.s.archive.get(ident)['state']!='ready' and time.monotonic()<deadline:time.sleep(.01)
+   item=self.s.archive.get(ident);self.assertEqual(item['summary'],fields['summary']);self.assertEqual(item['text'],'Synthetic OCR text')
+   self.assertEqual(model.call_count,1);self.assertEqual(len(model.call_args.args[3]),1)
+   self.assertEqual((self.s.archive.root/'files'/ident).read_bytes(),raw)
+   self.assertTrue(self.request('/ingest',body,self.credential)[1]['duplicate']);self.assertEqual(model.call_count,1)
+  messages=self.s.chat_history()['conversations'][0]['messages'];self.assertEqual(len(messages),1);self.assertEqual(messages[0]['items'],[ident])
+ def test_phone_photo_respects_disabled_auto_ai(self):
+  import io
+  from PIL import Image
+  self.approve();stream=io.BytesIO();Image.new('RGB',(16,16),'white').save(stream,'PNG')
+  with patch('secretary.local_ocr.recognize',return_value='Local only'),patch('secretary.ai.analyze_material') as model:
+   status,result=self.request('/ingest',{'request_id':'local-only','content':{'filename':'photo.png','data':base64.b64encode(stream.getvalue()).decode()}},self.credential)
+   self.assertEqual(status,200);self.assertTrue(result['chat_synced']);model.assert_not_called()
+   self.assertEqual(self.s.archive.get(result['item']['id'])['text'],'Local only')
+ def test_reextract_legacy_phone_photo_repairs_chat_once(self):
+  import io
+  from PIL import Image
+  stream=io.BytesIO();Image.new('RGB',(16,16),'white').save(stream,'JPEG');raw=stream.getvalue()
+  ident,_=self.s.archive.add('Photo.jpeg',filename='Photo.jpeg',data=raw)
+  self.m.state['receipts']['legacy-device:legacy-photo']={'id':ident,'signature':'legacy'};self.m.save()
+  self.s.chat_history({'activeId':'current','conversations':[{'id':'current','title':'Current','updated':1,'messages':[{'id':'unrelated','role':'user','text':'Keep this message'}]}]})
+  with patch('secretary.local_ocr.recognize',return_value='Reparsed fixture'):
+   self.s.reextract(ident);self.s.reextract(ident)
+  messages=self.s.chat_history()['conversations'][0]['messages']
+  self.assertEqual(len(messages),2);self.assertEqual(messages[-1]['items'],[ident]);self.assertEqual(messages[0]['text'],'Keep this message')
+  self.assertEqual((self.s.archive.root/'files'/ident).read_bytes(),raw)

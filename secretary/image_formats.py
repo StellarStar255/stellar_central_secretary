@@ -9,6 +9,8 @@ HEIF_MEDIA={'HEIF':'image/heic'}
 
 def is_heif(name):return Path(name).suffix.lower() in ('.heic','.heif','.hif')
 
+def is_image(name):return Path(name).suffix.lower() in ('.heic','.heif','.hif','.png','.jpg','.jpeg','.webp','.gif','.bmp','.tif','.tiff')
+
 def preview(data):
     if len(data)>50*1024**2:raise ValueError('图片原件超过 50 MB，无法生成预览')
     try:
@@ -22,4 +24,4 @@ def preview(data):
             output=io.BytesIO();image.save(output,'JPEG',quality=90)
             return output.getvalue()
     except (OSError,Image.UnidentifiedImageError) as error:
-        raise ValueError('HEIC/HEIF 图片无法解码，原件已保留') from error
+        raise ValueError('图片无法解码，原件已保留') from error

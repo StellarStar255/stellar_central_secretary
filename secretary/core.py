@@ -45,6 +45,17 @@ def extract(name, data):
         archive,manifest=load(data)
         with archive:return assemble(manifest),''
     suffix = Path(name).suffix.lower()
+    from . import image_formats
+    if image_formats.is_image(name):
+        from PIL import Image
+        from . import local_ocr
+        try:
+            raw=data.read_bytes() if isinstance(data,Path) else data
+            preview=image_formats.preview(raw)
+            with Image.open(io.BytesIO(preview)) as image:text=local_ocr.recognize(image).strip()
+            return text, '' if text else '图片原件已保存，未识别到可读文字。'
+        except Exception as error:
+            return '', '图片原件已保存，本机文字识别未完成：'+str(error)[:200]
     if suffix == '.pdf':
         if isinstance(data,Path):
             from .pdf_preview import read

@@ -82,6 +82,9 @@ enum CredentialStore {
     private var candidate: PairedMac?
     private var flushing = false
     private var discovering = false
+    private var connecting = false
+    private var discoveredURLs: [String] = []
+    private var sessionEndpoint = ""
     private var pairingInFlight = false
     private let queueURL: URL
     override init() {
@@ -94,7 +97,7 @@ enum CredentialStore {
         if let pair = paired { configure(pair);status = "正在连接 \(pair.info.name)…";discover() }
     }
     private func configure(_ pair: PairedMac, pairing: Bool = false) {
-        session?.invalidateAndCancel()
+        session?.invalidateAndCancel();sessionEndpoint = pair.info.url
         let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = pairing ? 20 : 300
         configuration.waitsForConnectivity = pairing
         session = URLSession(configuration:configuration,delegate:PinnedSession(pair.info.fingerprint),delegateQueue:nil)
@@ -103,11 +106,14 @@ enum CredentialStore {
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) { services.append(service);service.delegate = self;service.resolve(withTimeout:5) }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) { services.removeAll { $0 == service } }
     func netServiceDidResolveAddress(_ sender: NetService) {
-        guard var pair = paired, let host = sender.hostName else { return }
+        guard let pair = paired, let host = sender.hostName else { return }
         let txt = NetService.dictionary(fromTXTRecord:sender.txtRecordData() ?? Data())
         guard let id = txt["id"], String(data:id,encoding:.utf8) == pair.info.server_id else { return }
-        pair.info.url = "https://\(host):\(sender.port)"
-        paired = pair;try? CredentialStore.save(pair)
+        let endpoint = "https://\(host):\(sender.port)"
+        // Discovery is a hint, never overwrite a verified USB/Tailscale address.
+        discoveredURLs = Array(([endpoint] + pair.info.connectionURLs.map { raw in
+            guard var value = URLComponents(string:raw) else { return raw };value.port = sender.port;return value.string ?? raw
+        } + discoveredURLs).prefix(16))
         Task { await connect() }
     }
     private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil) async throws -> [String:Any] {
@@ -142,19 +148,28 @@ enum CredentialStore {
             while waiting && Date() < deadline {
                 try await Task.sleep(for:.seconds(2));let response = try await request("/pair/status",using:pair)
                 if response["approved"] as? Bool == true {
-                    var saved = pair;saved.info.secret = nil;try CredentialStore.save(saved);paired = saved;candidate = nil;waiting = false;code = "";configure(saved);discover();await connect();return
+                    var saved = pair;saved.info.secret = nil;try CredentialStore.save(saved);paired = saved;candidate = nil;waiting = false;code = "";configure(saved);discover();pairingInFlight = false;await connect();return
                 }
             }
             throw NSError(domain:"Pairing",code:2,userInfo:[NSLocalizedDescriptionKey:"配对已超时，请刷新二维码后重新扫码"])
         } catch { pairingDiagnostic("failed",error:error);waiting = false;code = "";candidate = nil;self.error = PairingConnectionFailure.message(error);if let paired { configure(paired) } else { session?.invalidateAndCancel();session = nil };status = "配对未完成" }
     }
     func connect() async {
-        guard !waiting, let pair = paired else { return }
+        guard !waiting, !pairingInFlight, !connecting, var pair = paired else { return }
+        connecting = true;defer { connecting = false }
         do {
-            let value = try await request("/status")
+            let urls = Array(NSOrderedSet(array: [pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? [pair.info.url]
+            let endpoint = try await PairingNetworkProbe.firstReachable(Array(urls.prefix(9)))
+            pair.info.url = endpoint
+            if session == nil || sessionEndpoint != endpoint { configure(pair) }
+            let value = try await request("/status",using:pair)
             guard value["server_id"] as? String == pair.info.server_id else { throw URLError(.serverCertificateUntrusted) }
-            online = true;status = "已连接 · \(pair.info.name)";discover();await flush()
-        } catch { online = false;status = "Mac 离线 · 内容将保留在手机";if (error as NSError).code == 401 { self.error = "此手机已被移除，请重新配对" } }
+            paired = pair;try CredentialStore.save(pair)
+            online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush()
+        } catch {
+            online = false;status = "Mac 离线 · 正在自动重连，内容将保留在手机"
+            if (error as NSError).code == 401 { self.error = "此手机已被移除，请重新配对" }
+        }
     }
     private func persist(_ next: [Draft]) throws {
         let data = try JSONEncoder().encode(next);try data.write(to:queueURL,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]);var values = URLResourceValues();values.isExcludedFromBackup = true;var url = queueURL;try? url.setResourceValues(values);drafts = next

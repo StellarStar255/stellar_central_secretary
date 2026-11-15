@@ -162,16 +162,37 @@ class Mobile:
     def ingest(self,device,body):
         key=body.get('request_id');content=body.get('content')
         if not isinstance(key,str) or not 1<=len(key)<=80 or not isinstance(content,dict):raise ValueError('归档请求格式无效')
-        allowed={k:content[k] for k in ('text','url','filename','data','note_reference') if k in content};allowed['archive_only']=True
-        signature=digest(json.dumps(allowed,sort_keys=True));receipt=device+':'+key
+        allowed={k:content[k] for k in ('text','url','filename','data','note_reference') if k in content};allowed['archive_only']=bool(allowed.get('url') and not allowed.get('filename') and not allowed.get('text'))
+        signature=digest(json.dumps({**allowed,'archive_only':True},sort_keys=True));receipt=device+':'+key
         with self.lock:
             previous=self.state['receipts'].get(receipt)
             if previous:
                 if previous['signature']!=signature:raise ValueError('这条待发送内容已改变，请重新建档')
-                return {'item':self.public_item(self.service.archive.get(previous['id'])),'duplicate':True}
-            result=self.service.ingest(allowed);self.state['receipts'][receipt]={'id':result['item']['id'],'signature':signature}
-            # Keep identifiers only. No documents or credentials in receipts.
-            self.save();return {'item':self.public_item(result['item']),'duplicate':not result['created']}
+                result={'item':self.service.archive.get(previous['id']),'created':False,'updated':False}
+                target=previous.get('chat_id',self.service.chat_history().get('activeId',''))
+                if not result['item']['summary'] and not allowed['archive_only']:self.service.queue(result['item']['id'])
+            else:
+                target=self.service.chat_history().get('activeId','')
+                result=self.service.ingest(allowed)
+                self.state['receipts'][receipt]={'id':result['item']['id'],'signature':signature,'chat_id':target}
+                # Identifiers only; no documents, invitation secrets or credentials.
+                self.save()
+            from .extension_chat import append_receipt
+            text=('手机资料已归档，按电脑设置整理。' if result['created'] else '这份手机资料已存在，可直接查看。')
+            result=append_receipt(self.service,result,target,digest(receipt),text,namespace='mobile')
+            return {'item':self.public_item(self.service.archive.get(result['item']['id'])),'duplicate':not result['created'],
+                    'chat_synced':result.get('chat_synced',False),**({'chat_sync_error':result['chat_sync_error']} if result.get('chat_sync_error') else {})}
+    def sync_receipt(self,item_id):
+        """Repair a legacy mobile capture receipt when its original is reprocessed."""
+        with self.lock:
+            entry=next(((key,value) for key,value in reversed(list(self.state['receipts'].items())) if value['id']==item_id),None)
+            if not entry:return
+            key,record=entry
+            target=record.get('chat_id',self.service.chat_history().get('activeId',''))
+            from .extension_chat import append_receipt
+            append_receipt(self.service,{'item':self.service.archive.get(item_id),'created':False},target,digest(key),
+                           '手机资料已保存，正在按电脑设置整理。',namespace='mobile')
+
     def handler(self):
         manager=self
         class Handler(BaseHTTPRequestHandler):

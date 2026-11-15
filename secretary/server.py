@@ -445,7 +445,7 @@ class Service:
     def queue(self, item_id, force=False, full_pdf=False, pdf_new=False):
         item = self.archive.get(item_id)
         if self.stopping:return
-        if not (item['text'].strip() or item.get('user_context','').strip() or image_formats.is_heif(item['filename']) or pdf_reading.index_text(item.get('pdf_reads',{})).strip()) or (not force and not self.archive.settings()['auto_ai']): return
+        if not (item['text'].strip() or item.get('user_context','').strip() or image_formats.is_image(item['filename']) or pdf_reading.index_text(item.get('pdf_reads',{})).strip()) or (not force and not self.archive.settings()['auto_ai']): return
         if company_ai.restricted(item):
             try:self.model_backend(item_ids=[item_id])
             except company_ai.ApprovalRequired:
@@ -486,7 +486,7 @@ class Service:
                     source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                     source,scope=service_pdf_material(self.archive,item,source,scope)
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope)
-                elif image_formats.is_heif(item['filename']):
+                elif image_formats.is_image(item['filename']):
                     original=self.archive.root/'files'/item_id
                     if original.stat().st_size>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
                     data=original.read_bytes()
@@ -760,7 +760,8 @@ class Service:
             raise
         finally:
             with self.lock:self.busy.discard(item_id);self.summary_futures.pop(item_id,None);self.trash_cancellations.discard(item_id)
-        if parsed:self.queue(item_id)
+        if parsed or image_formats.is_image(item['filename']):self.queue(item_id)
+        self.mobile.sync_receipt(item_id)
         return {'ok':True,'parsed':parsed,'item':self.archive.get(item_id)}
 
     def ingest(self, body):
@@ -1264,7 +1265,7 @@ def handler(service):
                     parts = path.split('/'); item = service.archive.get(parts[3])
                     if len(parts)==5 and parts[4]=='preview':
                         if local_media.video_type(item['filename']):return self.video(service.archive.root/'files'/item['id'],item['filename'])
-                        if image_formats.is_heif(item['filename']):
+                        if image_formats.is_image(item['filename']):
                             source=service.archive.root/'files'/item['id']
                             if source.stat().st_size>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
                             return self.send(200,image_formats.preview(source.read_bytes()),'image/jpeg')
