@@ -834,7 +834,8 @@ class Service:
                     expected=requested.split('\n',2)[-1] if requested else canonical
                     if content(existing,canonical)==expected:
                         return {'item':existing,'created':False,'updated':False,'reused':True}
-        item_id, created = self.archive.add(title, text, url, name, data, warning)
+        item_id, created = self.archive.add(title, text, url, name, data, warning,
+                                          fresh_if_trashed=bool(url) and (body.get('browser_extension') is True or name.endswith('.knowledge.json')))
         if created and not (url or name):
             from .note_dates import resolve
             from datetime import datetime

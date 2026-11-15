@@ -244,13 +244,13 @@ class Archive:
                 chunk=content[offset:offset+1200]
                 cursor=db.execute('INSERT INTO chunks(item_id,position,text,origin) VALUES (?,?,?,?)',(item_id,-1,chunk,json.dumps(origin,ensure_ascii=False)))
                 db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
-    def add(self, title='', text='', url='', filename='', data=None, warning=''):
+    def add(self, title='', text='', url='', filename='', data=None, warning='', *, fresh_if_trashed=False):
         if isinstance(data,Path):
             with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
         else:digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
-            old = db.execute("SELECT id,title,text,updated,trashed_at FROM items WHERE digest=? OR (url=? AND ?!='') ORDER BY (trashed_at!=''),created LIMIT 1", (digest, url, url)).fetchone()
+            old = db.execute("SELECT id,title,text,updated,trashed_at FROM items WHERE (digest=? OR (url=? AND ?!=''))" + (" AND trashed_at=''" if fresh_if_trashed else '') + " ORDER BY (trashed_at!=''),created LIMIT 1", (digest, url, url)).fetchone()
             if old:
                 if old['trashed_at']:raise TrashedDuplicateError(old)
                 if text.strip() and not old['text'].strip():
@@ -260,6 +260,10 @@ class Archive:
                         db.execute("UPDATE items SET filename=? WHERE id=?", (filename, old['id']))
                     self._index(db, old['id'], text)
                 return old['id'], False
+            # Keep the trashed row intact, including its unique content digest.
+            # Active recaptures are subsequently deduplicated by their source URL.
+            if fresh_if_trashed and db.execute('SELECT 1 FROM items WHERE digest=?',(digest,)).fetchone():
+                digest=hashlib.sha256((digest+item_id).encode()).hexdigest()
             if data is not None: bundles.copy_data(data,self.root / 'files' / item_id)
             state = 'pending' if text.strip() else 'needs_content'
             db.execute('INSERT INTO items(id,title,kind,url,filename,digest,text,state,error,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?)',

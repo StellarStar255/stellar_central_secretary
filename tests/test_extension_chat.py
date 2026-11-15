@@ -71,3 +71,25 @@ class ExtensionChatTest(unittest.TestCase):
         with patch('secretary.server.fetch_page',side_effect=AssertionError('Must not fetch')),patch.object(self.s,'start_capture',side_effect=AssertionError('Must not capture')):
             result=self.s.ingest({'filename':'bookmark.knowledge.json','data':base64.b64encode(json.dumps(capture).encode()).decode()})
         self.assertEqual(result['item']['url'],capture['url']);self.assertEqual(result['item']['text'],'')
+
+    def test_recapture_creates_new_record_and_leaves_trash_untouched(self):
+        old=self.s.ingest({'url':self.body['url'],'text':'Unwanted old body','title':'Old'})['item']
+        self.s.archive.trash_item(old['id'],old['updated'])
+        before=self.s.archive.get(old['id'],include_trashed=True)
+        result=ingest(self.s,self.body)
+        self.assertTrue(result['created']);self.assertTrue(result['chat_synced'])
+        self.assertNotEqual(result['item']['id'],old['id']);self.assertEqual(result['item']['text'],self.body['text'])
+        self.assertEqual(self.s.archive.get(old['id'],include_trashed=True),before)
+        repeated=ingest(self.s,{**self.body,'extension_event_id':'b'*32})
+        self.assertFalse(repeated['created']);self.assertEqual(repeated['item']['id'],result['item']['id'])
+        self.assertEqual(len(self.s.archive.list()),1);self.assertEqual(len(self.s.archive.trash_items()),1)
+
+    def test_repeated_bookmark_delete_and_recapture_keeps_all_trashed_rows(self):
+        body={**self.body,'text':'','archive_only':True}
+        for n in range(3):
+            result=ingest(self.s,{**body,'extension_event_id':str(n)*32})
+            self.assertTrue(result['created'])
+            item=result['item'];self.s.archive.trash_item(item['id'],item['updated'])
+        self.assertEqual(len(self.s.archive.trash_items()),3)
+        self.assertEqual(len({i['id'] for i in self.s.archive.trash_items()}),3)
+        self.assertEqual(len(self.s.archive.list()),0)
