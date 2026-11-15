@@ -68,3 +68,21 @@ class MobileTest(unittest.TestCase):
    status,value=self.request('/ask',{'question':'Find fixture'},self.credential)
   self.assertEqual(status,200);self.assertEqual(value['answer'],'Synthetic answer');self.assertNotIn('private',value);ask.assert_called_once_with('Find fixture')
   self.assertEqual(self.s.runtime()['answering'],0)
+
+ def test_alternate_addresses_exclude_public_ips_and_keep_lan_default(self):
+  from types import SimpleNamespace
+  from secretary.mobile import addresses
+  ips=['100.83.1.2','169.254.1.2','172.23.1.2','8.8.8.8','127.0.0.1']
+  adapter=SimpleNamespace(ips=[SimpleNamespace(ip=ip) for ip in ips])
+  with patch('ifaddr.get_adapters',return_value=[adapter]):
+   self.assertEqual(addresses(),['172.23.1.2'])
+   self.assertEqual(addresses(include_alternates=True),['172.23.1.2','100.83.1.2','169.254.1.2'])
+ def test_invitation_contains_secure_alternate_endpoints(self):
+  import qrcode
+  original=qrcode.make
+  with patch('secretary.mobile.addresses',return_value=['172.23.1.2','100.83.1.2','169.254.1.2']),patch('qrcode.make',wraps=original) as make:
+   self.m.invitation()
+  info=json.loads(make.call_args.args[0]);port=self.m.server.server_port
+  self.assertEqual(info['url'],f'https://172.23.1.2:{port}')
+  self.assertEqual(info['urls'],[f'https://{ip}:{port}' for ip in ['172.23.1.2','100.83.1.2','169.254.1.2']])
+  self.assertEqual(info['fingerprint'],self.m.fingerprint)

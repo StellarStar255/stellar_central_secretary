@@ -25,6 +25,10 @@ with tempfile.TemporaryDirectory() as root:
    assert manager.device(credential)
    page.screenshot(path='/tmp/stellar-mobile-desktop.png')
    page.locator('[data-revoke]').click();expect(page.locator('#mobile-devices')).to_contain_text('尚未配对手机');assert manager.device(credential) is None
+   page.locator('#mobile-invite').click();expect(page.locator('#mobile-qr')).to_be_visible()
+   old_port=manager.server.server_port;manager.stop();enable(bind='127.0.0.1',advertise=False);assert manager.server.server_port!=old_port
+   expect(page.locator('#mobile-qr')).not_to_be_visible(timeout=10000);expect(page.locator('#mobile-qr-expiry')).to_have_text('二维码已失效，请刷新')
+   page.locator('#mobile-invite').click();expect(page.locator('#mobile-qr')).to_be_visible()
    page.locator('#mobile-disable').click();expect(page.locator('#mobile-state')).to_have_text('手机连接已关闭');expect(page.locator('#mobile-qr')).not_to_be_visible()
    page.locator('#mobile-dialog .dialog-head button').click();page.locator('#ui-language').select_option('en');page.locator('#mobile-open').click();expect(page.locator('#mobile-state')).to_have_text('Phone connection is off')
    page.set_viewport_size({'width':390,'height':844});assert page.locator('#mobile-dialog').bounding_box()['width']<=390

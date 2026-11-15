@@ -8,15 +8,16 @@ from urllib.parse import urlsplit,parse_qs
 SERVICE_TYPE='_stellar-sec._tcp.local.'
 MAX_BODY=16*1024*1024
 
-def addresses():
+def addresses(include_alternates=False):
     import ifaddr
     found=[]
     for adapter in ifaddr.get_adapters():
         for item in adapter.ips:
             if not isinstance(item.ip,str):continue
             ip=ipaddress.ip_address(item.ip)
-            if ip.version==4 and not ip.is_loopback and any(ip in ipaddress.ip_network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):found.append(str(ip))
-    return sorted(set(found))
+            networks=('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16') + (('100.64.0.0/10','169.254.0.0/16') if include_alternates else ())
+            if ip.version==4 and not ip.is_loopback and any(ip in ipaddress.ip_network(net) for net in networks):found.append(str(ip))
+    return sorted(set(found),key=lambda value:(2 if ipaddress.ip_address(value).is_link_local else 1 if ipaddress.ip_address(value) in ipaddress.ip_network('100.64.0.0/10') else 0,value))[:8]
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 
@@ -99,7 +100,7 @@ class Mobile:
             with self.lock:
                 if stop.is_set() or not self.server:return
                 try:
-                    ips=addresses()
+                    ips=addresses(include_alternates=True)
                     if ips!=self.published_ips or (self.discovery and hasattr(self.discovery,'poll') and self.discovery.poll() is not None):self.publish(ips)
                     self.error=''
                 except Exception:self.error='局域网发现暂不可用，请检查 Wi-Fi 与系统的本地网络权限'
@@ -118,16 +119,16 @@ class Mobile:
     def status(self):
         with self.lock:
             now=time.time();self.pending={key:value for key,value in self.pending.items() if value['expires']>now}
-            return {'enabled':self.server is not None,'server_id':self.state['server_id'],'name':socket.gethostname(),'port':self.server.server_port if self.server else None,'addresses':addresses() if self.server else [],'error':self.error,
+            return {'enabled':self.server is not None,'server_id':self.state['server_id'],'name':socket.gethostname(),'port':self.server.server_port if self.server else None,'addresses':addresses(include_alternates=True) if self.server else [],'error':self.error,
                 'pending':[{'id':key,'name':value['name'],'code':value['code']} for key,value in self.pending.items()],
                 'devices':[{'id':key,'name':value['name'],'created':value['created']} for key,value in self.state['devices'].items()]}
     def invitation(self):
         with self.lock:
             if not self.server:raise ValueError('请先开启手机连接')
-            ips=addresses()
+            ips=addresses(include_alternates=True)
             if not ips:raise ValueError('未找到局域网地址，请先连接 Wi-Fi')
             self.invite={'secret':secrets.token_urlsafe(32),'expires':time.time()+300};self.pending.clear()
-            payload={'v':1,'server_id':self.state['server_id'],'name':socket.gethostname(),'url':f'https://{ips[0]}:{self.server.server_port}','fingerprint':self.fingerprint,'secret':self.invite['secret']}
+            payload={'v':1,'server_id':self.state['server_id'],'name':socket.gethostname(),'url':f'https://{ips[0]}:{self.server.server_port}','fingerprint':self.fingerprint,'secret':self.invite['secret'],'urls':[f'https://{ip}:{self.server.server_port}' for ip in ips]}
             import qrcode
             image=qrcode.make(json.dumps(payload,separators=(',',':')));buffer=io.BytesIO();image.save(buffer,format='PNG')
             return {'qr':'data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode(),'expires':self.invite['expires']}

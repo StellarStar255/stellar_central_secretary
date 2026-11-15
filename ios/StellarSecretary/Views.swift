@@ -232,7 +232,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         let values = metadataObjects.compactMap { ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }
         guard !values.isEmpty else { return }
         guard let value = values.first(where: { (try? PairInfo.pairingCode($0)) != nil }) else { hint.text = PairingCodeError.invalid.localizedDescription;return }
-        processing = true;retry.isHidden = true;hint.text = "已识别配对码，正在连接 Mac…"
+        processing = true;retry.isHidden = true;hint.text = "已识别配对码，正在检查局域网并连接 Mac…"
         queue.async { self.capture.stopRunning() }
         scanned?(value, { [weak self] message in
             guard let self, self.visible else { return };self.showError(message)

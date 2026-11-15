@@ -7,7 +7,15 @@ import AVFoundation
 func pairingDiagnostic(_ stage: String, error: Error? = nil) {
     #if DEBUG
     let details = error.map { " domain=\(($0 as NSError).domain) code=\(($0 as NSError).code)" } ?? ""
-    FileHandle.standardError.write(Data(("STELLAR_PAIRING " + stage + details + "\n").utf8))
+    let line = "STELLAR_PAIRING " + stage + details + "\n"
+    print(line, terminator: "")
+    // Only stage names and numeric errors; never URLs, invitation codes or credentials.
+    if let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+        let file = folder.appendingPathComponent("pairing-diagnostic.log")
+        var log = (try? Data(contentsOf: file)) ?? Data()
+        if log.count > 64_000 { log = Data() }
+        log.append(Data(line.utf8));try? log.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
     #endif
 }
 
@@ -28,12 +36,14 @@ final class PinnedSession: NSObject, URLSessionDelegate {
     let fingerprint: String
     init(_ fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        pairingDiagnostic("tls-challenge")
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust,
               let certificate = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else { completionHandler(.cancelAuthenticationChallenge, nil); return }
         let data = SecCertificateCopyData(certificate) as Data
         let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard actual == fingerprint else { completionHandler(.cancelAuthenticationChallenge, nil); return }
+        pairingDiagnostic("tls-pin-matched")
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
@@ -72,6 +82,7 @@ enum CredentialStore {
     private var candidate: PairedMac?
     private var flushing = false
     private var discovering = false
+    private var pairingInFlight = false
     private let queueURL: URL
     override init() {
         let folder = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0]
@@ -82,9 +93,10 @@ enum CredentialStore {
         browser.delegate = self
         if let pair = paired { configure(pair);status = "正在连接 \(pair.info.name)…";discover() }
     }
-    private func configure(_ pair: PairedMac) {
+    private func configure(_ pair: PairedMac, pairing: Bool = false) {
         session?.invalidateAndCancel()
-        let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = 300
+        let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = pairing ? 20 : 300
+        configuration.waitsForConnectivity = pairing
         session = URLSession(configuration:configuration,delegate:PinnedSession(pair.info.fingerprint),delegateQueue:nil)
     }
     func discover() { guard paired != nil, !discovering else { return };discovering = true;browser.searchForServices(ofType:"_stellar-sec._tcp.",inDomain:"local.") }
@@ -100,7 +112,7 @@ enum CredentialStore {
     }
     private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil) async throws -> [String:Any] {
         guard let pair = pair ?? paired, let url = URL(string:pair.info.url + path), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
-        var request = URLRequest(url:url);request.setValue("Bearer " + pair.credential,forHTTPHeaderField:"Authorization")
+        var request = URLRequest(url:url);if path == "/pair" { request.timeoutInterval = 15 };request.setValue("Bearer " + pair.credential,forHTTPHeaderField:"Authorization")
         if let body { request.httpMethod = "POST";request.httpBody = try JSONSerialization.data(withJSONObject:body);request.setValue("application/json",forHTTPHeaderField:"Content-Type");if path == "/ask" { request.timeoutInterval = 300 } }
         let (data,response) = try await session.data(for:request)
         let result = try JSONSerialization.jsonObject(with:data) as? [String:Any] ?? [:]
@@ -109,13 +121,18 @@ enum CredentialStore {
         return result
     }
     func pair(_ raw: String, requestAccepted: (() -> Void)? = nil) async {
-        guard !waiting else { return }
+        guard !pairingInFlight else { return }
+        pairingInFlight = true;defer { pairingInFlight = false }
         pairingDiagnostic("begin")
         do {
             let info = try PairInfo.pairingCode(raw)
             pairingDiagnostic("code-valid")
             let credential = (0..<48).map { _ in UInt8.random(in:0...255) };let value = Data(credential).base64EncodedString()
-            let pair = PairedMac(info:info,credential:value);candidate = pair;configure(pair);error = ""
+            var pair = PairedMac(info:info,credential:value);error = ""
+            pairingDiagnostic("tcp-start")
+            pair.info.url = try await PairingNetworkProbe.firstReachable(info.connectionURLs)
+            candidate = pair;configure(pair, pairing:true)
+            pairingDiagnostic("tcp-ready")
             pairingDiagnostic("request-start")
             let result = try await request("/pair",body:["secret":info.secret!,"credential":value,"name":UIDevice.current.name],using:pair)
             code = result["code"] as? String ?? "";waiting = true;status = "请在 Mac 上核对数字并允许配对"
@@ -125,11 +142,11 @@ enum CredentialStore {
             while waiting && Date() < deadline {
                 try await Task.sleep(for:.seconds(2));let response = try await request("/pair/status",using:pair)
                 if response["approved"] as? Bool == true {
-                    var saved = pair;saved.info.secret = nil;try CredentialStore.save(saved);paired = saved;candidate = nil;waiting = false;code = "";discover();await connect();return
+                    var saved = pair;saved.info.secret = nil;try CredentialStore.save(saved);paired = saved;candidate = nil;waiting = false;code = "";configure(saved);discover();await connect();return
                 }
             }
             throw NSError(domain:"Pairing",code:2,userInfo:[NSLocalizedDescriptionKey:"配对已超时，请刷新二维码后重新扫码"])
-        } catch { pairingDiagnostic("failed",error:error);waiting = false;code = "";candidate = nil;self.error = error.localizedDescription;if let paired { configure(paired) };status = "配对未完成" }
+        } catch { pairingDiagnostic("failed",error:error);waiting = false;code = "";candidate = nil;self.error = PairingConnectionFailure.message(error);if let paired { configure(paired) } else { session?.invalidateAndCancel();session = nil };status = "配对未完成" }
     }
     func connect() async {
         guard !waiting, let pair = paired else { return }
