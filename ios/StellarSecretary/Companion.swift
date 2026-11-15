@@ -133,6 +133,15 @@ enum CredentialStore {
         do {
             let info = try PairInfo.pairingCode(raw)
             pairingDiagnostic("code-valid")
+            if var existing = paired, existing.info.server_id == info.server_id, existing.info.fingerprint == info.fingerprint {
+                existing.info = info;existing.info.secret = nil
+                existing.info.url = try await PairingNetworkProbe.firstReachable(info.connectionURLs)
+                configure(existing)
+                let response = try await request("/status",using:existing)
+                guard response["server_id"] as? String == info.server_id else { throw URLError(.serverCertificateUntrusted) }
+                try CredentialStore.save(existing);paired = existing;online = true;status = "已连接 · \(info.name)";error = ""
+                pairingDiagnostic("existing-pair-connected");requestAccepted?();discover();await flush();return
+            }
             let credential = (0..<48).map { _ in UInt8.random(in:0...255) };let value = Data(credential).base64EncodedString()
             var pair = PairedMac(info:info,credential:value);error = ""
             pairingDiagnostic("tcp-start")
@@ -164,6 +173,14 @@ enum CredentialStore {
             if session == nil || sessionEndpoint != endpoint { configure(pair) }
             let value = try await request("/status",using:pair)
             guard value["server_id"] as? String == pair.info.server_id else { throw URLError(.serverCertificateUntrusted) }
+            if let urls = value["urls"] as? [String], urls.count <= 8 {
+                let port = URLComponents(string:endpoint)?.port ?? 443
+                pair.info.urls = urls.filter { raw in
+                    guard let value = URLComponents(string:raw) else { return false }
+                    return value.scheme == "https" && value.host != nil && value.user == nil && value.password == nil && value.query == nil && value.fragment == nil && value.path.isEmpty && (value.port ?? 443) == port
+                }
+            }
+            pairingDiagnostic("connected-verified")
             paired = pair;try CredentialStore.save(pair)
             online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush()
         } catch {

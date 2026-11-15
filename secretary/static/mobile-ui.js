@@ -4,7 +4,7 @@
  function render(data){
   endpoint=JSON.stringify([data.server_id,data.port,data.addresses]);if(expiry&&inviteEndpoint!==endpoint)expiry=1;
   $('#mobile-state').textContent=data.enabled?t('手机连接已开启'):t('手机连接已关闭');$('#mobile-enable').hidden=data.enabled;$('#mobile-disable').hidden=!data.enabled;$('#mobile-invite').hidden=!data.enabled;
-  $('#mobile-address').textContent=data.enabled?(data.addresses.length?data.addresses.map(a=>'https://'+a+':'+data.port).join(' · '):t('未找到局域网地址，请先连接 Wi-Fi')):'';
+  $('#mobile-address').textContent=data.enabled?(data.addresses.length?data.addresses.map(a=>'https://'+(a.includes(':')?'['+a+']':a)+':'+data.port).join(' · '):t('未找到局域网地址，请先连接 Wi-Fi')):'';
   $('#mobile-warning').textContent=data.error||'';
   $('#mobile-pending').innerHTML=data.pending.map(p=>`<div class="mobile-device"><strong>${esc(p.name)}</strong><p>${esc(t('请核对手机与电脑显示的数字一致：'))}<b>${esc(p.code)}</b></p><button class="primary" data-approve="${esc(p.id)}">${esc(t('允许配对'))}</button> <button class="secondary" data-reject="${esc(p.id)}">${esc(t('拒绝'))}</button></div>`).join('');
   $('#mobile-devices').innerHTML=data.devices.map(d=>`<div class="mobile-device"><span>${esc(d.name)}</span><button class="secondary" data-revoke="${esc(d.id)}">${esc(t('移除设备'))}</button></div>`).join('')||`<p>${esc(t('尚未配对手机'))}</p>`;

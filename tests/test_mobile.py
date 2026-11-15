@@ -73,10 +73,10 @@ class MobileTest(unittest.TestCase):
   from types import SimpleNamespace
   from secretary.mobile import addresses
   ips=['100.83.1.2','169.254.1.2','172.23.1.2','8.8.8.8','127.0.0.1']
-  adapter=SimpleNamespace(ips=[SimpleNamespace(ip=ip) for ip in ips])
+  adapter=SimpleNamespace(name='en0',ips=[SimpleNamespace(ip=ip) for ip in ips]+[SimpleNamespace(ip=('fe80::1234',0,1)),SimpleNamespace(ip=('2001:db8::1',0,1))])
   with patch('ifaddr.get_adapters',return_value=[adapter]):
    self.assertEqual(addresses(),['172.23.1.2'])
-   self.assertEqual(addresses(include_alternates=True),['172.23.1.2','100.83.1.2','169.254.1.2'])
+   self.assertEqual(addresses(include_alternates=True),['172.23.1.2','fe80::1234','100.83.1.2','169.254.1.2'])
  def test_invitation_contains_secure_alternate_endpoints(self):
   import qrcode
   original=qrcode.make
@@ -123,3 +123,13 @@ class MobileTest(unittest.TestCase):
   messages=self.s.chat_history()['conversations'][0]['messages']
   self.assertEqual(len(messages),2);self.assertEqual(messages[-1]['items'],[ident]);self.assertEqual(messages[0]['text'],'Keep this message')
   self.assertEqual((self.s.archive.root/'files'/ident).read_bytes(),raw)
+ def test_dual_stack_mobile_gateway_keeps_pinned_tls_on_ipv4_and_ipv6(self):
+  import socket
+  if not socket.has_dualstack_ipv6():self.skipTest('Dual stack unavailable')
+  self.m.stop();self.m.enable(advertise=False)
+  context=ssl.create_default_context(cafile=str(self.m.root/'certificate.pem'));context.check_hostname=False
+  for host in ['127.0.0.1','::1']:
+   with socket.create_connection((host,self.m.server.server_port),timeout=3) as raw:
+    with context.wrap_socket(raw,server_hostname=host) as tls:
+     tls.sendall(b'GET /status HTTP/1.0\r\nHost: fixture\r\n\r\n')
+     self.assertIn(b'401',tls.recv(2048))

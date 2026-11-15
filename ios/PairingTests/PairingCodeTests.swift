@@ -33,8 +33,8 @@ final class PairingCodeTests: XCTestCase {
     }
 
     func testAlternateEndpointsRemainBoundToTheSameSecurePort() throws {
-        var object = value();object["urls"] = [object["url"]!, "https://100.64.1.2:8769", "https://169.254.1.2:8769"]
-        let info = try PairInfo.pairingCode(json(object));XCTAssertEqual(info.connectionURLs.count,3)
+        var object = value();object["urls"] = [object["url"]!, "https://100.64.1.2:8769", "https://169.254.1.2:8769", "https://[fe80::1234]:8769"]
+        let info = try PairInfo.pairingCode(json(object));XCTAssertEqual(info.connectionURLs.count,4);XCTAssertTrue(info.connectionURLs.contains("https://[fe80::1234%25en0]:8769"))
         for invalid in ["http://100.64.1.2:8769", "https://user:pass@100.64.1.2:8769", "https://100.64.1.2:9999", "https://100.64.1.2:8769/path"] {
             object["urls"] = [invalid];XCTAssertThrowsError(try PairInfo.pairingCode(json(object)))
         }

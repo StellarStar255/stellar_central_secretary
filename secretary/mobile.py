@@ -13,11 +13,21 @@ def addresses(include_alternates=False):
     found=[]
     for adapter in ifaddr.get_adapters():
         for item in adapter.ips:
-            if not isinstance(item.ip,str):continue
-            ip=ipaddress.ip_address(item.ip)
-            networks=('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16') + (('100.64.0.0/10','169.254.0.0/16') if include_alternates else ())
-            if ip.version==4 and not ip.is_loopback and any(ip in ipaddress.ip_network(net) for net in networks):found.append(str(ip))
-    return sorted(set(found),key=lambda value:(2 if ipaddress.ip_address(value).is_link_local else 1 if ipaddress.ip_address(value) in ipaddress.ip_network('100.64.0.0/10') else 0,value))[:8]
+            if isinstance(item.ip,str):
+                ip=ipaddress.ip_address(item.ip)
+                networks=('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16') + (('100.64.0.0/10','169.254.0.0/16') if include_alternates else ())
+                if ip.version==4 and not ip.is_loopback and any(ip in ipaddress.ip_network(net) for net in networks):found.append(str(ip))
+            elif include_alternates and isinstance(item.ip,tuple):
+                ip=ipaddress.ip_address(item.ip[0].split('%')[0])
+                # Only local IPv6, never public Internet addresses. The client supplies its own interface scope.
+                if ip.version==6 and ip.is_link_local and str(adapter.name).startswith(('en','wl','Wi-Fi','Ethernet')):found.append(str(ip))
+    def rank(value):
+        ip=ipaddress.ip_address(value)
+        return (1 if ip.version==6 else 3 if ip.is_link_local else 2 if ip in ipaddress.ip_network('100.64.0.0/10') else 0,value)
+    return sorted(set(found),key=rank)[:8]
+
+def endpoint(ip,port):
+    return f'https://[{ip}]:{port}' if ':' in ip else f'https://{ip}:{port}'
 
 def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 
@@ -52,7 +62,12 @@ class Mobile:
         with self.lock:
             if self.server:return self.status()
             self.tls=self.certificate()
+            dual=bind=='0.0.0.0' and socket.has_dualstack_ipv6()
             class Gateway(ThreadingHTTPServer):
+                address_family=socket.AF_INET6 if dual else socket.AF_INET
+                def server_bind(server):
+                    if dual:server.socket.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,0)
+                    super().server_bind()
                 daemon_threads=True
                 request_queue_size=32
                 slots=threading.BoundedSemaphore(32)
@@ -64,7 +79,7 @@ class Mobile:
                     try:super().process_request_thread(request,address)
                     finally:server.slots.release()
                 def handle_error(server,request,address):pass
-            server=Gateway((bind,port),self.handler());self.server=server
+            server=Gateway(('::' if dual else bind,port),self.handler());self.server=server
             threading.Thread(target=server.serve_forever,daemon=True,name='mobile-https').start()
             try:
                 if advertise:
@@ -128,7 +143,7 @@ class Mobile:
             ips=addresses(include_alternates=True)
             if not ips:raise ValueError('未找到局域网地址，请先连接 Wi-Fi')
             self.invite={'secret':secrets.token_urlsafe(32),'expires':time.time()+300};self.pending.clear()
-            payload={'v':1,'server_id':self.state['server_id'],'name':socket.gethostname(),'url':f'https://{ips[0]}:{self.server.server_port}','fingerprint':self.fingerprint,'secret':self.invite['secret'],'urls':[f'https://{ip}:{self.server.server_port}' for ip in ips]}
+            payload={'v':1,'server_id':self.state['server_id'],'name':socket.gethostname(),'url':endpoint(ips[0],self.server.server_port),'fingerprint':self.fingerprint,'secret':self.invite['secret'],'urls':[endpoint(ip,self.server.server_port) for ip in ips]}
             import qrcode
             image=qrcode.make(json.dumps(payload,separators=(',',':')));buffer=io.BytesIO();image.save(buffer,format='PNG')
             return {'qr':'data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode(),'expires':self.invite['expires']}
@@ -230,7 +245,7 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname()})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)]})
                     if not post and parsed.path=='/items':
                         query=parse_qs(parsed.query).get('q',[''])[0][:200];items=manager.service.archive.list(q=query)
                         return self.send(200,{'items':[manager.public_item(item) for item in items[:50]]})

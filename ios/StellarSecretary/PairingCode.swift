@@ -8,7 +8,16 @@ struct PairInfo: Codable {
     var fingerprint: String
     var secret: String?
     var urls: [String]?
-    var connectionURLs: [String] { Array(NSOrderedSet(array: [url] + (urls ?? []))) as? [String] ?? [url] }
+    var connectionURLs: [String] {
+        let candidates = Array(NSOrderedSet(array: [url] + (urls ?? []))) as? [String] ?? [url]
+        return candidates.map { value in
+            // Link-local IPv6 scope is local to the phone, not the Mac's interface index.
+            if value.lowercased().hasPrefix("https://[fe80:") && !value.contains("%") {
+                return value.replacingOccurrences(of:"]",with:"%25en0]")
+            }
+            return value
+        }
+    }
 
     static func pairingCode(_ raw: String) throws -> PairInfo {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
