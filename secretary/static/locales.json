@@ -1352,5 +1352,8 @@
   "用 iPhone 配套 App 扫码，二维码 5 分钟内有效。": "Scan with the iPhone companion app. This code expires in 5 minutes.",
   "手机与电脑连接同一局域网，扫码配对后共用本机知识库。电脑需保持开机，手机离线时可暂存待发送内容。": "Connect your phone and computer to the same local network, then scan to pair and access this library. Keep the computer awake. Your phone can hold drafts while offline.",
   "请在 iPhone 安装配套 App 后扫码。此二维码不是 Safari 网页链接。": "Install the iPhone companion app before scanning. This code is not a Safari web link.",
-  "手机配对二维码": "Phone pairing code"
+  "手机配对二维码": "Phone pairing code",
+  "本地位置已保存，双击卡片可打开。": "Local location saved. Double-click its card to open.",
+  "单击查看资料；双击打开本地位置": "Click to view; double-click to open the local location",
+  "已打开本地文件": "Local file opened"
 }

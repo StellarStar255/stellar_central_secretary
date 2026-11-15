@@ -819,6 +819,8 @@ class Service:
                 note_reference=datetime.fromisoformat(raw)
                 if note_reference.tzinfo is None or note_reference>datetime.now(timezone.utc)+timedelta(minutes=5):raise ValueError()
             except (ValueError,TypeError):raise ValueError('原消息时间无效，请重新输入要建档的内容')
+        location=local_paths.shortcut(text) if not (url or name) else None
+        if location:archive_only=True;title=title or location['title']
         if text and not (url or name or title):
             title=next((line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('```')),'未命名笔记')[:100]
         if not (url or name):
@@ -868,7 +870,7 @@ class Service:
         item=self.with_progress(item)
         item['pdf_coverage']=pdf_reading.coverage(item)
         item['company_data']=company_ai.restricted(item)
-        item['local_paths']=local_paths.extract(item['text'])
+        item['local_paths']=local_paths.extract(item['text']);item['local_path_target']=local_paths.target(item['text']) if item['kind']=='note' else ''
         with self.archive.db() as db:
             selected=item.get('pdf_reads',{});seen=set();item['source_pages']=[]
             for _,origin in origins.material(self.archive,db,item_id):
@@ -1476,7 +1478,7 @@ def handler(service):
                     if company_mark:
                         service.archive.get(company_mark[1]);company_ai.mark(service.archive,company_mark[1]);return self.send(200,{'ok':True})
                     local_open=re.fullmatch(r'/api/items/([a-f0-9]{32})/open-local-path',path)
-                    if local_open:return self.send(200,local_paths.open_location(service.archive,local_open[1],body.get('path')))
+                    if local_open:return self.send(200,local_paths.open_location(service.archive,local_open[1],body.get('path'),open_file=body.get('open_file') is True))
                     order_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/attachment-order',path)
                     if order_match:return self.send(200,service.save_attachment_order(order_match[1],body))
                     attachment_remove=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/delete-attachment',path)

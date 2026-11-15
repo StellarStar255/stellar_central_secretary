@@ -71,6 +71,23 @@ with tempfile.TemporaryDirectory() as root:
                 page.locator(f'#recent-items [data-id="{conversation}"]').click()
                 expect(page.locator('.reader-message .local-path')).to_have_count(2)
                 assert not errors, errors
+                page.locator('#detail-dialog .dialog-head button').click()
+                page.evaluate("""() => {conversations=[{id:'path-fixture',title:'Path fixture',dialogueActive:true,updated:1,messages:[{id:'old-q',role:'user',text:'Earlier question',knowledgeQuestion:true},{id:'old-a',role:'assistant',text:'Earlier answer'}]}];activeId='path-fixture';saveChats();renderChat();renderSidebar()}""")
+                page.locator('#message-input').fill('Project location\n'+str(folder));page.locator('#send-button').click()
+                card=page.locator('#messages .archive-card').last
+                expect(card).to_contain_text('Project location');expect(page.locator('#messages')).to_contain_text('本地位置已保存')
+                count=run.call_count+launch.call_count;card.dblclick();expect(page.locator('#toast')).to_have_text('已打开本地文件夹')
+                assert run.call_count+launch.call_count==count+1
+                expect(page.locator('#detail-dialog')).not_to_be_visible()
+                saved=next(value for value in service.archive.list() if value['title']=='Project location')
+                expect(page.locator('#recent-items [data-id="'+saved['id']+'"]').first).to_be_visible()
+                page.reload();recent=page.locator('#recent-items [data-id="'+saved['id']+'"]');expect(recent).to_be_visible()
+                count=run.call_count+launch.call_count;recent.dblclick();expect(page.locator('#toast')).to_have_text('已打开本地文件夹')
+                assert run.call_count+launch.call_count==count+1
+                # One click remains a normal detail view.
+                recent.click();expect(page.locator('#detail-dialog')).to_be_visible()
+                assert service.archive.get(saved['id'])['text']=='Project location\n'+str(folder)
+                assert not errors,errors
                 print('PASS: source preserved; existing paths survive reload; single click selects; double-click opens Finder; Enter reveals file without execution; missing and forged paths rejected; conversation paths render; no page errors')
             finally:
                 browser.close()

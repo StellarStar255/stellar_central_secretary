@@ -174,6 +174,8 @@ class Archive:
     def db(self):
         db = sqlite3.connect(self.root / 'archive.sqlite3', timeout=30); db.row_factory = sqlite3.Row
         from .library import document,rank_values
+        from .local_paths import target
+        db.create_function('local_path_target',1,target,deterministic=True)
         db.create_function('library_document',13,document,deterministic=True);db.create_function('library_rank',6,rank_values,deterministic=True)
         try:
             with db: yield db
@@ -284,7 +286,10 @@ class Archive:
     def get(self, item_id, include_trashed=False):
         with self.db() as db: row = db.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
         if not row or row['trashed_at'] and not include_trashed: raise KeyError('资料不存在')
-        item = dict(row);item['attachment_order']=attachment_order.records(item['attachment_order']);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(date_summary(item['summary'],item['user_context']) if item['kind']=='note' else item['summary'],item['additions']); return item
+        item = dict(row)
+        from .local_paths import target
+        item['local_path_target']=target(item['text']) if item['kind']=='note' else ''
+        item['attachment_order']=attachment_order.records(item['attachment_order']);item['pdf_reads']=pdf_reading.records(item['pdf_reads']);item['favorite']=bool(item['favorite']);item['pinned']=bool(item['pinned']); item['tags'] = json.loads(item['tags']);item['note_images']=json.loads(item['note_images']);item['additions']=additions.records(item['additions']);item['group_links']=links.records(json.loads(item['group_links']));item['has_group_links']=bool(item['group_links']);item['addition_count']=len(item['additions']);item['base_summary']=item['summary'];item['summary']=additions.combined_summary(date_summary(item['summary'],item['user_context']) if item['kind']=='note' else item['summary'],item['additions']); return item
     def save_context(self,item_id,context):
         """Keep submitted annotations independent of fetched/replaced webpage text."""
         if not isinstance(context,str) or len(context)>20000:raise ValueError('链接说明不能超过 20000 个字符')
@@ -450,7 +455,7 @@ class Archive:
         # Conversational retrieval below keeps its broader relevance ranking.
         keywords=list(dict.fromkeys(q.casefold().split()))
         source_hits=self.retrieve(q,100) if keywords else []
-        columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
+        columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,CASE WHEN kind='note' THEN local_path_target(text) ELSE '' END AS local_path_target,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT '+columns+(',text,vision_text,group_links,pdf_reads' if keywords else '')+(" FROM items ORDER BY created DESC" if include_trashed else " FROM items WHERE trashed_at='' ORDER BY created DESC"))]
         result=[]

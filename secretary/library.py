@@ -12,7 +12,7 @@ def rank(item,words):
 # One indexed document per record. Trigrams preserve substring search, including
 # punctuation and paths; short one/two-character terms use SQL substring checks.
 FIELDS=('title','summary','text','tags','category','note','user_context','vision_text','additions','group_links','pdf_reads','url','filename')
-COLUMNS="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,note,user_context,additions,(group_links!='[]') AS has_group_links"
+COLUMNS="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,CASE WHEN kind='note' THEN local_path_target(text) ELSE '' END AS local_path_target,note,user_context,additions,(group_links!='[]') AS has_group_links"
 
 def document(*values):
     import json

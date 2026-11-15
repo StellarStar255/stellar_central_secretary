@@ -263,6 +263,15 @@ function bindDetails(container,items=allItems){container.querySelectorAll('[data
  const show=()=>{const action=inLibrary&&globalThis.StellarLibraryPreview?.select;return (action?action(button.dataset.id):detail(button.dataset.id,true).then(()=>locateCitedPassage(button))).catch(error=>toast(error.message))};
  const linkedRow=container===$('#messages')&&(button.classList.contains('archive-card')||button.classList.contains('source'))||container===$('#items')&&button.classList.contains('library-row');
  const url=linkedRow?originalLink(items.find(item=>item.id===button.dataset.id)):'';
+ const localTarget=items.find(item=>item.id===button.dataset.id)?.local_path_target;
+ if(localTarget){
+  let pending;button.title=t('单击查看资料；双击打开本地位置');
+  button.onclick=event=>{clearTimeout(pending);if(inLibrary||!event?.detail){if(!(event?.detail>1))void show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)void show()},200)};
+  let opening=false;
+  button.ondblclick=async event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);if(opening)return;opening=true;try{const result=await api('/api/items/'+button.dataset.id+'/open-local-path',{path:localTarget,open_file:true});toast(t(result.directory?'已打开本地文件夹':result.opened_file?'已打开本地文件':'已在文件夹中定位文件'))}catch(error){toast(error.message)}finally{opening=false}};
+  return;
+ }
+
  let origin;try{origin=JSON.parse(button.dataset.sourceOrigin||'null')}catch{}
  if(origin?.page){button.onclick=()=>{const path='/api/items/'+button.dataset.id+(origin.batch_id?'/additions/'+origin.batch_id:'')+(origin.attachment_id?'/attachments/'+origin.attachment_id:'');StellarPDF.open(path,origin.name,origin.page)};return}
  if(!url){button.onclick=show;return}
@@ -485,6 +494,7 @@ async function confirmLogin(id){
 }
 
 function archiveReply(result){const i=result.item;
+ if(i.local_path_target)return t('本地位置已保存，双击卡片可打开。');
  if(i.kind==='note'&&i.user_context?.startsWith('【日期解析】')&&!i.summary)return t('已归档：')+'\n\n'+i.user_context.split('\n').slice(2).join('\n');
  if(i.state==='saved')return t('已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。');
  if(i.has_group_links&&i.state==='processing'&&i.error==='正在读取本组链接…')return t('本组链接已归为一档，正在后台读取可访问的正文。');
@@ -678,7 +688,7 @@ function archiveInstruction(text){
 }
 function archiveNote(text,chat,current){
  const instruction=archiveInstruction(text);
- if(!instruction)return {text};
+ if(!instruction){const location=globalThis.StellarLocalPaths?.note(text);return location?{text,title:location.title}:{text}};
  if(!instruction.reference)return {text,title:instruction.title};
  const messages=chat.messages||[],end=current?messages.indexOf(current):messages.length;
  for(let i=end-1;i>=Math.max(0,end-12);i--){
@@ -711,6 +721,7 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  if(['auto','library','ask'].includes(mode)&&archiveInstruction(text))return 'note';
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
  if(mode!=='auto')return mode;
+ if(!hasFiles&&globalThis.StellarLocalPaths?.note(text))return 'note';
  const first=text.split('\n').find(line=>line.trim())?.trim()||'';
  if(!hasFiles&&isSocialMessage(text))return 'ask';
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);

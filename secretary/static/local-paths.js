@@ -1,5 +1,12 @@
 /* Paths come from archived source text; never turn them into file:// URLs. */
-globalThis.StellarLocalPaths={bind(root,item,{api,toast}){
+globalThis.StellarLocalPaths={note(text){
+ const value=String(text||'').trim(),lines=value.split('\n').map(line=>line.trim()).filter(Boolean);
+ if(value.length>8192||lines.length<1||lines.length>2||/[?？]|^(?:请问|为什么|怎么|如何|解释|分析|比较|查找|what\b|how\b|why\b|compare\b)|(?:是什么|在哪里|怎么办|吗|呢)/i.test(lines[0]))return null;
+ const line=lines.at(-1),match=/^(?:(.{1,100}?)[:：]\s*)?["'`]?((?:[A-Za-z]:[\\/]|~[\\/]|\/(?!\/))[^\r\n]+?)["'`]?$/u.exec(line);
+ if(!match||/https?:\/\//i.test(value))return null;
+ const path=match[2].replace(/[.,;，。；]+$/u,''),title=(lines.length===2?lines[0]:match[1]||path.replaceAll('\\','/').replace(/\/$/,'').split('/').at(-1)).replace(/[:：]$/,'');
+ return {path,title};
+},bind(root,item,{api,toast}){
  const paths=(item.local_paths||[]).slice().sort((a,b)=>b.length-a.length);
  if(!paths.length)return;
  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);

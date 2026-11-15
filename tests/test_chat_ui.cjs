@@ -27,7 +27,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  return{ok:true,json:async()=>data};
 }};
 context.HTMLDialogElement=class {show(){}showModal(){}};
-vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','drafts.js','model-proxy-ui.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
+vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','drafts.js','model-proxy-ui.js','local-paths.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
 const sample='用户：\n解释一下 ETF\n\nChatGPT：\n## 基金\n\n**重点**\n\n1. 第一项\n2. 第二项\n\n```text\n用户：\n<script>alert(1)</script>\n```\n\n用户：\n继续\n\nClaude：\n[原件](https://example.com)';
 context.readerSample=sample;
 assert.equal(vm.runInContext('parseArchivedConversation(readerSample).length',context),4);
@@ -258,3 +258,11 @@ assert.equal(vm.runInContext('currentChat().messages.length',context),2);
 assert(vm.runInContext("externalArchiveCard('a'.repeat(32))",context).includes('class="source"'));
 context.beforeExtensionFixture=beforeExtensionFixture;vm.runInContext('conversations=beforeExtensionFixture.conversations;activeId=beforeExtensionFixture.activeId',context);stored.set('stellar.conversations.v1',storedBeforeExtensionFixture);
 console.log('PASS: external capture receipt survives newer local chat and merges once as compact card');
+
+for(const pathCase of ['/tmp/Project','Design docs\n/tmp/Project folder','文档：C:\\Users\\me\\Documents']){
+ context.pathCase=pathCase;assert.equal(vm.runInContext('resolveInputMode(pathCase,"auto",false,true)',context),'note');
+}
+for(const pathQuestion of ['这个文件夹是什么？\n/tmp/Project','比较这些文件\n/tmp/Project','https://example.com/path']){
+ context.pathQuestion=pathQuestion;assert.equal(vm.runInContext('StellarLocalPaths.note(pathQuestion)',context),null);
+}
+console.log('PASS: local path bookmarks take precedence over follow-up chat, preserve explicit questions and ignore web URLs');

@@ -32,7 +32,27 @@ def extract(text):
     return result
 
 
-def open_location(archive, item_id, value):
+def shortcut(text):
+    """A path alone or a short label plus one path is a location bookmark."""
+    if not isinstance(text,str) or len(text)>8192:return None
+    lines=[line.strip() for line in text.splitlines() if line.strip()]
+    if not 1<=len(lines)<=2:return None
+    if re.search(r'[?？]|(?:是什么|在哪里|怎么办|吗|呢)|^(?:请问|为什么|怎么|如何|解释|分析|比较|查找|what\b|how\b|why\b|compare\b)',lines[0],re.I):return None
+    paths=extract(text)
+    if len(paths)!=1:return None
+    value=paths[0];line=lines[-1]
+    if value not in line:return None
+    prefix,suffix=line.split(value,1)
+    if suffix.strip('"\'` 。；;.,') or (prefix.strip('"\'` ') and not prefix.rstrip('"\'` ').endswith(('：',':'))):return None
+    label=lines[0] if len(lines)==2 else prefix.strip('"\'` ：:')
+    if len(label)>100:return None
+    return {'path':value,'title':label.rstrip('：:') or Path(value.replace('\\','/').rstrip('/')).name or value}
+
+def target(text):
+    value=shortcut(text)
+    return value['path'] if value else ''
+
+def open_location(archive, item_id, value, open_file=False):
     item = archive.get(item_id)
     if not isinstance(value, str) or value not in extract(item.get('text', '')):
         raise ValueError('请选择正文中记录的本地路径。')
@@ -48,7 +68,7 @@ def open_location(archive, item_id, value):
         if directory and sys.platform == 'darwin':
             subprocess.run(['/usr/bin/open', '-a', 'Finder', str(target.resolve())], check=True, timeout=15)
         else:
-            attachment_editor.launch(target, reveal=not directory)
+            attachment_editor.launch(target, reveal=not directory and not (open_file and attachment_editor.can_open(target.resolve().name)))
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError('无法打开本地路径，请检查访问权限或系统文件管理器。') from error
-    return {'ok': True, 'directory': directory}
+    return {'ok': True, 'directory': directory, 'opened_file':not directory and open_file and attachment_editor.can_open(target.resolve().name)}

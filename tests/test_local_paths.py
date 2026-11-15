@@ -58,3 +58,34 @@ class LocalPathsTest(unittest.TestCase):
                             local_paths.open_location(service.archive, item, 'C:\\Users\\someone\\Project')
             finally:
                 service.close()
+
+    def test_location_bookmark_is_saved_without_model_and_exposed_on_cards(self):
+        from secretary.library import dashboard,query as page
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root);service.archive.configure('codex',True)
+            try:
+                source='设计文档\n'+str(Path(root)/'Folder with spaces')
+                with patch.object(service,'queue') as queue:
+                    result=service.ingest({'text':source});queue.assert_not_called()
+                item=result['item'];self.assertEqual(item['title'],'设计文档');self.assertEqual(item['text'],source);self.assertEqual(item['state'],'saved')
+                self.assertEqual(item['local_path_target'],str(Path(root)/'Folder with spaces'))
+                self.assertEqual(service.archive.list()[0]['local_path_target'],item['local_path_target'])
+                self.assertEqual(dashboard(service.archive,[])['items'][0]['local_path_target'],item['local_path_target'])
+                self.assertEqual(page(service.archive)['items'][0]['local_path_target'],item['local_path_target'])
+                for question in ['比较这些文件\n/tmp/Project','这个文件夹是什么？\n/tmp/Project','https://example.com/path']:
+                    self.assertIsNone(local_paths.shortcut(question))
+                self.assertEqual(local_paths.shortcut('位置：C:\\Users\\me\\Project Files')['path'],'C:\\Users\\me\\Project Files')
+            finally:service.close()
+
+    def test_open_document_but_reveal_executables_for_explicit_card_open(self):
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root)
+            try:
+                document=Path(root)/'plan.txt';document.write_text('Fixture document')
+                script=Path(root)/'run.command';script.write_text('must never execute')
+                with patch('secretary.attachment_editor.launch') as launch:
+                    for path,opened in [(document,True),(script,False)]:
+                        ident,_=service.archive.add('Location',str(path))
+                        result=local_paths.open_location(service.archive,ident,str(path),open_file=True)
+                        self.assertEqual(result['opened_file'],opened);self.assertEqual(launch.call_args.kwargs['reveal'],not opened)
+            finally:service.close()
