@@ -26,7 +26,7 @@ sign() {
         return 0
       fi
       printf '%s\n' "$output" >&2
-      if [[ "$output" != *"timestamp service is not available"* ]] || [ "$attempt" = 4 ]; then return 1; fi
+      if [[ "$output" != *"timestamp service is not available"* && "$output" != *"A timestamp was expected but was not found"* ]] || [ "$attempt" = 4 ]; then return 1; fi
       echo "==> Retrying Apple timestamp ($attempt/3): $1" >&2
       sleep "$((attempt * 2))"
     done
