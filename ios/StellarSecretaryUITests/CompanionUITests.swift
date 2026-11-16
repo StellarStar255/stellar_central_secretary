@@ -47,6 +47,20 @@ final class CompanionUITests: XCTestCase {
         let after=try fixture("/wait-status?after=\(before["status"] as! Int)")
         XCTAssertGreaterThan(after["status"] as! Int,before["status"] as! Int)
         XCTAssertEqual(after["tls"] as? Int,before["tls"] as? Int,"Short foreground resume must reuse the pinned TLS connection")
+        // Reproduce a long suspension with the old gateway going away. The
+        // foreground path must rebuild immediately, without terminating the app.
+        let beforeLong=try fixture("/connections")
+        XCUIDevice.shared.press(.home)
+        _ = try fixture("/offline")
+        let backgroundElapsed=expectation(description:"Gateway idle deadline elapsed")
+        DispatchQueue.global().asyncAfter(deadline:.now()+21) {backgroundElapsed.fulfill()}
+        wait(for:[backgroundElapsed],timeout:25)
+        _ = try fixture("/online")
+        let resumed=Date();app.activate()
+        let afterLong=try fixture("/wait-status?after=\(beforeLong["status"] as! Int)")
+        XCTAssertGreaterThan(afterLong["status"] as! Int,beforeLong["status"] as! Int)
+        XCTAssertLessThan(Date().timeIntervalSince(resumed),8,"Long background resume must not wait for the old transport")
+        XCTAssertGreaterThan(afterLong["tls"] as! Int,beforeLong["tls"] as! Int)
         let editor = app.textViews["归档内容"];editor.tap();editor.typeText("Mobile fixture unique note")
         app.buttons["保存到知识库"].tap()
         let empty = NSPredicate(format:"value == ''");expectation(for:empty,evaluatedWith:editor);waitForExpectations(timeout:20)
@@ -63,7 +77,16 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.buttons["暂存，连接后发送"].waitForExistence(timeout:20))
         editor.tap();editor.typeText("Offline fixture note");app.buttons["暂存，连接后发送"].tap()
         app.terminate();app.launch();XCTAssertTrue(app.staticTexts["Offline fixture note"].waitForExistence(timeout:20))
+        // Leave an offline connection attempt in flight, then suspend. Its
+        // late completion must not block or overwrite the foreground attempt.
+        XCUIDevice.shared.press(.home)
+        let attemptExpired=expectation(description:"Offline attempt suspended")
+        DispatchQueue.global().asyncAfter(deadline:.now()+21) {attemptExpired.fulfill()}
+        wait(for:[attemptExpired],timeout:25)
         _ = try fixture("/online")
+        let offlineResume=Date();app.activate()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:8),app.debugDescription)
+        XCTAssertLessThan(Date().timeIntervalSince(offlineResume),10)
         app.tabBars.buttons["连接"].tap();app.buttons["重新连接"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20))
         app.tabBars.buttons["归档"].tap()

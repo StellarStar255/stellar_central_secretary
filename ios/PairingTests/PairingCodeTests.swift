@@ -233,3 +233,20 @@ extension PairingNetworkTests {
         } catch { }
     }
 }
+
+final class ConnectionResumePolicyTests: XCTestCase {
+    func testShortSwitchReusesAndLongBackgroundRebuilds() {
+        let start=Date(timeIntervalSince1970:1000)
+        var policy=ConnectionResumePolicy()
+        XCTAssertFalse(policy.needsFreshTransport(at:start))
+        policy.enteredBackground(at:start)
+        XCTAssertFalse(policy.needsFreshTransport(at:start.addingTimeInterval(3)))
+        policy.enteredBackground(at:start)
+        // A repeated background notification must not postpone the expiry.
+        policy.enteredBackground(at:start.addingTimeInterval(19))
+        XCTAssertTrue(policy.needsFreshTransport(at:start.addingTimeInterval(20)))
+        XCTAssertFalse(policy.needsFreshTransport(at:start.addingTimeInterval(21)))
+        policy.enteredBackground(at:start)
+        XCTAssertTrue(policy.needsFreshTransport(at:start.addingTimeInterval(3600)))
+    }
+}

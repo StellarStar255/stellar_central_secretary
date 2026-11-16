@@ -137,3 +137,17 @@ final class PairingTLSProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
         return endpoint
     }
 }
+
+// The gateway closes idle HTTP sockets after 20 seconds. Beyond that interval,
+// resuming old radio/relay state is less reliable than rebuilding the carrier.
+struct ConnectionResumePolicy {
+    private var backgroundSince: Date?
+    mutating func enteredBackground(at date: Date = Date()) {
+        if backgroundSince == nil { backgroundSince = date }
+    }
+    mutating func needsFreshTransport(at date: Date = Date()) -> Bool {
+        defer { backgroundSince = nil }
+        guard let backgroundSince else { return false }
+        return date.timeIntervalSince(backgroundSince) >= 20
+    }
+}

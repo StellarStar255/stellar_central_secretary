@@ -16,6 +16,7 @@ import AVFoundation
                 }
                 .onChange(of:scene) { _,phase in
                     pairingDiagnostic("scene-"+String(describing:phase))
+                    if phase == .background {model.enteredBackground()}
                     #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("--wifi-only") || ProcessInfo.processInfo.arguments.contains("--bluetooth-only") { UIApplication.shared.isIdleTimerDisabled = phase == .active }
                     #endif

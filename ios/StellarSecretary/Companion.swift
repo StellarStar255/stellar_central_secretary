@@ -83,6 +83,10 @@ enum CredentialStore {
     private var flushing = false
     private var discovering = false
     private var connecting = false
+    private var connectionTask: Task<Void, Never>?
+    private var connectionGeneration = UUID()
+    private var resumePolicy = ConnectionResumePolicy()
+    private var inBackground = false
     private var mayRetryConnection = false
     private var discoveredURLs: [String] = []
     private var sessionEndpoint = ""
@@ -153,7 +157,7 @@ enum CredentialStore {
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) { services.append(service);service.delegate = self;service.resolve(withTimeout:5) }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) { services.removeAll { $0 == service } }
     func netServiceDidResolveAddress(_ sender: NetService) {
-        guard let pair = paired, let host = sender.hostName else { return }
+        guard services.contains(sender), let pair = paired, let host = sender.hostName else { return }
         let txt = NetService.dictionary(fromTXTRecord:sender.txtRecordData() ?? Data())
         guard let id = txt["id"], String(data:id,encoding:.utf8) == pair.info.server_id else { return }
         let endpoint = "https://\(host):\(sender.port)"
@@ -216,45 +220,78 @@ enum CredentialStore {
         let value=error as NSError
         return value.domain==NSURLErrorDomain && [-1001,-1004,-1005,-1009,-1200].contains(value.code)
     }
+    func enteredBackground() {inBackground=true;resumePolicy.enteredBackground()}
+    private func rebuildConnectionTransport() {
+        // Invalidate the previous attempt before cancelling it. A completion
+        // delivered after foregrounding must not overwrite the new connection.
+        connectionGeneration = UUID();connectionTask?.cancel();connectionTask = nil;connecting = false
+        session?.invalidateAndCancel();session = nil;sessionEndpoint = "";online = false
+        wifiRelay?.onAvailable = nil;bluetoothRelay?.onAvailable = nil
+        wifiRelay?.stop();bluetoothRelay?.stop();wifiRelay = nil;bluetoothRelay = nil;relayServerID = ""
+        browser.stop();discovering = false
+        for service in services {service.delegate = nil;service.stop()}
+        services.removeAll();discoveredURLs.removeAll();discover()
+        pairingDiagnostic("resume-transport-rebuilt")
+    }
     func resumeConnection() async {
-        guard let pair=paired,!waiting,!pairingInFlight,!connecting,!busy,!flushing else {return}
+        inBackground=false
+        guard let pair=paired,!waiting,!pairingInFlight else {return}
+        // Let a live upload/question finish. The polling connection will apply
+        // the pending foreground rebuild after that operation releases its state.
+        guard !busy,!flushing else {return}
+        let freshTransport = resumePolicy.needsFreshTransport()
         let start=Date()
-        bluetoothRelay?.reconnectKnownPeer()
-        // A short app switch must not tear down a working pinned TLS session.
-        if online,session != nil {
-            await connect(quickResume:true)
-            if online {
-                pairingDiagnostic("resume-reused-ms-\(Int(Date().timeIntervalSince(start)*1000))")
-                return
+        if freshTransport {
+            rebuildConnectionTransport()
+        } else {
+            guard !connecting else {return}
+            bluetoothRelay?.reconnectKnownPeer()
+            if online,session != nil {
+                await connect(quickResume:true)
+                if online {
+                    pairingDiagnostic("resume-reused-ms-\(Int(Date().timeIntervalSince(start)*1000))")
+                    return
+                }
+                guard mayRetryConnection else {return}
+                // A failed carrier must be rebuilt too, not just its TLS session.
+                rebuildConnectionTransport()
             }
-            guard mayRetryConnection else {return}
         }
         guard !Task.isCancelled else {return}
-        session?.invalidateAndCancel();session=nil;online=false
         status="正在连接 \(pair.info.name)…"
         await connect()
         pairingDiagnostic("resume-\(online ? "connected":"pending")-ms-\(Int(Date().timeIntervalSince(start)*1000))")
     }
     func connect(quickResume:Bool=false) async {
-        guard !waiting, !pairingInFlight, !connecting, var pair = paired else { return }
-        connecting = true;mayRetryConnection=false;defer { connecting = false }
+        guard !inBackground,!waiting,!pairingInFlight,paired != nil else {return}
+        if !busy,!flushing,resumePolicy.needsFreshTransport() {rebuildConnectionTransport()}
+        guard connectionTask == nil else {return}
+        let generation=UUID();connectionGeneration=generation
+        let task=Task {await self.performConnect(quickResume:quickResume,generation:generation)}
+        connectionTask=task
+        await task.value
+        if connectionGeneration==generation {connectionTask=nil}
+    }
+    private func performConnect(quickResume:Bool,generation:UUID) async {
+        guard connectionGeneration==generation,!Task.isCancelled,!waiting,!pairingInFlight,!connecting,var pair=paired else {return}
+        connecting = true;mayRetryConnection=false;defer {if connectionGeneration==generation {connecting=false}}
         do {
             let urls = Array(NSOrderedSet(array: [pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? [pair.info.url]
             let endpoint = online && session != nil ? sessionEndpoint : try await transport(pair.info,urls:Array(urls.prefix(9)),preferred:pair.transport)
-            guard !Task.isCancelled, !pairingInFlight, paired?.info.server_id == pair.info.server_id else { return }
+            guard connectionGeneration==generation,!Task.isCancelled,!pairingInFlight,paired?.info.server_id==pair.info.server_id else {return}
             let nearby = endpoint.hasPrefix("https://127.0.0.1:")
             if !nearby { pair.info.url = endpoint }
             if session == nil || sessionEndpoint != endpoint { configure(pair,endpoint:endpoint) }
             let value:[String:Any]
             do {value = try await request("/status",using:pair,timeout:quickResume ? 3:nil)}
             catch {
-                guard quickResume,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
+                guard connectionGeneration==generation,quickResume,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
                 // A genuinely stale socket gets one fresh, still-pinned TLS
                 // session on the same carrier before rediscovering the Mac.
                 configure(pair,endpoint:endpoint)
                 value = try await request("/status",using:pair,timeout:6)
             }
-            guard !Task.isCancelled, !pairingInFlight, paired?.info.server_id == pair.info.server_id else { return }
+            guard connectionGeneration==generation,!Task.isCancelled,!pairingInFlight,paired?.info.server_id==pair.info.server_id else {return}
             guard value["server_id"] as? String == pair.info.server_id else { throw URLError(.serverCertificateUntrusted) }
             if let urls = value["urls"] as? [String], urls.count <= 8 {
                 let port = URLComponents(string:pair.info.url)?.port ?? 443
@@ -265,13 +302,14 @@ enum CredentialStore {
             }
             let wireless = await wifiRelay?.ownsEndpoint(endpoint) ?? false
             let bluetooth = await bluetoothRelay?.ownsEndpoint(endpoint) ?? false
+            guard connectionGeneration==generation,!Task.isCancelled else {return}
             pair.transport = bluetooth ? "bluetooth" : wireless ? "wifi" : "direct"
             if bluetooth {bluetoothRelay?.rememberVerifiedPeer();wifiRelay?.suspendDiscovery()}
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             paired = pair;try CredentialStore.save(pair)
             online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush()
         } catch {
-            if Task.isCancelled {return}
+            guard connectionGeneration==generation,!Task.isCancelled else {return}
             mayRetryConnection=canRefreshSession(after:error)
             pairingDiagnostic("connect-failed",error:error)
             wifiRelay?.rediscover()
@@ -312,5 +350,5 @@ enum CredentialStore {
         catch { self.error = error.localizedDescription }
     }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
-    func disconnect() { bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
+    func disconnect() { connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
 }

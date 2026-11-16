@@ -63,5 +63,5 @@ if __name__=='__main__':
     if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
     result.check_returncode()
     assert len(service.archive.list())==3
-    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, foreground TLS reuse, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
+    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
   finally:control.shutdown();control.server_close();mobile.stop(disable=True);service.close()
