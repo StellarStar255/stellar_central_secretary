@@ -250,3 +250,37 @@ final class ConnectionResumePolicyTests: XCTestCase {
         XCTAssertTrue(policy.needsFreshTransport(at:start.addingTimeInterval(3600)))
     }
 }
+
+final class LibraryCacheTests: XCTestCase {
+    func testSnapshotsPersistAcrossRestartAndAreScopedToPinnedMac() throws {
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:folder)}
+        let url=folder.appendingPathComponent("library.json"),now=Date()
+        var cache=LibraryCache(serverID:"mac-a",fingerprint:"pin-a")
+        cache.update([Record(["id":"one","title":"Cached note","summary":"Last verified summary"])],query:"",at:now)
+        cache.update([],query:"missing",at:now)
+        try cache.save(to:url)
+        let restored=LibraryCache.load(from:url,serverID:"mac-a",fingerprint:"pin-a")
+        XCTAssertEqual(restored.snapshots[""]?.records.first?.title,"Cached note")
+        XCTAssertNotNil(restored.snapshots["missing"],"Empty searches are cached too")
+        XCTAssertTrue(restored.snapshots[""]!.isFresh(at:now.addingTimeInterval(10)))
+        XCTAssertFalse(restored.snapshots[""]!.isFresh(at:now.addingTimeInterval(61)))
+        XCTAssertEqual(restored.snapshots[""]?.records.count,1,"Expiry must not delete the displayable snapshot")
+        XCTAssertTrue(LibraryCache.load(from:url,serverID:"mac-b",fingerprint:"pin-a").snapshots.isEmpty)
+        XCTAssertTrue(LibraryCache.load(from:url,serverID:"mac-a",fingerprint:"pin-b").snapshots.isEmpty)
+        try Data("broken".utf8).write(to:url)
+        XCTAssertTrue(LibraryCache.load(from:url,serverID:"mac-a",fingerprint:"pin-a").snapshots.isEmpty)
+    }
+    func testQueryHistoryAndRecordCountsAreBounded() {
+        let now=Date();var cache=LibraryCache(serverID:"mac",fingerprint:"pin")
+        let records=(0..<70).map {Record(["id":String($0)])}
+        for number in 0..<20 {cache.update(records,query:String(number),at:now.addingTimeInterval(Double(number)))}
+        XCTAssertEqual(cache.snapshots.count,8)
+        XCTAssertNil(cache.snapshots["0"])
+        XCTAssertEqual(cache.snapshots["19"]?.records.count,50)
+        cache.invalidate()
+        XCTAssertFalse(cache.snapshots["19"]!.isFresh(at:now.addingTimeInterval(20)))
+        XCTAssertEqual(cache.snapshots["19"]?.records.count,50,"A new archive invalidates freshness without clearing visible results")
+    }
+}

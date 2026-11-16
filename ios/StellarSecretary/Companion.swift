@@ -28,10 +28,6 @@ struct Draft: Codable, Identifiable {
     var data: String?
     var created = ISO8601DateFormatter().string(from: Date())
 }
-struct Record: Identifiable {
-    var id: String; var title: String; var summary: String
-    init(_ value: [String: Any]) { id = value["id"] as? String ?? value["item_id"] as? String ?? ""; title = value["title"] as? String ?? "资料"; summary = value["summary"] as? String ?? "" }
-}
 final class PinnedSession: NSObject, URLSessionDelegate {
     let fingerprint: String
     init(_ fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
@@ -72,6 +68,15 @@ enum CredentialStore {
     @Published var code = ""
     @Published var waiting = false
     @Published var records: [Record] = []
+    @Published var libraryQuery = ""
+    @Published var libraryRefreshing = false
+    @Published var libraryUpdatedAt: Date?
+    @Published var libraryMessage = ""
+    private var libraryCache: LibraryCache?
+    private var libraryTask: Task<Void, Never>?
+    private var libraryRequestQuery: String?
+    private var libraryGeneration = UUID()
+    private let libraryCacheURL: URL
     @Published var answer = ""
     @Published var sources: [Record] = []
     @Published var drafts: [Draft] = []
@@ -99,6 +104,7 @@ enum CredentialStore {
         let folder = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0]
         try? FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         queueURL = folder.appendingPathComponent("outbox.json")
+        libraryCacheURL = folder.appendingPathComponent("library-cache.json")
         super.init();paired = CredentialStore.load()
         if let data = try? Data(contentsOf:queueURL) { drafts = (try? JSONDecoder().decode([Draft].self,from:data)) ?? [] }
         browser.delegate = self
@@ -146,6 +152,7 @@ enum CredentialStore {
         }
     }
     private func configure(_ pair: PairedMac, pairing: Bool = false, endpoint: String? = nil) {
+        activateLibraryCache(pair)
         session?.invalidateAndCancel();sessionEndpoint = endpoint ?? pair.info.url
         let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = pairing ? 20 : 900
         configuration.httpMaximumConnectionsPerHost = 2
@@ -225,6 +232,7 @@ enum CredentialStore {
         // Invalidate the previous attempt before cancelling it. A completion
         // delivered after foregrounding must not overwrite the new connection.
         connectionGeneration = UUID();connectionTask?.cancel();connectionTask = nil;connecting = false
+        cancelLibraryRefresh()
         session?.invalidateAndCancel();session = nil;sessionEndpoint = "";online = false
         wifiRelay?.onAvailable = nil;bluetoothRelay?.onAvailable = nil
         wifiRelay?.stop();bluetoothRelay?.stop();wifiRelay = nil;bluetoothRelay = nil;relayServerID = ""
@@ -335,14 +343,62 @@ enum CredentialStore {
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
             else if let url = URL(string:draft.text.trimmingCharacters(in:.whitespacesAndNewlines)), ["https","http"].contains(url.scheme ?? ""), !draft.text.contains("\n") { content["url"] = url.absoluteString;content["text"] = "" }
-            do { _ = try await request("/ingest",body:["request_id":draft.id,"content":content]);try persist(drafts.filter { $0.id != draft.id }) }
+            do {
+                _ = try await request("/ingest",body:["request_id":draft.id,"content":content])
+                try persist(drafts.filter { $0.id != draft.id })
+                libraryCache?.invalidate()
+                if let cache=libraryCache {try? cache.save(to:libraryCacheURL)}
+            }
             catch { self.error = "待发送内容已保留：" + error.localizedDescription;return }
         }
     }
-    func search(_ text: String) async {
-        guard online else { error = "请先连接 Mac";return };busy = true;defer { busy = false }
-        do { let value = try await request("/items?q=" + (text.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed.subtracting(CharacterSet(charactersIn:"&+#?"))) ?? ""));records = (value["items"] as? [[String:Any]] ?? []).map(Record.init);error = "" }
-        catch { self.error = error.localizedDescription }
+    private func activateLibraryCache(_ pair: PairedMac) {
+        guard libraryCache?.belongsTo(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint) != true else {return}
+        cancelLibraryRefresh();libraryQuery="";records=[];libraryUpdatedAt=nil;libraryMessage=""
+        libraryCache=LibraryCache.load(from:libraryCacheURL,serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
+        showLibrarySnapshot(query:"")
+    }
+    private func showLibrarySnapshot(query:String) {
+        let snapshot=libraryCache?.snapshots[query]
+        records=snapshot?.records ?? [];libraryUpdatedAt=snapshot?.updatedAt
+    }
+    private func cancelLibraryRefresh() {
+        libraryGeneration=UUID();libraryTask?.cancel();libraryTask=nil;libraryRequestQuery=nil;libraryRefreshing=false
+    }
+    func openLibrary() async {await search(libraryQuery,force:false)}
+    func search(_ text: String,force:Bool=true) async {
+        guard let pair=paired else {return}
+        activateLibraryCache(pair)
+        let query=String(text.prefix(200))
+        libraryQuery=query;showLibrarySnapshot(query:query)
+        guard online else {
+            libraryMessage=libraryUpdatedAt == nil ? "连接 Mac 后加载资料":"离线缓存 · 连接后自动更新"
+            return
+        }
+        if let task=libraryTask,libraryRequestQuery==query {await task.value;return}
+        if libraryTask != nil {cancelLibraryRefresh()}
+        if !force,libraryCache?.snapshots[query]?.isFresh() == true {libraryMessage="";return}
+        cancelLibraryRefresh()
+        let generation=UUID();libraryGeneration=generation;libraryRequestQuery=query;libraryRefreshing=true;libraryMessage=""
+        let task=Task {await self.fetchLibrary(query:query,pair:pair,generation:generation)}
+        libraryTask=task
+        await task.value
+        if libraryGeneration==generation {libraryTask=nil;libraryRequestQuery=nil;libraryRefreshing=false}
+    }
+    private func fetchLibrary(query:String,pair:PairedMac,generation:UUID) async {
+        do {
+            let escaped=query.addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed.subtracting(CharacterSet(charactersIn:"&+#?"))) ?? ""
+            let value=try await request("/items?q="+escaped,using:pair,timeout:30)
+            guard !Task.isCancelled,libraryGeneration==generation,paired?.info.server_id==pair.info.server_id,
+                  libraryCache?.belongsTo(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)==true else {return}
+            guard let items=value["items"] as? [[String:Any]] else {throw URLError(.cannotParseResponse)}
+            libraryCache?.update(items.map(Record.init),query:query)
+            if let cache=libraryCache {try? cache.save(to:libraryCacheURL)}
+            if libraryQuery==query {showLibrarySnapshot(query:query);libraryMessage=""}
+        } catch {
+            guard !Task.isCancelled,libraryGeneration==generation else {return}
+            libraryMessage=libraryUpdatedAt == nil ? "暂时无法加载资料，请稍后下拉重试":"更新未完成，继续显示上次的资料"
+        }
     }
     func ask(_ text: String) async {
         guard online else { error = "请先连接 Mac";return };busy = true;defer { busy = false }
@@ -350,5 +406,5 @@ enum CredentialStore {
         catch { self.error = error.localizedDescription }
     }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
-    func disconnect() { connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
+    func disconnect() { cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
 }

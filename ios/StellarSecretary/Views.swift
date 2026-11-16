@@ -112,19 +112,25 @@ struct CaptureView: View {
 }
 struct LibraryView: View {
     @EnvironmentObject var model: Companion
-    @State private var query = ""
+    private var query: String { model.libraryQuery }
     @FocusState private var searching: Bool
     var body: some View {
         NavigationStack {
             List {
-                Section { ConnectionBanner();TextField("搜索资料或输入问题",text:$query).focused($searching).submitLabel(.search).onSubmit { searching = false;Task { await model.search(query) } }
+                Section { ConnectionBanner();TextField("搜索资料或输入问题",text:$model.libraryQuery).focused($searching).submitLabel(.search).onSubmit { searching = false;Task { await model.search(query) } }
                     HStack { Button("搜索资料") { searching = false;Task { await model.search(query) } };Spacer();Button("问知识库") { searching = false;Task { await model.ask(query) } }.disabled(query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) }.disabled(model.busy || !model.online)
                 }
                 if model.busy { Section { HStack { ProgressView();Text("正在查询 Mac 上的知识库…") } } }
+                if model.libraryRefreshing {
+                    Section { HStack { ProgressView();Text(model.libraryUpdatedAt == nil ? "正在加载资料…":"正在后台更新资料…") }.font(.footnote).foregroundStyle(.secondary) }
+                }
+                if !model.libraryMessage.isEmpty { Section { Text(model.libraryMessage).font(.footnote).foregroundStyle(.secondary) } }
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
                 if !model.answer.isEmpty { Section("回答") { Text(model.answer).textSelection(.enabled);ForEach(model.sources) { item in NavigationLink(item.title) { DetailView(record:item) } } } }
                 Section("资料") { ForEach(model.records) { item in NavigationLink { DetailView(record:item) } label: { VStack(alignment:.leading,spacing:5) { Text(item.title);if !item.summary.isEmpty { Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) } } } } }
-            }.navigationTitle("知识库").task { if model.online { await model.search("") } }
+            }.navigationTitle("知识库")
+            .task(id:model.online) {await model.openLibrary()}
+            .refreshable {await model.search(query)}
         }
     }
 }

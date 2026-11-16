@@ -24,6 +24,10 @@ Credentials are saved in the phone Keychain; the QR contains a short-lived invit
 - A locally saved file is not guaranteed to survive deleting the app. Do not uninstall with unsent captures.
 - Removing a phone on the desktop immediately revokes new requests. Turning off phone connection stops discovery and new connections; already running requests may finish.
 
+## Library list cache
+
+The phone keeps the last successful list results (titles and summaries) for up to eight queries, scoped to the paired Mac ID and pinned certificate. Opening the library displays that snapshot immediately, including after restarting offline. Results less than a minute old are reused; older results refresh in the background. Pull to refresh or use Search to update immediately. A failed update keeps the previous list, and successful phone captures mark the cache for refresh. The cache is protected on the phone, excluded from backup, and cleared when unpairing; original documents and AI answers are not cached.
+
 ## Validation
 
 ```sh
