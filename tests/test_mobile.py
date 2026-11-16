@@ -239,3 +239,24 @@ class MobileTest(unittest.TestCase):
   with patch('secretary.mobile_preview.Image.open',side_effect=AssertionError('Must reuse generated derivative')):
    self.assertEqual(download(file['preview_path'])[0],preview)
   self.assertEqual(hashlib.sha256(download(file['path'])[0]).digest(),hashlib.sha256(raw).digest())
+
+ def test_shared_chat_requires_pairing_and_uses_desktop_background_store(self):
+  self.assertEqual(self.request('/chats')[0],401)
+  self.approve()
+  created=self.request('/chats',{'request_id':'shared-chat-fixture'},self.credential)[1]['chat_id']
+  self.assertEqual(self.request('/chats',{'request_id':'shared-chat-fixture'},self.credential)[1]['chat_id'],created)
+  self.assertEqual(self.request('/chats/'+created,credential=self.credential)[0],200)
+  self.assertEqual(self.request('/chats/'+created+'/messages',{'request_id':'not-paired','text':'Hello'})[0],401)
+  with patch.object(self.s,'ask_library',return_value={'answer':'A shared desktop answer','sources':[]}) as model:
+   path='/chats/'+created+'/messages';body={'request_id':'shared-phone-message','text':'A chat message'}
+   self.assertTrue(self.request(path,body,self.credential)[1]['accepted'])
+   import time
+   deadline=time.monotonic()+3
+   while self.s.question_jobs.active_count() and time.monotonic()<deadline:time.sleep(.01)
+   self.assertTrue(self.request(path,body,self.credential)[1]['accepted']);self.assertEqual(model.call_count,1)
+  data=self.request('/chats/'+created,credential=self.credential)[1]
+  self.assertEqual(data['messages'][-1]['text'],'A shared desktop answer')
+  self.assertEqual(self.s.chat_history()['conversations'][0]['messages'][-1]['text'],'A shared desktop answer')
+  self.assertNotIn('token',json.dumps(data));self.assertNotIn('fingerprint',json.dumps(data))
+  ident=self.m.device(self.credential);self.m.revoke(ident)
+  self.assertEqual(self.request('/chats/'+created,credential=self.credential)[0],401)

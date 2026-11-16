@@ -28,6 +28,12 @@ Credentials are saved in the phone Keychain; the QR contains a short-lived invit
 
 The phone keeps the last successful list results (titles and summaries) for up to eight queries, scoped to the paired Mac ID and pinned certificate. Opening the library displays that snapshot immediately, including after restarting offline. Results less than a minute old are reused; older results refresh in the background. Pull to refresh or use Search to update immediately. A failed update keeps the previous list, and successful phone captures mark the cache for refresh. The cache is protected on the phone, excluded from backup, and cleared when unpairing; original documents and AI answers are not cached.
 
+## Shared desktop chat
+
+The **聊天** tab opens the desktop's existing conversations. Choose a thread from **会话**, continue it on either device, or create a new one. **问知识库** in Search opens this same shared chat. Retrieval, model requests, retained context and final transcript storage stay on the Mac. Source citations open the existing record details. The phone displays partial answers and can stop an active answer; closing the phone app leaves accepted questions running on the Mac.
+
+Cached transcripts appear immediately, including offline. The phone protects and excludes from backup the latest 100 messages in up to five cached threads, scoped to the paired Mac and certificate. Older messages load on demand. Offline messages for an existing thread are durably queued and retried on reconnect with a stable request ID, so a lost acknowledgement does not run the question twice. New conversations require a connection. Keep the Mac awake and its service running; this does not provide internet remote access.
+
 ## Validation
 
 ```sh

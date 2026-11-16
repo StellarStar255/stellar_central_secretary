@@ -5,6 +5,8 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 
+from .shared_chat import ChatBusy
+
 SERVICE_TYPE='_stellar-sec._tcp.local.'
 MAX_BODY=16*1024*1024
 
@@ -34,6 +36,8 @@ def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 class Mobile:
     def __init__(self,service):
         self.service=service;self.root=service.archive.root/'mobile';self.path=self.root/'state.json'
+        from .shared_chat import SharedChat
+        self.chats=SharedChat(service)
         self.peer_bridge=None
         self.lock=threading.RLock();self.server=None;self.discovery=None;self.info=None;self.pending={};self.invite=None;self.error='';self.operations=threading.BoundedSemaphore(2);self.monitor_stop=threading.Event();self.published_ips=[]
         self.state=json.loads(self.path.read_text()) if self.path.exists() else {'server_id':uuid.uuid4().hex,'devices':{},'receipts':{},'enabled':False}
@@ -317,6 +321,17 @@ class Mobile:
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
                     if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)]})
+                    if not post and parsed.path=='/chats':return self.send(200,manager.chats.listing(parse_qs(parsed.query).get('revision',[''])[0]))
+                    if post and parsed.path=='/chats':return self.send(200,manager.chats.create(device,body))
+                    chat_match=re.fullmatch(r'/chats/([^/]{1,100})(?:/(messages|stop))?',parsed.path)
+                    if chat_match:
+                        from urllib.parse import unquote
+                        chat_id=unquote(chat_match[1])
+                        if post and chat_match[2]=='messages':return self.send(200,manager.chats.send(device,chat_id,body))
+                        if post and chat_match[2]=='stop':return self.send(200,manager.chats.stop(chat_id,body))
+                        if not post and chat_match[2] is None:
+                            query=parse_qs(parsed.query)
+                            return self.send(200,manager.chats.detail(chat_id,query.get('revision',[''])[0],query.get('before',[''])[0],query.get('partial_offset',['0'])[0],query.get('partial_id',[''])[0]))
                     file_match=re.fullmatch(r'/items/([a-f0-9]{32})/files/(base|[a-f0-9]{32})/(original|[a-f0-9]{32})(/preview)?',parsed.path)
                     if not post and file_match:
                         file,source=manager.attachment(*file_match.groups()[:3]);size=source.stat().st_size
@@ -361,6 +376,7 @@ class Mobile:
                             with manager.service.lock:manager.service.questions-=1
                             manager.operations.release()
                     return self.send(404,{'error':'不存在'})
+                except ChatBusy as exc:return self.send(409,{'error':str(exc)})
                 except PermissionError as exc:self.send(403,{'error':str(exc)})
                 except (ValueError,KeyError,TypeError) as exc:self.send(400,{'error':str(exc)})
                 except Exception:self.send(500,{'error':'手机请求未完成，请在电脑端检查任务状态'})

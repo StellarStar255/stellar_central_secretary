@@ -49,10 +49,11 @@ struct ContentView: View {
                     }.padding(30).navigationTitle("Stellar Secretary")
                 }
             } else {
-                TabView {
-                    CaptureView().tabItem { Label("归档",systemImage:"square.and.pencil") }
-                    LibraryView().tabItem { Label("检索",systemImage:"magnifyingglass") }
-                    DeviceView().tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }
+                TabView(selection:$model.selectedTab) {
+                    CaptureView().tabItem { Label("归档",systemImage:"square.and.pencil") }.tag("archive")
+                    ChatView().tabItem {Label("聊天",systemImage:"bubble.left.and.bubble.right")}.tag("chat")
+                    LibraryView().tabItem { Label("检索",systemImage:"magnifyingglass") }.tag("library")
+                    DeviceView().tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }.tag("device")
                 }.tint(.orange)
             }
         }.fullScreenCover(isPresented:$scan) {
@@ -107,6 +108,111 @@ struct CaptureView: View {
             .fileImporter(isPresented:$importing,allowedContentTypes:[.item]) { result in
                 do { let url = try result.get();let access = url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } };let values = try url.resourceValues(forKeys:[.fileSizeKey]);guard (values.fileSize ?? Int.max) <= 10*1024*1024 else { model.error = "文件超过 10 MB";return };image = try Data(contentsOf:url);filename = url.lastPathComponent }
                 catch { model.error = "无法读取文件" }
+            }
+        }
+    }
+}
+struct ChatView: View {
+    @EnvironmentObject var model:Companion
+    @State private var input=""
+    @State private var inputDrafts:[String:String]=[:]
+    @State private var choosing=false
+    @State private var removing:PendingChatMessage?
+    @State private var confirmingRemoval=false
+    @FocusState private var typing:Bool
+    private var messages:[ChatMessage] {model.chatSnapshot?.messages ?? []}
+    private var queued:[PendingChatMessage] {
+        let known=Set(messages.map(\.clientID))
+        return model.currentChatQueue.filter {($0.chatID==model.selectedChatID || model.selectedChatID.isEmpty) && !known.contains($0.id)}
+    }
+    private func stage(_ value:String) -> String {
+        switch value {
+        case "queued":return "等待电脑处理…"
+        case "planning":return "电脑正在理解问题…"
+        case "retrieving":return "电脑正在检索资料…"
+        case "answering","partial":return "电脑正在回答…"
+        case "images","expanding":return "电脑正在核对资料…"
+        case "approval":return "请在电脑上确认模型使用后继续"
+        default:return "电脑正在处理…"
+        }
+    }
+    var body:some View {
+        NavigationStack {
+            VStack(spacing:0) {
+                ConnectionBanner().padding(.horizontal).frame(maxWidth:.infinity,alignment:.leading)
+                if !model.online {Text("离线时显示已同步记录，新消息会暂存在手机").font(.caption).foregroundStyle(.secondary).padding(.horizontal)}
+                if !model.chatNotice.isEmpty {Text(model.chatNotice).font(.footnote).foregroundStyle(.orange).padding(.horizontal)}
+                ScrollViewReader {reader in
+                    ScrollView {
+                        LazyVStack(alignment:.leading,spacing:16) {
+                            if model.chatSnapshot?.hasMore==true {Button("加载更早的消息") {Task {await model.syncSelectedChat(older:true)}}.disabled(!model.online)}
+                            if messages.isEmpty && queued.isEmpty {
+                                Text(model.selectedChatID.isEmpty ? "选择电脑上的会话，或新建对话":"继续这段对话，电脑会结合相同的上下文处理").foregroundStyle(.secondary).padding(.vertical,24)
+                            }
+                            ForEach(messages) {message in
+                                HStack(alignment:.top) {
+                                    if message.role=="user" {Spacer(minLength:35)}
+                                    VStack(alignment:.leading,spacing:8) {
+                                        Text(message.role=="user" ? "我":"电脑").font(.caption).foregroundStyle(.secondary)
+                                        if !message.text.isEmpty {Text(message.text).textSelection(.enabled).foregroundStyle(message.error ? Color.orange:Color.primary)}
+                                        ForEach(message.files,id:\.self) {Text($0).font(.caption).foregroundStyle(.secondary)}
+                                        if message.pending || message.requestState=="running" {
+                                            Text(stage(model.chatStage)).font(.footnote).foregroundStyle(.secondary)
+                                            if !model.chatPartial.isEmpty {Text(model.chatPartial).textSelection(.enabled);Text("回答生成中").font(.caption).foregroundStyle(.secondary)}
+                                            Button("停止回答") {Task {await model.stopChatAnswer(message)}}.disabled(!model.online)
+                                        }
+                                        ForEach(Array(message.sources.enumerated()),id:\.offset) {_,source in NavigationLink {DetailView(record:source)} label:{Label(source.title,systemImage:"doc.text").font(.footnote)}}
+                                    }.padding(12).background(message.role=="user" ? Color.accentColor.opacity(0.12):Color.secondary.opacity(0.08),in:RoundedRectangle(cornerRadius:14)).id(message.id)
+                                    if message.role != "user" {Spacer(minLength:20)}
+                                }
+                            }
+                            ForEach(queued) {pending in
+                                VStack(alignment:.leading,spacing:8) {
+                                    Text(pending.text).textSelection(.enabled)
+                                    Text(pending.lastError.isEmpty ? "待发送 · 连接后由电脑处理":pending.lastError).font(.footnote).foregroundStyle(.secondary)
+                                    HStack {
+                                        if !pending.lastError.isEmpty {Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)}
+                                        Button("移除待发消息",role:.destructive) {removing=pending;confirmingRemoval=true}.disabled(model.chatSubmitting)
+                                    }
+                                }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(Color.accentColor.opacity(0.08),in:RoundedRectangle(cornerRadius:14)).id(pending.id)
+                            }
+                            Color.clear.frame(height:1).id("chat-bottom")
+                        }.padding()
+                    }.scrollDismissesKeyboard(.interactively)
+                    .onChange(of:messages.last?.id) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
+                    .onChange(of:queued.count) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
+                }
+                HStack(alignment:.bottom) {
+                    TextField("发消息，继续这段对话…",text:$input,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).accessibilityIdentifier("chat-input").disabled(model.selectedChatID.isEmpty)
+                    Button("发送") {
+                        let value=input;typing=false
+                        Task {if await model.enqueueChat(value),input==value {input=""}}
+                    }.buttonStyle(.borderedProminent).accessibilityIdentifier("chat-send").disabled(model.selectedChatID.isEmpty || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || model.chatSubmitting)
+                }.padding()
+            }.navigationTitle(model.chatSnapshot?.title ?? "聊天").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement:.topBarLeading) {Button("会话") {choosing=true}}
+                ToolbarItem(placement:.topBarTrailing) {Button {Task {await model.createChat()}} label:{Image(systemName:"square.and.pencil")}.accessibilityLabel("新建聊天").disabled(!model.online || model.chatSubmitting)}
+            }
+            .sheet(isPresented:$choosing) {
+                NavigationStack {
+                    List {
+                        ForEach(model.chatThreads) {chat in Button {model.selectChat(chat.id);choosing=false} label:{HStack {Text(chat.title);Spacer();if chat.running {ProgressView()};if chat.id==model.selectedChatID {Image(systemName:"checkmark")}}}}
+                        if !model.currentChatQueue.isEmpty {
+                            Section("手机待发送") {ForEach(model.currentChatQueue) {pending in VStack(alignment:.leading) {Text(pending.text).lineLimit(3);if !pending.lastError.isEmpty {Text(pending.lastError).font(.caption).foregroundStyle(.orange)}}}}
+                        }
+                    }.navigationTitle("电脑上的会话").toolbar {Button("关闭") {choosing=false}}.refreshable {await model.syncChatList()}
+                }
+            }
+            .alert("移除待发消息？",isPresented:$confirmingRemoval) {Button("移除",role:.destructive) {if let pending=removing {model.removeQueuedChatMessage(pending.id)}};Button("取消",role:.cancel) {}} message:{Text("这条尚未发送的内容将从手机移除。")}
+            .onChange(of:model.selectedChatID) {old,new in inputDrafts[old]=input;input=inputDrafts[new] ?? ""}
+            .task(id:model.selectedChatID+String(model.online)) {
+                guard model.online else {return};var tick=0
+                while !Task.isCancelled && model.online {
+                    if tick%5==0 {await model.syncChatList()}
+                    await model.flushChatMessages();await model.syncSelectedChat()
+                    tick+=1;try? await Task.sleep(nanoseconds:model.chatSnapshot?.running==true ? 1_500_000_000:3_000_000_000)
+                }
             }
         }
     }

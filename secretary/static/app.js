@@ -124,7 +124,12 @@ function mergeQuestionMessages(remote){
   for(const message of saved.messages||[]){
    if(message.externalArchive&&!local.messages.some(m=>m.id===message.id)){local.messages.push(message);continue}
    if(!message.requestId)continue;
-   const target=local.messages.find(m=>m.id===message.id);if(!target||(target.requestVersion||0)>(message.requestVersion||0))continue;
+   let target=local.messages.find(m=>m.id===message.id);
+   if(!target){
+    const question=saved.messages.find(m=>m.id===message.questionId&&m.role==='user');
+    if(question?.mobileRequestId){if(!local.messages.some(m=>m.id===question.id))local.messages.push(question);local.messages.push(message);continue}
+   }
+   if(!target||(target.requestVersion||0)>(message.requestVersion||0))continue;
    if(activeQuestion?.messageId===message.id&&activeQuestion.id!==message.requestId)continue;
    for(const field of fields){if(field in message)target[field]=message[field];else delete target[field]}
   }

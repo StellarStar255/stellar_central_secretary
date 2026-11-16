@@ -266,3 +266,33 @@ for(const pathQuestion of ['这个文件夹是什么？\n/tmp/Project','比较�
  context.pathQuestion=pathQuestion;assert.equal(vm.runInContext('StellarLocalPaths.note(pathQuestion)',context),null);
 }
 console.log('PASS: local path bookmarks take precedence over follow-up chat, preserve explicit questions and ignore web URLs');
+
+// A stale desktop snapshot must still pick up a new phone question/answer pair.
+const previousSharedConversations=vm.runInContext("conversations",context);
+context.phoneRemote={conversations:[{id:'shared-phone',title:'Shared',updated:2,messages:[
+ {id:'phone-user',role:'user',text:'Phone continuation',mobileRequestId:'client-request'},
+ {id:'phone-answer',role:'assistant',text:'Saved on desktop',requestId:'f'.repeat(32),requestState:'done',questionId:'phone-user',requestVersion:2}
+]}]};
+vm.runInContext('conversations=[{id:"shared-phone",title:"Local title",updated:9999999999999,messages:[]}];mergeQuestionMessages(phoneRemote);mergeQuestionMessages(phoneRemote)',context);
+assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(conversations[0].messages.map(m=>m.id))',context)),['phone-user','phone-answer']);
+assert.equal(vm.runInContext('conversations[0].messages[1].text',context),'Saved on desktop');
+context.previousSharedConversations=previousSharedConversations;vm.runInContext('conversations=previousSharedConversations',context);
+
+// Compare phone context extraction with the existing desktop rules directly.
+const childProcess=require('child_process');
+const python=fs.existsSync('.venv/bin/python')?'.venv/bin/python':process.platform==='win32'?'python':'python3';
+const basis={id:'basis-parity',messages:[
+ {id:'q0',role:'user',text:'我的课表',knowledgeQuestion:true},
+ {id:'a0',role:'assistant',text:'周二有课。[1]',sources:[{number:1,item_id:'a'.repeat(32)}]},
+ {id:'condition',role:'user',text:'以后请用中文回答',knowledgeQuestion:true},
+ {id:'ack',role:'assistant',text:'好的',sources:[]},
+ ...Array.from({length:8},(_,i)=>[{id:'q'+(i+1),role:'user',text:'后续问题'+i,knowledgeQuestion:true},{id:'a'+(i+1),role:'assistant',text:'普通回复',sources:[]}]).flat(),
+ {id:'current',role:'user',text:'接着说',knowledgeQuestion:true}
+],contextEdits:{condition:'以后请使用简体中文回答'}};
+for(const modifications of [{},{contextIgnored:['condition']},{contextReset:'ack'}]){
+ const chat={...basis,...modifications};context.contextParity=chat;
+ const desktop=JSON.parse(vm.runInContext('JSON.stringify([knowledgeHistory(contextParity,contextParity.messages.at(-1)),rememberedContext(contextParity,contextParity.messages.at(-1)).map(({statement,source_ids})=>({statement,source_ids}))])',context));
+ const phone=JSON.parse(childProcess.execFileSync(python,['-c','import json,sys;from secretary.shared_chat import context;c=json.load(sys.stdin);print(json.dumps(context(c,len(c["messages"])-1)))'],{input:JSON.stringify(chat),encoding:'utf8'}));
+ assert.deepEqual(phone,desktop);
+}
+console.log('PASS: cross-device message preservation and identical mobile/desktop conversation context');

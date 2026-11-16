@@ -118,6 +118,22 @@ enum CredentialStore {
     private var libraryRequestQuery: String?
     private var libraryGeneration = UUID()
     private let libraryCacheURL: URL
+    @Published var selectedTab="archive"
+    @Published var chatThreads:[ChatThread]=[]
+    @Published var selectedChatID=""
+    @Published var chatSnapshot:ChatSnapshot?
+    @Published var pendingChatMessages:[PendingChatMessage]=[]
+    @Published var chatNotice=""
+    @Published var chatSubmitting=false
+    @Published var chatStage=""
+    @Published var chatPartial=""
+    private var partialMessageID=""
+    private var partialOffset=0
+    private var chatCache:ChatCache?
+    private var chatListSyncing=false
+    private var chatFetchingID:String?
+    private let chatCacheURL:URL
+    private let chatQueueURL:URL
     @Published var answer = ""
     @Published var sources: [Record] = []
     @Published var drafts: [Draft] = []
@@ -146,8 +162,11 @@ enum CredentialStore {
         try? FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         queueURL = folder.appendingPathComponent("outbox.json")
         libraryCacheURL = folder.appendingPathComponent("library-cache.json")
+        chatCacheURL=folder.appendingPathComponent("chat-cache.json")
+        chatQueueURL=folder.appendingPathComponent("chat-outbox.json")
         super.init();paired = CredentialStore.load()
         if let data = try? Data(contentsOf:queueURL) { drafts = (try? JSONDecoder().decode([Draft].self,from:data)) ?? [] }
+        if let data=try? Data(contentsOf:chatQueueURL) {pendingChatMessages=(try? JSONDecoder().decode([PendingChatMessage].self,from:data)) ?? []}
         browser.delegate = self
         if let pair = paired { configure(pair);status = "正在连接 \(pair.info.name)…";discover() }
     }
@@ -194,6 +213,7 @@ enum CredentialStore {
     }
     private func configure(_ pair: PairedMac, pairing: Bool = false, endpoint: String? = nil) {
         activateLibraryCache(pair)
+        activateChatCache(pair)
         session?.invalidateAndCancel();sessionEndpoint = endpoint ?? pair.info.url
         let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = pairing ? 20 : 900
         configuration.httpMaximumConnectionsPerHost = 2
@@ -241,7 +261,7 @@ enum CredentialStore {
                 let response = try await request("/status",using:existing)
                 guard response["server_id"] as? String == info.server_id else { throw URLError(.serverCertificateUntrusted) }
                 try CredentialStore.save(existing);paired = existing;online = true;status = "已连接 · \(info.name)";error = ""
-                pairingDiagnostic(endpoint.hasPrefix("https://127.0.0.1:") ? "existing-pair-nearby-verified" : "existing-pair-direct-verified");requestAccepted?();discover();await flush();return
+                pairingDiagnostic(endpoint.hasPrefix("https://127.0.0.1:") ? "existing-pair-nearby-verified" : "existing-pair-direct-verified");requestAccepted?();discover();await flush();await flushChatMessages();return
             }
             let credential = (0..<48).map { _ in UInt8.random(in:0...255) };let value = Data(credential).base64EncodedString()
             let pair = PairedMac(info:info,credential:value);error = ""
@@ -356,7 +376,7 @@ enum CredentialStore {
             if bluetooth {bluetoothRelay?.rememberVerifiedPeer();wifiRelay?.suspendDiscovery()}
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             paired = pair;try CredentialStore.save(pair)
-            online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush()
+            online = true;status = "已连接 · \(pair.info.name)";error = "";discover();await flush();await flushChatMessages()
         } catch {
             guard connectionGeneration==generation,!Task.isCancelled else {return}
             mayRetryConnection=canRefreshSession(after:error)
@@ -442,9 +462,129 @@ enum CredentialStore {
         }
     }
     func ask(_ text: String) async {
-        guard online else { error = "请先连接 Mac";return };busy = true;defer { busy = false }
-        do { let value = try await request("/ask",body:["question":text]);answer = value["answer"] as? String ?? "";sources = (value["sources"] as? [[String:Any]] ?? []).map(Record.init);error = "" }
-        catch { self.error = error.localizedDescription }
+        guard online else {error="请先连接电脑";return}
+        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {return}
+        if selectedChatID.isEmpty {await syncChatList()}
+        if selectedChatID.isEmpty {await createChat()}
+        selectedTab="chat"
+        _ = await enqueueChat(text)
+    }
+    var currentChatQueue:[PendingChatMessage] {
+        guard let pair=paired else {return []}
+        return pendingChatMessages.filter {$0.serverID==pair.info.server_id && $0.fingerprint==pair.info.fingerprint}
+    }
+    private func activateChatCache(_ pair:PairedMac) {
+        guard chatCache?.serverID != pair.info.server_id || chatCache?.fingerprint != pair.info.fingerprint else {return}
+        chatCache=ChatCache.load(chatCacheURL,serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
+        chatThreads=chatCache?.threads ?? [];selectedChatID=chatCache?.selectedID ?? "";chatSnapshot=chatCache?.snapshots[selectedChatID]
+        chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice=""
+    }
+    private func saveChatCache() {if var cache=chatCache {cache.selectedID=selectedChatID;try? cache.save(chatCacheURL);chatCache=cache}}
+    private func chatPath(_ id:String) -> String {"/chats/"+(id.addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? "")}
+    func selectChat(_ id:String) {
+        selectedChatID=id;chatSnapshot=chatCache?.snapshots[id];chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice="";saveChatCache()
+    }
+    func syncChatList() async {
+        guard online,!chatListSyncing,let pair=paired else {return};chatListSyncing=true;defer {chatListSyncing=false}
+        do {
+            let value=try await request("/chats?revision="+(chatCache?.listRevision ?? ""),using:pair)
+            guard !Task.isCancelled,paired?.info.server_id==pair.info.server_id,chatCache?.fingerprint==pair.info.fingerprint else {return}
+            if value["unchanged"] as? Bool != true {
+                guard let chats=value["conversations"] as? [[String:Any]] else {throw URLError(.cannotParseResponse)}
+                chatThreads=chats.map(ChatThread.init);chatCache?.threads=chatThreads
+                let alive=Set(chatThreads.map(\.id))
+                if var cache=chatCache {cache.snapshots=cache.snapshots.filter {alive.contains($0.key)};chatCache=cache}
+                if !alive.contains(selectedChatID) {
+                    let active=value["active_id"] as? String ?? ""
+                    selectChat(alive.contains(active) ? active:chatThreads.first?.id ?? "")
+                }
+            }
+            chatCache?.listRevision=value["revision"] as? String ?? "";saveChatCache();chatNotice=""
+        } catch {if !Task.isCancelled {chatNotice="对话同步暂未完成，保留手机缓存"}}
+    }
+    func syncSelectedChat(older:Bool=false) async {
+        let id=selectedChatID
+        guard online,!id.isEmpty,chatFetchingID != id,let pair=paired else {return}
+        chatFetchingID=id;defer {if chatFetchingID==id {chatFetchingID=nil}}
+        let before=older ? chatSnapshot?.messages.first?.id ?? "":""
+        let revision=older ? "":chatSnapshot?.revision ?? ""
+        do {
+            let value=try await request(chatPath(id)+"?revision="+revision+"&before="+(before.addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? "")+"&partial_offset="+String(partialOffset)+"&partial_id="+(partialMessageID.addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? ""),using:pair)
+            guard !Task.isCancelled,selectedChatID==id,paired?.info.server_id==pair.info.server_id,chatCache?.fingerprint==pair.info.fingerprint else {return}
+            if value["unchanged"] as? Bool != true {
+                guard let messages=value["messages"] as? [[String:Any]] else {throw URLError(.cannotParseResponse)}
+                let incoming=messages.map(ChatMessage.init),deleted=Set(value["deleted_ids"] as? [String] ?? [])
+                let old=chatSnapshot?.messages.filter {!deleted.contains($0.id)} ?? []
+                let ids=Set(incoming.map(\.id))
+                let combined=older ? incoming+old.filter {!ids.contains($0.id)}:old.filter {!ids.contains($0.id)}+incoming
+                chatSnapshot=ChatSnapshot(id:id,title:value["title"] as? String ?? "对话",revision:older ? "":value["revision"] as? String ?? "",messages:combined,hasMore:older || old.count<=incoming.count ? value["has_more"] as? Bool ?? false:chatSnapshot?.hasMore ?? false)
+                chatCache?.snapshots[id]=chatSnapshot;saveChatCache()
+            }
+            if let progress=value["progress"] as? [String:Any] {
+                let mid=progress["message_id"] as? String ?? ""
+                if mid != partialMessageID || progress["reset"] as? Bool == true {chatPartial=""}
+                partialMessageID=mid;partialOffset=progress["offset"] as? Int ?? 0
+                chatPartial += progress["partial"] as? String ?? "";chatStage=progress["stage"] as? String ?? ""
+            } else {chatPartial="";partialMessageID="";partialOffset=0;chatStage=""}
+            chatNotice=""
+        } catch {
+            if !Task.isCancelled {
+                chatNotice=error.localizedDescription
+                if (error as NSError).code==400 && chatNotice.contains("会话不存在") {chatCache?.snapshots.removeValue(forKey:id);chatSnapshot=nil;await syncChatList()}
+            }
+        }
+    }
+    func createChat() async {
+        guard online else {chatNotice="连接电脑后可以新建对话";return}
+        do {
+            let value=try await request("/chats",body:["request_id":UUID().uuidString])
+            guard let id=value["chat_id"] as? String else {throw URLError(.cannotParseResponse)}
+            await syncChatList();selectChat(id);await syncSelectedChat()
+        } catch {chatNotice=error.localizedDescription}
+    }
+    private func persistChatQueue(_ messages:[PendingChatMessage]) throws {
+        try ChatCache.protectedWrite(JSONEncoder().encode(messages),to:chatQueueURL);pendingChatMessages=messages
+    }
+    func enqueueChat(_ text:String) async -> Bool {
+        guard let pair=paired,!selectedChatID.isEmpty else {chatNotice="请先选择或新建对话";return false}
+        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
+        do {try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:selectedChatID,text:text)]);chatNotice="";await flushChatMessages();return true}
+        catch {chatNotice="手机暂存失败，请保留输入内容";return false}
+    }
+    func retryChatMessage(_ id:String) async {
+        var messages=pendingChatMessages
+        if let index=messages.firstIndex(where:{$0.id==id}) {messages[index].lastError="";do {try persistChatQueue(messages)} catch {chatNotice="无法保存待发消息";return}}
+        await flushChatMessages()
+    }
+    func removeQueuedChatMessage(_ id:String) {
+        guard !chatSubmitting else {return}
+        do {try persistChatQueue(pendingChatMessages.filter {$0.id != id})} catch {chatNotice="无法移除待发消息"}
+    }
+    func flushChatMessages() async {
+        guard online,!chatSubmitting else {return};chatSubmitting=true;defer {chatSubmitting=false}
+        var changed=false
+        for pending in currentChatQueue where pending.lastError.isEmpty {
+            if chatSnapshot?.id==pending.chatID && chatSnapshot?.running==true {continue}
+            do {
+                let value=try await request(chatPath(pending.chatID)+"/messages",body:["request_id":pending.id,"text":pending.text])
+                guard value["accepted"] as? Bool==true else {throw URLError(.cannotParseResponse)}
+                try persistChatQueue(pendingChatMessages.filter {$0.id != pending.id});changed=true
+            } catch {
+                if Task.isCancelled {return}
+                let ns=error as NSError
+                if ns.domain=="Companion",ns.code != 409 {
+                    var messages=pendingChatMessages
+                    if let index=messages.firstIndex(where:{$0.id==pending.id}) {messages[index].lastError=error.localizedDescription;try? persistChatQueue(messages)}
+                }
+                if ns.domain != "Companion" {return}
+            }
+        }
+        if changed {await syncSelectedChat()}
+    }
+    func stopChatAnswer(_ message:ChatMessage) async {
+        guard online else {chatNotice="连接电脑后才能停止回答";return}
+        do {_ = try await request(chatPath(selectedChatID)+"/stop",body:["message_id":message.id]);await syncSelectedChat()}
+        catch {chatNotice=error.localizedDescription}
     }
     private func acceptEditedItem(_ value:[String:Any]) -> [String:Any] {
         let item=value["item"] as? [String:Any] ?? [:],record=Record(value["item"] as? [String:Any] ?? [:])
@@ -493,5 +633,5 @@ enum CredentialStore {
         } catch {try? FileManager.default.removeItem(at:staging);throw error}
     }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
-    func disconnect() { try? FileManager.default.removeItem(at:attachmentCacheFolder);cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
+    func disconnect() { chatCache=nil;chatThreads=[];selectedChatID="";chatSnapshot=nil;chatPartial="";try? FileManager.default.removeItem(at:chatCacheURL);try? FileManager.default.removeItem(at:attachmentCacheFolder);cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
 }

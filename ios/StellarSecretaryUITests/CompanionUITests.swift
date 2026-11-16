@@ -157,4 +157,46 @@ final class CompanionUITests: XCTestCase {
         XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
         let screenshot = XCTAttachment(screenshot:app.screenshot());screenshot.name = "Paired iPhone capture";screenshot.lifetime = .keepAlways;add(screenshot)
     }
+    @MainActor func testSharedDesktopChatAndOfflineRecovery() throws {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch()
+        if app.buttons["扫描 Mac 配对码"].exists {
+            let pair=try fixture("/pair.json");app.open(URL(string:pair["url"] as! String)!)
+            XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+            _ = try fixture("/approve")
+            XCTAssertTrue(app.tabBars.buttons["聊天"].waitForExistence(timeout:20))
+        }
+        app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Desktop context fixture"].waitForExistence(timeout:15))
+        let input=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        input.tap();input.typeText("Mobile shared question");app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["Shared phone reply"].waitForExistence(timeout:15),app.debugDescription)
+        XCTAssertEqual(try fixture("/chat-inspect")["phone_count"] as? Int,1)
+        _ = try fixture("/desktop-chat-append")
+        XCTAssertTrue(app.staticTexts["Desktop updated reply"].waitForExistence(timeout:15))
+        _ = try fixture("/offline")
+        app.terminate();app.launch();app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Desktop updated reply"].waitForExistence(timeout:3),"Offline history must be available without connecting")
+        let offlineInput=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        offlineInput.tap();offlineInput.typeText("Offline shared follow-up");app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.staticTexts["待发送 · 连接后由电脑处理"].waitForExistence(timeout:5))
+        app.terminate();app.launch();app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Offline shared follow-up"].waitForExistence(timeout:3))
+        _ = try fixture("/online")
+        XCTAssertTrue(app.staticTexts["Offline shared answer"].waitForExistence(timeout:30),app.debugDescription)
+        XCTAssertEqual(try fixture("/chat-inspect")["offline_count"] as? Int,1)
+        let backgroundInput=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        backgroundInput.tap();backgroundInput.typeText("Background shared question");app.buttons["chat-send"].tap()
+        XCTAssertTrue(try fixture("/wait-background")["started"] as? Bool == true)
+        app.terminate();_ = try fixture("/finish-background")
+        app.launch();app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:20))
+        XCTAssertEqual(try fixture("/chat-inspect")["background_calls"] as? Int,1)
+        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="Shared desktop chat on iPhone";shot.lifetime = .keepAlways;add(shot)
+        app.buttons["新建聊天"].tap()
+        XCTAssertTrue(app.staticTexts["继续这段对话，电脑会结合相同的上下文处理"].waitForExistence(timeout:10))
+        app.buttons["会话"].tap();app.buttons["Shared fixture chat"].tap()
+        XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:10))
+    }
+
 }

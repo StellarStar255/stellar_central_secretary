@@ -284,3 +284,33 @@ final class LibraryCacheTests: XCTestCase {
         XCTAssertEqual(cache.snapshots["19"]?.records.count,50,"A new archive invalidates freshness without clearing visible results")
     }
 }
+
+final class ChatStoreTests:XCTestCase {
+    func testChatCacheAndPendingSendSurviveRestartWithoutCrossingPairings() throws {
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);defer {try? FileManager.default.removeItem(at:folder)}
+        let url=folder.appendingPathComponent("chats.json")
+        var cache=ChatCache(serverID:"mac",fingerprint:"pin")
+        cache.selectedID="shared";cache.threads=[ChatThread(["id":"shared","title":"Desktop conversation","updated":1])]
+        cache.snapshots["shared"]=ChatSnapshot(id:"shared",title:"Desktop conversation",revision:"rev",messages:[ChatMessage(["id":"a","role":"assistant","text":"Saved answer","sources":[]])],hasMore:false)
+        try cache.save(url)
+        XCTAssertEqual(ChatCache.load(url,serverID:"mac",fingerprint:"pin").snapshots["shared"]?.messages.first?.text,"Saved answer")
+        XCTAssertTrue(ChatCache.load(url,serverID:"other",fingerprint:"pin").snapshots.isEmpty)
+        XCTAssertTrue(ChatCache.load(url,serverID:"mac",fingerprint:"changed").snapshots.isEmpty)
+        let pending=PendingChatMessage(serverID:"mac",fingerprint:"pin",chatID:"shared",text:"Offline continuation")
+        let queue=folder.appendingPathComponent("queue.json");try ChatCache.protectedWrite(JSONEncoder().encode([pending]),to:queue)
+        let restored=try JSONDecoder().decode([PendingChatMessage].self,from:Data(contentsOf:queue))
+        XCTAssertEqual(restored.first?.id,pending.id);XCTAssertEqual(restored.first?.text,pending.text);XCTAssertEqual(restored.first?.chatID,"shared")
+    }
+    func testCacheTrimmingRetainsSelectedChatAndHistoryCanBeFetchedAgain() {
+        var cache=ChatCache(serverID:"mac",fingerprint:"pin");cache.selectedID="selected"
+        for number in 0..<10 {
+            let id=number==9 ? "selected":String(number)
+            cache.threads.append(ChatThread(["id":id,"title":id]))
+            cache.snapshots[id]=ChatSnapshot(id:id,title:id,revision:"r",messages:(0..<150).map {ChatMessage(["id":String($0),"role":"user","text":"Message"])},hasMore:false)
+        }
+        cache.trim();XCTAssertEqual(cache.snapshots.count,5)
+        XCTAssertEqual(cache.snapshots["selected"]?.messages.count,100)
+        XCTAssertTrue(cache.snapshots["selected"]?.hasMore==true)
+    }
+}

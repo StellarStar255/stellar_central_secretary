@@ -94,6 +94,7 @@ class QuestionJobs:
             if key in self.jobs:
                 if self.jobs[key]['fingerprint']!=fingerprint:raise ValueError('问答标识已用于其他问题')
                 return {'request_id':key}
+            if any(job['chat_id']==chat_id and job['ended'] is None for job in self.jobs.values()):raise ValueError('这段对话仍在回答，请等待完成后发送')
             if sum(job['ended'] is None for job in self.jobs.values())>=8:raise ValueError('问答任务过多，请等待已有任务完成')
             # Only IDs/fingerprints remain in memory after completion, never a second answer copy.
             now=time.monotonic();self.jobs={k:v for k,v in self.jobs.items() if v['ended'] is None or now-v['ended']<3600}
