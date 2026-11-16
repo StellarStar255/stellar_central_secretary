@@ -192,9 +192,12 @@ class MobileTest(unittest.TestCase):
   fresh=self.s.archive.get(ident)
   self.assertEqual(self.request('/items/'+ident+'/metadata',{'title':'Must not save','tags':['x'*61],'expected_updated':fresh['updated']},self.credential)[0],400)
   self.assertEqual(self.s.archive.get(ident)['title'],body['title'])
-  browser=urllib.request.Request(self.base+'/items/'+ident+'/metadata',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+self.credential,'Origin':'https://example.com'})
+  # The origin gate rejects before reading a body. Send an empty POST so
+  # Linux does not reset TLS for unread request bytes before the 403 is read.
+  browser=urllib.request.Request(self.base+'/items/'+ident+'/metadata',data=b'',headers={'Authorization':'Bearer '+self.credential,'Origin':'https://example.com'})
   with self.assertRaises(urllib.error.HTTPError) as denied:self.http.open(browser,timeout=5)
   self.assertEqual(denied.exception.code,403);denied.exception.close()
+  self.assertEqual(self.s.archive.get(ident)["title"],body["title"])
 
  def test_phone_appends_and_downloads_only_parent_owned_originals(self):
   self.approve();ident,_=self.s.archive.add('Phone parent','Parent source preserved')

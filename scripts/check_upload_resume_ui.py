@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as temp:
   with sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None))
    try:
-    page=browser.new_page(viewport={'width':1300,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);held=[];offsets=[]
+    page=browser.new_page(viewport={'width':1300,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);page.wait_for_function("()=>typeof token==='string' && token.length>0");held=[];offsets=[]
     def hold(route):
      offset=int(route.request.headers.get('x-upload-offset','0'));offsets.append(offset)
      if offset==4*1024*1024 and not held:held.append(route)
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as temp:
      try:route.abort()
      except Exception:pass
     meta=json.loads(next(service.uploads.folder.glob('*.json')).read_text());assert meta['offset']==4*1024*1024
-    page.once('dialog',lambda dialog:dialog.accept());page.reload();page.unroute('**/api/uploads/*/chunk',hold)
+    page.once('dialog',lambda dialog:dialog.accept());page.reload();page.wait_for_function("()=>typeof token==='string' && token.length>0");page.unroute('**/api/uploads/*/chunk',hold)
     resumed=[];page.on('request',lambda request:resumed.append(int(request.headers.get('x-upload-offset','-1'))) if request.url.endswith('/chunk') else None)
     page.locator('#archive-only').check();page.locator('#file-input').set_input_files(source)
     with page.expect_response(lambda response:response.url.endswith('/api/ingest'),timeout=30000) as saved:page.locator('#send-button').click()
