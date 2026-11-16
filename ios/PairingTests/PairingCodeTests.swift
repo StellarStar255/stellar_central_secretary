@@ -150,6 +150,13 @@ extension WiFiRelayTests {
         let ready=expectation(description:"TLS relay ready")
         relay.listener.stateUpdateHandler={state in if case .ready=state {ready.fulfill()}}
         relay.start();defer {relay.stop()};await fulfillment(of:[ready],timeout:3)
+        let endpoint="https://127.0.0.1:\(relay.listener.port!.rawValue)"
+        let verified=try await PairingTLSProbe.verified(endpoint,fingerprint:pin)
+        XCTAssertEqual(verified,endpoint,"A pinned 403 response must allow an unpaired phone to select the carrier")
+        do {
+            _ = try await PairingTLSProbe.verified(endpoint,fingerprint:String(repeating:"0",count:64))
+            XCTFail("A different certificate must never be selected")
+        } catch { }
         let configuration=URLSessionConfiguration.ephemeral;configuration.connectionProxyDictionary=[:]
         let trust=FixtureTrust(pin)
         let session=URLSession(configuration:configuration,delegate:trust,delegateQueue:nil);defer {session.invalidateAndCancel()}
@@ -203,5 +210,26 @@ extension PairingNetworkTests {
         let url="https://127.0.0.1:\(port.rawValue)"
         let result=try await PairingNetworkProbe.reachableWhileDiscovering([url],timeout:5)
         XCTAssertEqual(result,url)
+    }
+}
+
+extension PairingNetworkTests {
+    func testTCPReadyWithoutTLSIsRejected() async throws {
+        let listener=try NWListener(using:.tcp,on:.any)
+        let ready=expectation(description:"TCP-only fixture")
+        let queue=DispatchQueue(label:"fixture.invalid-tls")
+        listener.stateUpdateHandler={if case .ready=$0 {ready.fulfill()}}
+        listener.newConnectionHandler={connection in
+            connection.start(queue:queue)
+            connection.send(content:Data("HTTP/1.1 200 OK\r\n\r\n".utf8),completion:.contentProcessed {_ in connection.cancel()})
+        }
+        listener.start(queue:queue);defer {listener.cancel()}
+        await fulfillment(of:[ready],timeout:3)
+        let endpoint="https://127.0.0.1:\(listener.port!.rawValue)"
+        try await PairingNetworkProbe(url:URL(string:endpoint)!).check()
+        do {
+            _ = try await PairingTLSProbe.verified(endpoint,fingerprint:String(repeating:"0",count:64))
+            XCTFail("TCP readiness must not win over a working secure carrier")
+        } catch { }
     }
 }

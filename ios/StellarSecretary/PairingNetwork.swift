@@ -1,5 +1,7 @@
 import Foundation
 import Network
+import Security
+import CryptoKit
 
 // A short, credential-free transport check distinguishes LAN failures from TLS/HTTP failures.
 final class PairingNetworkProbe: @unchecked Sendable {
@@ -90,5 +92,48 @@ enum PairingTransportFailure: LocalizedError {
         case .unreachable: return "无法建立到 Mac 的局域网连接。请刷新配对码，并检查 Wi-Fi 的设备隔离或 VPN 路由。（TCP 未连接）"
         case .timedOut: return "手机无法连通 Mac 的配对端口。即使 Wi-Fi 名称相同，访客网络、设备隔离或 VPN 也可能阻断互访。（TCP 超时）"
         }
+    }
+}
+
+// A TCP accept alone can be a stale relay or an unreachable TLS upstream.
+// Race carriers through an actual pinned HTTPS response before selecting one.
+final class PairingTLSProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
+    private let fingerprint: String
+    init(fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust,
+              let certificate = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first,
+              SHA256.hash(data: SecCertificateCopyData(certificate) as Data).map({ String(format: "%02x", $0) }).joined() == fingerprint else {
+            completionHandler(.cancelAuthenticationChallenge, nil);return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+    static func verifiedWhileDiscovering(_ endpoint: String, fingerprint: String, timeout: TimeInterval = 12) async throws -> String {
+        let deadline=Date().addingTimeInterval(timeout)
+        var failure:Error=PairingTransportFailure.timedOut
+        repeat {
+            try Task.checkCancellation()
+            do {return try await verified(endpoint,fingerprint:fingerprint)}
+            catch {try Task.checkCancellation();failure=error}
+            guard Date()<deadline else {break}
+            try await Task.sleep(nanoseconds:500_000_000)
+        } while Date()<deadline
+        throw failure
+    }
+    static func verified(_ endpoint: String, fingerprint: String) async throws -> String {
+        try Task.checkCancellation()
+        guard let url = URL(string: endpoint + "/pair/status") else { throw PairingCodeError.invalid }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = 8;configuration.timeoutIntervalForResource = 8
+        let session = URLSession(configuration: configuration, delegate: PairingTLSProbe(fingerprint: fingerprint), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (_, response) = try await session.data(from: url)
+        // This credential-free endpoint returns 403 until authorized. Its TLS
+        // certificate, rather than HTTP authorization, establishes the carrier.
+        guard response is HTTPURLResponse else { throw PairingTransportFailure.unreachable }
+        try Task.checkCancellation()
+        return endpoint
     }
 }

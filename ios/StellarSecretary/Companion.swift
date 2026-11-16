@@ -125,9 +125,14 @@ enum CredentialStore {
             let nearbyOnly = false, wifiOnly = false
             #endif
             let directURLs=urls.filter { !(URLComponents(string:$0)?.host?.hasPrefix("169.254.") ?? false) }
-            if !nearbyOnly && !bluetoothOnly && !directURLs.isEmpty { group.addTask {if preferBluetooth {try await Task.sleep(for:.seconds(3))};return try await PairingNetworkProbe.reachableWhileDiscovering(directURLs) } }
-            if let wifi, !bluetoothOnly { group.addTask {if preferBluetooth {try await Task.sleep(for:.seconds(3))};return try await wifi.endpoint() } }
-            if let bluetooth, !wifiOnly {group.addTask {if !bluetoothOnly && !preferBluetooth {try await Task.sleep(for:.seconds(4))};return try await bluetooth.endpoint()}}
+            if !nearbyOnly && !bluetoothOnly {
+                for url in directURLs.prefix(9) { group.addTask {
+                    if preferBluetooth {try await Task.sleep(for:.seconds(3))}
+                    return try await PairingTLSProbe.verifiedWhileDiscovering(url,fingerprint:info.fingerprint)
+                }}
+            }
+            if let wifi, !bluetoothOnly { group.addTask {if preferBluetooth {try await Task.sleep(for:.seconds(3))};let endpoint = try await wifi.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint) } }
+            if let bluetooth, !wifiOnly {group.addTask {if !bluetoothOnly && !preferBluetooth {try await Task.sleep(for:.seconds(4))};let endpoint = try await bluetooth.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint)}}
             var failure: Error = PairingTransportFailure.timedOut
             while !group.isEmpty {
                 do { if let endpoint = try await group.next() { group.cancelAll();return endpoint } }
@@ -270,6 +275,7 @@ enum CredentialStore {
             mayRetryConnection=canRefreshSession(after:error)
             pairingDiagnostic("connect-failed",error:error)
             wifiRelay?.rediscover()
+            session?.invalidateAndCancel();session = nil
             online = false;status = "Mac 离线 · 正在自动重连，内容将保留在手机"
             if (error as NSError).code == 401 { self.error = "此手机已被移除，请重新配对" }
         }
