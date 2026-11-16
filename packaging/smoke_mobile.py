@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory(prefix='stellar-mobile-frozen-') as folder:
    try:status=request('/api/status');token=status['token'];break
    except OSError:time.sleep(.2)
   else:raise RuntimeError('Frozen server did not start')
+  request('/api/settings',{'backend':'codex','auto_ai':False})
   assert request('/api/mobile')['enabled'] is False
   mobile=request('/api/mobile/enable',{});assert mobile['enabled']
   invite=request('/api/mobile/invite',{});image=Image.open(io.BytesIO(base64.b64decode(invite['qr'].split(',',1)[1])));assert image.format=='PNG'
