@@ -37,6 +37,12 @@ struct LibraryCache: Codable {
             snapshots.removeValue(forKey: oldest)
         }
     }
+    mutating func replace(_ record: Record) {
+        for query in Array(snapshots.keys) {
+            if let index=snapshots[query]?.records.firstIndex(where:{$0.id==record.id}) {snapshots[query]?.records[index]=record}
+        }
+        invalidate()
+    }
     mutating func invalidate() {
         for query in Array(snapshots.keys) { snapshots[query]?.requiresRefresh = true }
     }

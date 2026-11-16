@@ -177,3 +177,43 @@ class MobileTest(unittest.TestCase):
    connection.request('GET','/status',headers={'Authorization':'Bearer '+self.credential});response=connection.getresponse();self.assertEqual(response.status,401);self.assertEqual(response.getheader('Connection'),'close');response.read()
    self.assertIsNotNone(original)
   finally:connection.close()
+
+ def test_phone_metadata_edit_is_validated_conflict_checked_and_indexed(self):
+  self.approve();ident,_=self.s.archive.add('Old phone title','Metadata mobile fixture')
+  old=self.s.archive.get(ident)
+  body={'title':'Updated phone title','tags':['Phone','Review'],'expected_updated':old['updated']}
+  self.assertEqual(self.request('/items/'+ident+'/metadata',body)[0],401)
+  code,value=self.request('/items/'+ident+'/metadata',body,self.credential)
+  self.assertEqual(code,200);self.assertEqual(value['item']['title'],body['title']);self.assertEqual(value['item']['tags'],body['tags'])
+  self.assertEqual(self.s.archive.get(ident)['tags_manual'],1)
+  self.assertEqual(self.s.archive.list(q='Updated phone title')[0]['id'],ident)
+  self.assertEqual(self.request('/items/'+ident+'/metadata',{**body,'title':'Stale overwrite'},self.credential)[0],400)
+  self.assertEqual(self.s.archive.get(ident)['title'],body['title'])
+  fresh=self.s.archive.get(ident)
+  self.assertEqual(self.request('/items/'+ident+'/metadata',{'title':'Must not save','tags':['x'*61],'expected_updated':fresh['updated']},self.credential)[0],400)
+  self.assertEqual(self.s.archive.get(ident)['title'],body['title'])
+  browser=urllib.request.Request(self.base+'/items/'+ident+'/metadata',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+self.credential,'Origin':'https://example.com'})
+  with self.assertRaises(urllib.error.HTTPError) as denied:self.http.open(browser,timeout=5)
+  self.assertEqual(denied.exception.code,403);denied.exception.close()
+
+ def test_phone_appends_and_downloads_only_parent_owned_originals(self):
+  self.approve();ident,_=self.s.archive.add('Phone parent','Parent source preserved')
+  item=self.s.archive.get(ident);raw=b'Appended mobile original bytes'
+  body={'filename':'mobile.txt','data':base64.b64encode(raw).decode(),'expected_updated':item['updated'],'request_id':'append-fixture'}
+  path='/items/'+ident+'/attachments'
+  code,value=self.request(path,body,self.credential);self.assertEqual(code,200)
+  self.assertEqual(len(self.s.archive.get(ident)['additions']),1)
+  self.assertEqual(self.s.archive.get(ident)['text'],'Parent source preserved')
+  self.assertTrue(self.request(path,body,self.credential)[1]['duplicate'])
+  self.assertEqual(len(self.s.archive.get(ident)['additions']),1)
+  self.assertEqual(self.request(path,{**body,'data':base64.b64encode(b'Changed').decode()},self.credential)[0],400)
+  file=value['item']['attachments'][0];download=file['path']
+  self.assertEqual(self.request(download)[0],401)
+  request=urllib.request.Request(self.base+download,headers={'Authorization':'Bearer '+self.credential})
+  with self.http.open(request,timeout=5) as response:
+   self.assertEqual(response.read(),raw);self.assertIn('attachment',response.headers['Content-Disposition'])
+  other,_=self.s.archive.add('Other parent','Not the owner')
+  self.assertEqual(self.request(download.replace(ident,other),credential=self.credential)[0],400)
+  self.assertNotIn(str(self.s.archive.root),json.dumps(value))
+  self.s.trash_item(ident)
+  self.assertEqual(self.request(download,credential=self.credential)[0],400)

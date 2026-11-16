@@ -51,6 +51,14 @@ if __name__=='__main__':
       connection_changed.wait_for(lambda:connections['status']>previous,timeout=8);value=dict(connections)
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
     elif self.path=='/release-items':list_gate.set();value={'ok':True}
+    elif self.path=='/prepare-detail':
+     item=next(item for item in service.archive.list() if item['title']=='Mobile fixture unique note')
+     with service.archive.db() as db:db.execute('UPDATE items SET url=? WHERE id=?',('https://example.com/phone-original',item['id']))
+     service.append_material(item['id'],{'expected_updated':service.archive.get(item['id'])['updated'],'attachments':[{'name':'fixture.txt','data':base64.b64encode(b'Phone original fixture').decode()}],'summarize':False,'read_links':False})
+     value={'ok':True}
+    elif self.path=='/metadata':
+     item=next(item for item in service.archive.list() if item['title']=='Edited mobile fixture title')
+     value={'title':item['title'],'tags':item['tags']}
     elif self.path=='/count':value={'count':len(service.archive.list())}
     else:self.send_error(404);return
     data=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
@@ -69,5 +77,5 @@ if __name__=='__main__':
     if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
     result.check_returncode()
     assert len(service.archive.list())==3
-    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
+    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, top original links and attachment controls, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
   finally:control.shutdown();control.server_close();mobile.stop(disable=True);service.close()

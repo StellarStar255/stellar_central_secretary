@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import QuickLook
 
 @main struct StellarCompanionApp: App {
     @StateObject private var model = Companion()
@@ -134,16 +135,151 @@ struct LibraryView: View {
         }
     }
 }
+private struct PhoneAttachment: Identifiable {
+    let id:String;let name:String;let path:String
+    init(_ value:[String:Any]) {id=value["path"] as? String ?? "";name=value["name"] as? String ?? "附件";path=id}
+}
+private struct PhoneLink: Identifiable {
+    let id:String;let title:String;let url:URL
+    init?(_ value:[String:Any]) {
+        guard let raw=value["url"] as? String,let url=URL(string:raw),["https","http"].contains(url.scheme?.lowercased() ?? "") else {return nil}
+        self.url=url;id=raw;title=value["title"] as? String ?? raw
+    }
+}
+private struct PhonePreview: Identifiable {let id=UUID();let url:URL}
+private struct OriginalPreview: UIViewControllerRepresentable {
+    let url:URL
+    func makeCoordinator() -> Coordinator {Coordinator(url)}
+    func makeUIViewController(context:Context) -> QLPreviewController {let controller=QLPreviewController();controller.dataSource=context.coordinator;return controller}
+    func updateUIViewController(_ controller:QLPreviewController,context:Context) {}
+    final class Coordinator:NSObject,QLPreviewControllerDataSource {
+        let url:URL
+        init(_ url:URL) {self.url=url}
+        func numberOfPreviewItems(in controller:QLPreviewController) -> Int {1}
+        func previewController(_ controller:QLPreviewController,previewItemAt index:Int) -> QLPreviewItem {url as NSURL}
+    }
+}
 struct DetailView: View {
     @EnvironmentObject var model: Companion
-    let record: Record
-    @State private var content = ""
-    @State private var original: URL?
-    @State private var error = ""
-    var body: some View { ScrollView { VStack(alignment:.leading,spacing:20) { Text(record.title).font(.title2.bold());if !error.isEmpty { Text(error).foregroundStyle(.orange) };Text(content).textSelection(.enabled);if let original { Link("打开原网页 ↗",destination:original) } }.padding() }.navigationTitle("资料详情").navigationBarTitleDisplayMode(.inline).task {
-        do { let value = try await model.detail(record.id);content = (value["summary"] as? String ?? "") + "\n\n" + (value["text"] as? String ?? "");if let raw = value["url"] as? String, let url = URL(string:raw), ["http","https"].contains(url.scheme ?? "") { original = url } }
-        catch { self.error = error.localizedDescription }
-    } }
+    let record:Record
+    @State private var title=""
+    @State private var tags=""
+    @State private var updated=""
+    @State private var savedTitle=""
+    @State private var savedTags=""
+    @State private var summary=""
+    @State private var text=""
+    @State private var originals:[PhoneLink]=[]
+    @State private var attachments:[PhoneAttachment]=[]
+    @State private var loaded=false
+    @State private var working=false
+    @State private var error=""
+    @State private var notice=""
+    @State private var importing=false
+    @State private var photo:PhotosPickerItem?
+    @State private var pendingData:Data?
+    @State private var pendingName=""
+    @State private var attachmentRequestID=UUID().uuidString
+    @State private var preview:PhonePreview?
+    @State private var previewFolder:URL?
+    var body:some View {
+        ScrollView {
+            VStack(alignment:.leading,spacing:20) {
+                if !originals.isEmpty || !attachments.isEmpty {
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("原链接与原件").font(.headline)
+                        ForEach(originals) {link in Link(destination:link.url) {Label(link.title,systemImage:"arrow.up.right.square").lineLimit(2)}}
+                        ForEach(attachments) {file in Button {Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}.disabled(working || !model.online)}
+                    }.frame(maxWidth:.infinity,alignment:.leading).padding().background(.quaternary,in:RoundedRectangle(cornerRadius:14))
+                }
+                if !loaded {Text(record.title).font(.title2.bold());Text(record.summary).textSelection(.enabled);if working {ProgressView("正在加载资料详情…")}}
+                if !error.isEmpty {Text(error).foregroundStyle(.orange)}
+                if !notice.isEmpty {Text(notice).foregroundStyle(.secondary)}
+                if loaded {
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("标题与标签").font(.headline)
+                        TextField("资料标题",text:$title,axis:.vertical).textFieldStyle(.roundedBorder).accessibilityIdentifier("detail-title")
+                        TextField("标签，用逗号分隔",text:$tags).textFieldStyle(.roundedBorder).accessibilityIdentifier("detail-tags")
+                        Button("保存标题与标签") {Task {await save()}}.buttonStyle(.borderedProminent)
+                    }.disabled(working || !model.online)
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("添加附件").font(.headline)
+                        HStack {
+                            PhotosPicker(selection:$photo,matching:.images) {Label("照片",systemImage:"photo")}
+                            Button {importing=true} label:{Label("文件",systemImage:"paperclip")}
+                        }.disabled(working || !model.online)
+                        Text("追加到当前资料，保留已有原件。每个附件最多 10 MB。").font(.footnote).foregroundStyle(.secondary)
+                        if pendingData != nil {
+                            Text(pendingName).lineLimit(2)
+                            HStack {
+                                Button("添加到这份资料") {Task {await append()}}.buttonStyle(.borderedProminent)
+                                Button("取消") {pendingData=nil;photo=nil}
+                            }.disabled(working || !model.online)
+                        }
+                    }
+                    if working {ProgressView("正在处理…")}
+                    if !summary.isEmpty {Text("摘要").font(.headline);Text(summary).textSelection(.enabled)}
+                    if !text.isEmpty {DisclosureGroup("正文与归档说明") {Text(text).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled)}}
+                }
+            }.padding().frame(maxWidth:.infinity,alignment:.leading)
+        }.navigationTitle("资料详情").navigationBarTitleDisplayMode(.inline)
+        .toolbar {Button("重新加载") {Task {await load()}}.disabled(working)}
+        .task {await load()}
+        .sheet(item:$preview,onDismiss:{clearPreview()}) {value in OriginalPreview(url:value.url)}
+        .onDisappear {if preview == nil {clearPreview()}}
+        .onChange(of:photo) {_,value in Task {
+            guard let value else {return}
+            if let data=try? await value.loadTransferable(type:Data.self) {select(data,name:"Photo."+(value.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"))}
+            else {error="照片读取失败，请重试"}
+        }}
+        .fileImporter(isPresented:$importing,allowedContentTypes:[.item]) {result in
+            do {
+                let url=try result.get(),access=url.startAccessingSecurityScopedResource();defer {if access {url.stopAccessingSecurityScopedResource()}}
+                let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+                guard size<=10*1024*1024 else {error="每个附件最多 10 MB";return}
+                select(try Data(contentsOf:url),name:url.lastPathComponent)
+            } catch {self.error="无法读取文件，请重新选择"}
+        }
+    }
+    private func apply(_ value:[String:Any]) {
+        title=value["title"] as? String ?? record.title;tags=(value["tags"] as? [String] ?? []).joined(separator:", ")
+        savedTitle=title;savedTags=tags
+        updated=value["updated"] as? String ?? "";summary=value["summary"] as? String ?? "";text=value["text"] as? String ?? ""
+        var links=(value["links"] as? [[String:Any]] ?? []).compactMap(PhoneLink.init)
+        if let original=PhoneLink(["url":value["url"] as? String ?? "","title":"打开原链接"]) {links.insert(original,at:0)}
+        var seen=Set<String>();originals=links.filter {seen.insert($0.id).inserted}
+        attachments=(value["attachments"] as? [[String:Any]] ?? []).map(PhoneAttachment.init);loaded=true
+    }
+    private func load() async {
+        guard !working else {return};working=true;defer {working=false}
+        do {apply(try await model.detail(record.id));error=""}
+        catch {self.error=error.localizedDescription}
+    }
+    private func save() async {
+        working=true;defer {working=false};notice=""
+        let values=tags.components(separatedBy:CharacterSet(charactersIn:",，、\n")).map {$0.trimmingCharacters(in:.whitespacesAndNewlines)}.filter {!$0.isEmpty}
+        do {apply(try await model.saveMetadata(record.id,title:title,tags:values,updated:updated));error="";notice="标题与标签已保存"}
+        catch {self.error=error.localizedDescription}
+    }
+    private func select(_ data:Data,name:String) {
+        guard data.count<=10*1024*1024 else {error="每个附件最多 10 MB";return}
+        pendingData=data;pendingName=name;attachmentRequestID=UUID().uuidString;error="";notice=""
+    }
+    private func append() async {
+        guard let data=pendingData else {return};working=true;defer {working=false};notice=""
+        do {
+            let draftTitle=title,draftTags=tags,titleChanged=title != savedTitle,tagsChanged=tags != savedTags
+            apply(try await model.addAttachment(record.id,name:pendingName,data:data,updated:updated,requestID:attachmentRequestID))
+            if titleChanged {title=draftTitle};if tagsChanged {tags=draftTags}
+            pendingData=nil;photo=nil;error="";notice="附件已添加"
+        } catch {self.error=error.localizedDescription}
+    }
+    private func open(_ file:PhoneAttachment) async {
+        working=true;defer {working=false}
+        do {let url=try await model.downloadAttachment(file.path,name:file.name);clearPreview();previewFolder=url.deletingLastPathComponent();preview=PhonePreview(url:url);error=""}
+        catch {self.error=error.localizedDescription}
+    }
+    private func clearPreview() {if let folder=previewFolder {try? FileManager.default.removeItem(at:folder)};previewFolder=nil}
 }
 struct DeviceView: View {
     @EnvironmentObject var model: Companion

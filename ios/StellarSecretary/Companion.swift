@@ -405,6 +405,33 @@ enum CredentialStore {
         do { let value = try await request("/ask",body:["question":text]);answer = value["answer"] as? String ?? "";sources = (value["sources"] as? [[String:Any]] ?? []).map(Record.init);error = "" }
         catch { self.error = error.localizedDescription }
     }
+    private func acceptEditedItem(_ value:[String:Any]) -> [String:Any] {
+        let item=value["item"] as? [String:Any] ?? [:],record=Record(value["item"] as? [String:Any] ?? [:])
+        libraryCache?.replace(record)
+        if let index=records.firstIndex(where:{$0.id==record.id}) {records[index]=record}
+        if let cache=libraryCache {try? cache.save(to:libraryCacheURL)}
+        return item
+    }
+    func saveMetadata(_ id:String,title:String,tags:[String],updated:String) async throws -> [String:Any] {
+        let value=try await request("/items/"+id+"/metadata",body:["title":title,"tags":tags,"expected_updated":updated])
+        return acceptEditedItem(value)
+    }
+    func addAttachment(_ id:String,name:String,data:Data,updated:String,requestID:String) async throws -> [String:Any] {
+        let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data.base64EncodedString(),"expected_updated":updated,"request_id":requestID],timeout:120)
+        return acceptEditedItem(value)
+    }
+    func downloadAttachment(_ path:String,name:String) async throws -> URL {
+        guard let pair=paired,let session,path.hasPrefix("/items/"),let url=URL(string:sessionEndpoint+path) else {throw URLError(.badURL)}
+        var request=URLRequest(url:url);request.setValue("Bearer "+pair.credential,forHTTPHeaderField:"Authorization");request.timeoutInterval=120
+        let (temporary,response)=try await session.download(for:request)
+        guard (response as? HTTPURLResponse)?.statusCode==200 else {try? FileManager.default.removeItem(at:temporary);throw NSError(domain:"Companion",code:2,userInfo:[NSLocalizedDescriptionKey:"原件无法打开，请重新加载资料后再试"])}
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent("preview-"+UUID().uuidString,isDirectory:true)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let target=folder.appendingPathComponent(URL(fileURLWithPath:name).lastPathComponent)
+        try FileManager.default.moveItem(at:temporary,to:target)
+        try FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication],ofItemAtPath:target.path)
+        return target
+    }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
     func disconnect() { cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
 }

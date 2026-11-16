@@ -8,7 +8,7 @@ Native SwiftUI companion for iOS 17 or later. The Mac keeps the library and perf
 2. Open `StellarSecretary.xcodeproj` in Xcode. Select your own development team in the **StellarSecretary → Signing & Capabilities** settings. Connect the iPhone to the Mac, trust the computer, and enable Developer Mode when requested by iOS.
 3. Select the phone as the run destination and run **StellarSecretary**. This is a development installation, not an App Store or TestFlight release.
 4. Allow local network, Bluetooth (if requested) and camera access. Scan the Mac QR using the app, compare the six digits, and approve the request on the Mac.
-5. Capture notes, links, screenshots or files (10 MB maximum), search the library, ask questions and open cited text. URL captures initially save the link; complete webpage reading on the desktop.
+5. Capture notes, links, screenshots or files (10 MB maximum), search the library, ask questions and open cited text. In a record detail, open original links and archived files from the top, edit its title and tags, or append a photo/file to the same record. Edits detect concurrent changes, and attachment retries do not create duplicate batches. Original files open in a native preview after an authenticated download. URL captures initially save the link; complete webpage reading on the desktop.
 
 Credentials are saved in the phone Keychain; the QR contains a short-lived invitation and the server certificate fingerprint. Only the fingerprint-matching TLS server is trusted. Desktop APIs, settings, model credentials and arbitrary file downloads are not exposed by the companion listener. Pairing and revocation are available only through the desktop UI. The listener is off by default.
 

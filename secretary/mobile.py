@@ -1,5 +1,5 @@
 """Opt-in, paired LAN companion. Never exposes desktop routes or settings."""
-import errno,base64,hashlib,io,ipaddress,json,os,secrets,socket,ssl,subprocess,sys,threading,time,uuid
+import re,errno,base64,hashlib,io,ipaddress,json,os,secrets,socket,ssl,subprocess,sys,threading,time,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -186,9 +186,53 @@ class Mobile:
         with self.lock:self.state['devices'].pop(key,None);self.save()
         return self.status()
     def public_item(self,item,detail=False):
-        result={key:item.get(key,'') for key in ('id','title','kind','state','summary','url','created')}
-        if detail:result['text']=item.get('text','')[:100000]
+        result={key:item.get(key,'') for key in ('id','title','kind','state','summary','url','created','updated','tags')}
+        if detail:
+            result['text']=item.get('text','')[:100000]
+            item=self.service.material_attachments(item)
+            result['attachments']=[{'id':file['id'],'name':file['name'],'media':file.get('media','application/octet-stream'),
+                'path':'/items/'+item['id']+'/files/'+(file['batch_id'] or 'base')+'/'+file['id']} for file in item['all_attachments']]
+            result['links']=[{'title':link.get('title') or link['url'],'url':link['url']} for link in item.get('group_links',[])]
+            for batch in item.get('additions',[]):
+                result['links'] += [{'title':link.get('title') or link['url'],'url':link['url']} for link in batch.get('links',[])]
         return result
+    def edit_metadata(self,item_id,body):
+        title=body.get('title');tags=body.get('tags')
+        if not isinstance(title,str) or not title.strip() or len(title.strip())>300:raise ValueError('标题需为 1–300 个字符')
+        if not isinstance(tags,list) or len(tags)>50 or any(not isinstance(tag,str) or not tag.strip() or len(tag.strip())>60 for tag in tags):raise ValueError('最多 50 个标签，每个标签需为 1–60 个字符')
+        with self.service.lock,self.service.archive.lock:
+            item=self.service.archive.get(item_id)
+            if item_id in self.service.busy or item_id in self.service.captures:raise ValueError('资料正在处理，请稍后修改')
+            if not body.get('expected_updated') or body['expected_updated']!=item['updated']:raise ValueError('资料已在其他位置更新，请重新加载后修改；本次草稿仍保留')
+            self.service.archive.set_tags(item_id,tags,expected=item['tags'])
+            self.service.archive.update(item_id,title=title.strip())
+            return {'item':self.public_item(self.service.archive.get(item_id),True)}
+    def append_attachment(self,device,item_id,body):
+        key=body.get('request_id');name=body.get('filename');encoded=body.get('data')
+        if not isinstance(key,str) or not 1<=len(key)<=80 or not isinstance(name,str) or not name or len(name)>300 or '/' in name or '\\' in name:raise ValueError('附件信息无效')
+        if not isinstance(encoded,str) or len(encoded)>14*1024*1024:raise ValueError('手机附件最多 10 MB')
+        try:raw=base64.b64decode(encoded,validate=True)
+        except Exception:raise ValueError('附件编码无效')
+        if len(raw)>10*1024*1024:raise ValueError('手机附件最多 10 MB')
+        signature=digest(item_id+'\n'+name+'\n'+hashlib.sha256(raw).hexdigest());receipt=device+':'+key
+        with self.lock:
+            receipts=self.state.setdefault('attachment_receipts',{})
+            previous=receipts.get(receipt)
+            if previous:
+                if previous['signature']!=signature:raise ValueError('这次附件内容已改变，请重新选择附件')
+            else:
+                self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False})
+                receipts[receipt]={'signature':signature,'id':item_id};self.save()
+            return {'item':self.public_item(self.service.archive.get(item_id),True),'duplicate':previous is not None}
+    def attachment(self,item_id,batch_id,key):
+        from . import bundles
+        item=self.service.material_attachments(self.service.archive.get(item_id))
+        batch='' if batch_id=='base' else batch_id
+        file=next((file for file in item['all_attachments'] if file['batch_id']==batch and file['id']==key),None)
+        if not file:raise ValueError('附件不存在或已移除')
+        source=self.service.archive.root/'files'/(batch or item_id)
+        if key!='original':_,source=bundles.member(source,key)
+        return file,source
     def ingest(self,device,body):
         key=body.get('request_id');content=body.get('content')
         if not isinstance(key,str) or not 1<=len(key)<=80 or not isinstance(content,dict):raise ValueError('归档请求格式无效')
@@ -266,10 +310,24 @@ class Mobile:
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
                     if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)]})
+                    file_match=re.fullmatch(r'/items/([a-f0-9]{32})/files/(base|[a-f0-9]{32})/(original|[a-f0-9]{32})',parsed.path)
+                    if not post and file_match:
+                        file,source=manager.attachment(*file_match.groups());size=source.stat().st_size
+                        from urllib.parse import quote
+                        self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(size));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+quote(file['name'],safe=''));self.end_headers()
+                        with source.open('rb') as stream:
+                            while chunk:=stream.read(64*1024):self.wfile.write(chunk)
+                        return
+                    edit_match=re.fullmatch(r'/items/([a-f0-9]{32})/(metadata|attachments)',parsed.path)
+                    if post and edit_match:
+                        if edit_match[2]=='metadata':return self.send(200,manager.edit_metadata(edit_match[1],body))
+                        if not manager.operations.acquire(blocking=False):return self.send(429,{'error':'电脑正在处理手机请求，请稍后重试'})
+                        try:return self.send(200,manager.append_attachment(device,edit_match[1],body))
+                        finally:manager.operations.release()
                     if not post and parsed.path=='/items':
                         query=parse_qs(parsed.query).get('q',[''])[0][:200];items=manager.service.archive.list(q=query)
                         return self.send(200,{'items':[manager.public_item(item) for item in items[:50]]})
-                    if not post and parsed.path.startswith('/items/'):
+                    if not post and re.fullmatch(r'/items/[a-f0-9]{32}',parsed.path):
                         return self.send(200,{'item':manager.public_item(manager.service.archive.get(parsed.path.split('/')[-1]),True)})
                     if post and parsed.path in ('/ingest','/ask'):
                         if not manager.operations.acquire(blocking=False):return self.send(429,{'error':'电脑正在处理手机请求，请稍后重试'})
