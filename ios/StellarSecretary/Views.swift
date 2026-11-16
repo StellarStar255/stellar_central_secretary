@@ -136,8 +136,11 @@ struct LibraryView: View {
     }
 }
 private struct PhoneAttachment: Identifiable {
-    let id:String;let name:String;let path:String
-    init(_ value:[String:Any]) {id=value["path"] as? String ?? "";name=value["name"] as? String ?? "附件";path=id}
+    let id:String;let name:String;let path:String;let previewPath:String;let version:String;let size:Int64
+    init(_ value:[String:Any]) {
+        id=value["path"] as? String ?? "";name=value["name"] as? String ?? "附件";path=id
+        previewPath=value["preview_path"] as? String ?? "";version=value["version"] as? String ?? "";size=(value["size"] as? NSNumber)?.int64Value ?? 0
+    }
 }
 private struct PhoneLink: Identifiable {
     let id:String;let title:String;let url:URL
@@ -146,7 +149,7 @@ private struct PhoneLink: Identifiable {
         self.url=url;id=raw;title=value["title"] as? String ?? raw
     }
 }
-private struct PhonePreview: Identifiable {let id=UUID();let url:URL}
+private struct PhonePreview: Identifiable {let id=UUID();let url:URL;let lightweight:Bool}
 private struct OriginalPreview: UIViewControllerRepresentable {
     let url:URL
     func makeCoordinator() -> Coordinator {Coordinator(url)}
@@ -182,6 +185,10 @@ struct DetailView: View {
     @State private var attachmentRequestID=UUID().uuidString
     @State private var preview:PhonePreview?
     @State private var previewFolder:URL?
+    @State private var fileTask:Task<Void,Never>?
+    @State private var downloadDone:Int64=0
+    @State private var downloadTotal:Int64=0
+    @State private var operationLabel=""
     var body:some View {
         ScrollView {
             VStack(alignment:.leading,spacing:20) {
@@ -189,8 +196,26 @@ struct DetailView: View {
                     VStack(alignment:.leading,spacing:12) {
                         Text("原链接与原件").font(.headline)
                         ForEach(originals) {link in Link(destination:link.url) {Label(link.title,systemImage:"arrow.up.right.square").lineLimit(2)}}
-                        ForEach(attachments) {file in Button {Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}.disabled(working || !model.online)}
+                        ForEach(attachments) {file in
+                            VStack(alignment:.leading,spacing:8) {
+                                if !file.previewPath.isEmpty {
+                                    Button {fileTask=Task {await open(file,lightweight:true)}} label:{Label("查看图片 · "+file.name,systemImage:"photo")}
+                                }
+                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}
+                                if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? " · 图片预览更快，原件保持完整":"")).font(.caption).foregroundStyle(.secondary)}
+                            }.disabled(working || !model.online)
+                        }
                     }.frame(maxWidth:.infinity,alignment:.leading).padding().background(.quaternary,in:RoundedRectangle(cornerRadius:14))
+                }
+                if fileTask != nil {
+                    VStack(alignment:.leading,spacing:8) {
+                        Text(operationLabel).font(.subheadline)
+                        if downloadTotal>0 {
+                            ProgressView(value:Double(downloadDone),total:Double(max(downloadTotal,1)))
+                            Text(ByteCountFormatter.string(fromByteCount:downloadDone,countStyle:.file)+" / "+ByteCountFormatter.string(fromByteCount:downloadTotal,countStyle:.file)).font(.caption).foregroundStyle(.secondary)
+                        } else {ProgressView()}
+                        Button("取消下载") {fileTask?.cancel()}
+                    }
                 }
                 if !loaded {Text(record.title).font(.title2.bold());Text(record.summary).textSelection(.enabled);if working {ProgressView("正在加载资料详情…")}}
                 if !error.isEmpty {Text(error).foregroundStyle(.orange)}
@@ -217,7 +242,7 @@ struct DetailView: View {
                             }.disabled(working || !model.online)
                         }
                     }
-                    if working {ProgressView("正在处理…")}
+                    if working && fileTask == nil {ProgressView("正在处理…")}
                     if !summary.isEmpty {Text("摘要").font(.headline);Text(summary).textSelection(.enabled)}
                     if !text.isEmpty {DisclosureGroup("正文与归档说明") {Text(text).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled)}}
                 }
@@ -225,8 +250,13 @@ struct DetailView: View {
         }.navigationTitle("资料详情").navigationBarTitleDisplayMode(.inline)
         .toolbar {Button("重新加载") {Task {await load()}}.disabled(working)}
         .task {await load()}
-        .sheet(item:$preview,onDismiss:{clearPreview()}) {value in OriginalPreview(url:value.url)}
-        .onDisappear {if preview == nil {clearPreview()}}
+        .sheet(item:$preview,onDismiss:{clearPreview()}) {value in
+            NavigationStack {
+                OriginalPreview(url:value.url).navigationTitle(value.lightweight ? "图片预览（非原件）":"完整原件").navigationBarTitleDisplayMode(.inline)
+                    .toolbar {ToolbarItem(placement:.topBarTrailing) {Button("关闭") {preview=nil}}}
+            }
+        }
+        .onDisappear {fileTask?.cancel();if preview == nil {clearPreview()}}
         .onChange(of:photo) {_,value in Task {
             guard let value else {return}
             if let data=try? await value.loadTransferable(type:Data.self) {select(data,name:"Photo."+(value.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"))}
@@ -274,12 +304,23 @@ struct DetailView: View {
             pendingData=nil;photo=nil;error="";notice="附件已添加"
         } catch {self.error=error.localizedDescription}
     }
-    private func open(_ file:PhoneAttachment) async {
-        working=true;defer {working=false}
-        do {let url=try await model.downloadAttachment(file.path,name:file.name);clearPreview();previewFolder=url.deletingLastPathComponent();preview=PhonePreview(url:url);error=""}
-        catch {self.error=error.localizedDescription}
+    private func open(_ file:PhoneAttachment,lightweight:Bool=false) async {
+        working=true;downloadDone=0;downloadTotal=0
+        operationLabel=lightweight ? "正在加载图片预览（非原件）…":"正在下载完整原件…"
+        defer {working=false;fileTask=nil}
+        do {
+            let url=try await model.downloadAttachment(lightweight ? file.previewPath:file.path,name:lightweight ? file.name+".preview.jpg":file.name,version:file.version) {done,total in
+                Task {@MainActor in downloadDone=done;downloadTotal=total}
+            }
+            guard !Task.isCancelled else {return}
+            clearPreview();previewFolder=url.deletingLastPathComponent();preview=PhonePreview(url:url,lightweight:lightweight);error=""
+        } catch {
+            if Task.isCancelled {return}
+            self.error=error.localizedDescription
+        }
     }
-    private func clearPreview() {if let folder=previewFolder {try? FileManager.default.removeItem(at:folder)};previewFolder=nil}
+    private func clearPreview() {previewFolder=nil}
+
 }
 struct DeviceView: View {
     @EnvironmentObject var model: Companion

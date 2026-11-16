@@ -11,8 +11,9 @@ ROOT=Path(__file__).resolve().parent.parent
 if __name__=='__main__':
  with tempfile.TemporaryDirectory(prefix='stellar-ios-fixture-') as folder:
   service=Service(folder);service.archive.configure('codex',False);mobile=service.mobile
-  connections={'tls':0,'status':0,'items':0};connection_changed=threading.Condition()
+  connections={'tls':0,'status':0,'items':0,'files':0};connection_changed=threading.Condition()
   list_gate=threading.Event();list_gate.set()
+  file_gate=threading.Event();file_gate.set()
   original_handler=mobile.handler
   def counted_handler():
    base=original_handler()
@@ -26,6 +27,9 @@ if __name__=='__main__':
      if self.path.startswith('/items?'):
       with connection_changed:connections['items']+=1;connection_changed.notify_all()
       list_gate.wait(timeout=10)
+     if '/files/' in self.path:
+      with connection_changed:connections['files']+=1;connection_changed.notify_all()
+      file_gate.wait(timeout=15)
      super().do_GET()
    return Counting
   mobile.handler=counted_handler
@@ -49,12 +53,14 @@ if __name__=='__main__':
      previous=int(self.path.split('=',1)[1])
      with connection_changed:
       connection_changed.wait_for(lambda:connections['status']>previous,timeout=8);value=dict(connections)
+    elif self.path=='/hold-files':file_gate.clear();value={'ok':True}
+    elif self.path=='/release-files':file_gate.set();value={'ok':True}
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
     elif self.path=='/release-items':list_gate.set();value={'ok':True}
     elif self.path=='/prepare-detail':
      item=next(item for item in service.archive.list() if item['title']=='Mobile fixture unique note')
      with service.archive.db() as db:db.execute('UPDATE items SET url=? WHERE id=?',('https://example.com/phone-original',item['id']))
-     service.append_material(item['id'],{'expected_updated':service.archive.get(item['id'])['updated'],'attachments':[{'name':'fixture.txt','data':base64.b64encode(b'Phone original fixture').decode()}],'summarize':False,'read_links':False})
+     service.append_material(item['id'],{'expected_updated':service.archive.get(item['id'])['updated'],'attachments':[{'name':'fixture.txt','data':base64.b64encode(b'Phone original fixture').decode()},{'name':'slow.txt','data':base64.b64encode(b'Cancellation fixture').decode()}],'summarize':False,'read_links':False})
      value={'ok':True}
     elif self.path=='/metadata':
      item=next(item for item in service.archive.list() if item['title']=='Edited mobile fixture title')
@@ -77,5 +83,5 @@ if __name__=='__main__':
     if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
     result.check_returncode()
     assert len(service.archive.list())==3
-    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, top original links and attachment controls, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
+    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, top original links and attachment controls, original file cache and download cancellation, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives')
   finally:control.shutdown();control.server_close();mobile.stop(disable=True);service.close()

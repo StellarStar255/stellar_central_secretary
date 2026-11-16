@@ -28,7 +28,7 @@ struct Draft: Codable, Identifiable {
     var data: String?
     var created = ISO8601DateFormatter().string(from: Date())
 }
-final class PinnedSession: NSObject, URLSessionDelegate {
+class PinnedSession: NSObject, URLSessionDelegate {
     let fingerprint: String
     init(_ fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
@@ -42,6 +42,47 @@ final class PinnedSession: NSObject, URLSessionDelegate {
         pairingDiagnostic("tls-pin-matched")
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
+}
+// A dedicated pinned download reports bytes and supports cancellation without
+// invalidating the session used by library queries or editing.
+private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let lock=NSLock()
+    private var continuation:CheckedContinuation<URL,Error>?
+    private var task:URLSessionDownloadTask?
+    private var transferSession:URLSession?
+    private var cancelled=false
+    private let destination:URL
+    private let progress:@Sendable(Int64,Int64)->Void
+    init(pin:String,destination:URL,progress:@escaping @Sendable(Int64,Int64)->Void) {
+        self.destination=destination;self.progress=progress;super.init(pin)
+    }
+    func run(_ request:URLRequest) async throws -> URL {
+        try await withTaskCancellationHandler(operation:{try await withCheckedThrowingContinuation {continuation in
+            self.lock.lock()
+            if self.cancelled {self.lock.unlock();continuation.resume(throwing:CancellationError());return}
+            self.continuation=continuation
+            let config=URLSessionConfiguration.ephemeral;config.connectionProxyDictionary=[:];config.timeoutIntervalForResource=900
+            let session=URLSession(configuration:config,delegate:self,delegateQueue:nil)
+            self.transferSession=session;let task=session.downloadTask(with:request);self.task=task
+            self.lock.unlock();task.resume()
+        }},onCancel:{self.lock.lock();self.cancelled=true;let task=self.task;self.lock.unlock();task?.cancel()})
+    }
+    private func finish(_ result:Result<URL,Error>) {
+        lock.lock();let continuation=self.continuation;self.continuation=nil;let session=transferSession;transferSession=nil;task=nil;lock.unlock()
+        continuation?.resume(with:result);session?.finishTasksAndInvalidate()
+    }
+    func urlSession(_ session:URLSession,downloadTask:URLSessionDownloadTask,didWriteData bytesWritten:Int64,totalBytesWritten:Int64,totalBytesExpectedToWrite:Int64) {
+        progress(totalBytesWritten,totalBytesExpectedToWrite)
+    }
+    func urlSession(_ session:URLSession,downloadTask:URLSessionDownloadTask,didFinishDownloadingTo location:URL) {
+        guard (downloadTask.response as? HTTPURLResponse)?.statusCode==200 else {finish(.failure(URLError(.badServerResponse)));return}
+        do {
+            try FileManager.default.moveItem(at:location,to:destination)
+            try FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication],ofItemAtPath:destination.path)
+            finish(.success(destination))
+        } catch {finish(.failure(error))}
+    }
+    func urlSession(_ session:URLSession,task:URLSessionTask,didCompleteWithError error:Error?) {if let error {finish(.failure(error))}}
 }
 enum CredentialStore {
     static let service = "io.github.stellarstar255.secretary.companion"
@@ -420,18 +461,31 @@ enum CredentialStore {
         let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data.base64EncodedString(),"expected_updated":updated,"request_id":requestID],timeout:120)
         return acceptEditedItem(value)
     }
-    func downloadAttachment(_ path:String,name:String) async throws -> URL {
-        guard let pair=paired,let session,path.hasPrefix("/items/"),let url=URL(string:sessionEndpoint+path) else {throw URLError(.badURL)}
-        var request=URLRequest(url:url);request.setValue("Bearer "+pair.credential,forHTTPHeaderField:"Authorization");request.timeoutInterval=120
-        let (temporary,response)=try await session.download(for:request)
-        guard (response as? HTTPURLResponse)?.statusCode==200 else {try? FileManager.default.removeItem(at:temporary);throw NSError(domain:"Companion",code:2,userInfo:[NSLocalizedDescriptionKey:"原件无法打开，请重新加载资料后再试"])}
-        let folder=FileManager.default.temporaryDirectory.appendingPathComponent("preview-"+UUID().uuidString,isDirectory:true)
-        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+    private var attachmentCacheFolder:URL {FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("phone-attachments",isDirectory:true)}
+    func downloadAttachment(_ path:String,name:String,version:String,progress:@escaping @Sendable(Int64,Int64)->Void) async throws -> URL {
+        guard let pair=paired,path.hasPrefix("/items/"),let url=URL(string:sessionEndpoint+path) else {throw URLError(.badURL)}
+        let key=SHA256.hash(data:Data((pair.info.server_id+pair.info.fingerprint+path+version).utf8)).map {String(format:"%02x",$0)}.joined()
+        let folder=attachmentCacheFolder.appendingPathComponent(key,isDirectory:true)
         let target=folder.appendingPathComponent(URL(fileURLWithPath:name).lastPathComponent)
-        try FileManager.default.moveItem(at:temporary,to:target)
-        try FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication],ofItemAtPath:target.path)
-        return target
+        if FileManager.default.fileExists(atPath:target.path) {return target}
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        var request=URLRequest(url:url);request.setValue("Bearer "+pair.credential,forHTTPHeaderField:"Authorization");request.timeoutInterval=120
+        let transfer=AttachmentTransfer(pin:pair.info.fingerprint,destination:target,progress:progress)
+        do {
+            let result=try await transfer.run(request)
+            // Keep completed files for repeated opens, bounded to 200 MB plus
+            // the currently opened file. iOS may reclaim this cache as needed.
+            let files=(try? FileManager.default.contentsOfDirectory(at:attachmentCacheFolder,includingPropertiesForKeys:[.contentModificationDateKey])) ?? []
+            let ordered=files.sorted {((try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast)}
+            var kept=0
+            for entry in [folder]+ordered.filter({$0 != folder}) {
+                let children=(try? FileManager.default.contentsOfDirectory(at:entry,includingPropertiesForKeys:[.fileSizeKey])) ?? []
+                let size=children.reduce(0) {$0+((try? $1.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? 0)}
+                if kept+size>200*1024*1024 && entry != folder {try? FileManager.default.removeItem(at:entry)} else {kept+=size}
+            }
+            return result
+        } catch {try? FileManager.default.removeItem(at:folder);throw error}
     }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
-    func disconnect() { cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
+    func disconnect() { try? FileManager.default.removeItem(at:attachmentCacheFolder);cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
 }

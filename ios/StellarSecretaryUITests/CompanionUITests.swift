@@ -90,6 +90,24 @@ final class CompanionUITests: XCTestCase {
         let original=app.buttons["打开原件 · fixture.txt"]
         XCTAssertTrue(original.waitForExistence(timeout:10));XCTAssertTrue(original.isHittable,"Original file access must appear before the long summary")
         XCTAssertTrue(app.buttons["打开原链接"].isHittable || app.links["打开原链接"].isHittable)
+        let filesBefore=try fixture("/connections")["files"] as! Int
+        original.tap()
+        XCTAssertTrue(app.buttons["关闭"].waitForExistence(timeout:10))
+        XCTAssertTrue(app.navigationBars["完整原件"].exists)
+        app.buttons["关闭"].tap()
+        let filesAfter=try fixture("/connections")["files"] as! Int
+        XCTAssertEqual(filesAfter,filesBefore+1)
+        original.tap()
+        XCTAssertTrue(app.buttons["关闭"].waitForExistence(timeout:3))
+        app.buttons["关闭"].tap()
+        XCTAssertEqual(try fixture("/connections")["files"] as? Int,filesAfter,"Reopening a completed original must use the protected phone cache")
+        _ = try fixture("/hold-files")
+        app.buttons["打开原件 · slow.txt"].tap()
+        XCTAssertTrue(app.buttons["取消下载"].waitForExistence(timeout:5))
+        app.buttons["取消下载"].tap()
+        let cancelled=NSPredicate(format:"enabled == true")
+        expectation(for:cancelled,evaluatedWith:app.buttons["保存标题与标签"]);waitForExpectations(timeout:5)
+        _ = try fixture("/release-files")
         let details=XCTAttachment(screenshot:app.screenshot());details.name="Phone details top actions";details.lifetime = .keepAlways;add(details)
         let title=app.textFields["detail-title"].exists ? app.textFields["detail-title"] : app.textViews["detail-title"]
         title.coordinate(withNormalizedOffset:CGVector(dx:0.95,dy:0.5)).tap();title.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:40))

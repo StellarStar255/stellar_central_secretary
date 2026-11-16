@@ -190,8 +190,15 @@ class Mobile:
         if detail:
             result['text']=item.get('text','')[:100000]
             item=self.service.material_attachments(item)
-            result['attachments']=[{'id':file['id'],'name':file['name'],'media':file.get('media','application/octet-stream'),
-                'path':'/items/'+item['id']+'/files/'+(file['batch_id'] or 'base')+'/'+file['id']} for file in item['all_attachments']]
+            result['attachments']=[]
+            from . import image_formats
+            for file in item['all_attachments']:
+                path='/items/'+item['id']+'/files/'+(file['batch_id'] or 'base')+'/'+file['id']
+                source=self.service.archive.root/'files'/(file['batch_id'] or item['id'])
+                stat=source.stat();version=digest(item['id']+file['batch_id']+file['id']+str(stat.st_mtime_ns)+str(stat.st_size))
+                result['attachments'].append({'id':file['id'],'name':file['name'],'media':file.get('media','application/octet-stream'),
+                    'path':path,'size':file.get('size',stat.st_size),'version':version,
+                    'preview_path':path+'/preview' if image_formats.is_image(file['name']) else ''})
             result['links']=[{'title':link.get('title') or link['url'],'url':link['url']} for link in item.get('group_links',[])]
             for batch in item.get('additions',[]):
                 result['links'] += [{'title':link.get('title') or link['url'],'url':link['url']} for link in batch.get('links',[])]
@@ -310,9 +317,16 @@ class Mobile:
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
                     if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)]})
-                    file_match=re.fullmatch(r'/items/([a-f0-9]{32})/files/(base|[a-f0-9]{32})/(original|[a-f0-9]{32})',parsed.path)
+                    file_match=re.fullmatch(r'/items/([a-f0-9]{32})/files/(base|[a-f0-9]{32})/(original|[a-f0-9]{32})(/preview)?',parsed.path)
                     if not post and file_match:
-                        file,source=manager.attachment(*file_match.groups());size=source.stat().st_size
+                        file,source=manager.attachment(*file_match.groups()[:3]);size=source.stat().st_size
+                        if file_match[4]:
+                            from . import mobile_preview,image_formats
+                            if not image_formats.is_image(file['name']):raise ValueError('此附件请下载原件')
+                            archive=manager.service.archive.root/'files'/(file_match[2] if file_match[2]!='base' else file_match[1])
+                            stat=archive.stat();key=digest(file_match[1]+('' if file_match[2]=='base' else file_match[2])+file['id']+str(stat.st_mtime_ns)+str(stat.st_size))
+                            data=mobile_preview.render(source,manager.root/'previews',key)
+                            self.send_response(200);self.send_header('Content-Type','image/jpeg');self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(data);return
                         from urllib.parse import quote
                         self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(size));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+quote(file['name'],safe=''));self.end_headers()
                         with source.open('rb') as stream:

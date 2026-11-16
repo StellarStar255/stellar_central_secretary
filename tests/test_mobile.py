@@ -217,3 +217,22 @@ class MobileTest(unittest.TestCase):
   self.assertNotIn(str(self.s.archive.root),json.dumps(value))
   self.s.trash_item(ident)
   self.assertEqual(self.request(download,credential=self.credential)[0],400)
+
+ def test_mobile_image_preview_is_small_cached_and_original_stays_identical(self):
+  import io,hashlib
+  from PIL import Image
+  self.approve();stream=io.BytesIO()
+  Image.effect_noise((2400,1800),80).convert('RGB').save(stream,'PNG');raw=stream.getvalue()
+  result=self.m.ingest(self.m.device(self.credential),{'request_id':'preview-original','content':{'filename':'original.png','data':base64.b64encode(raw).decode()}})
+  ident=result['item']['id'];item=self.request('/items/'+ident,credential=self.credential)[1]['item'];file=item['attachments'][0]
+  self.assertEqual(file['size'],len(raw));self.assertTrue(file['version']);self.assertTrue(file['preview_path'])
+  self.assertEqual(self.request(file['preview_path'])[0],401)
+  def download(path):
+   request=urllib.request.Request(self.base+path,headers={'Authorization':'Bearer '+self.credential})
+   with self.http.open(request,timeout=10) as response:return response.read(),response.headers['Content-Type']
+  preview,media=download(file['preview_path'])
+  self.assertEqual(media,'image/jpeg');self.assertLessEqual(len(preview),96*1024);self.assertLess(len(preview),len(raw)//5)
+  with Image.open(io.BytesIO(preview)) as image:self.assertLessEqual(max(image.size),1280)
+  with patch('secretary.mobile_preview.Image.open',side_effect=AssertionError('Must reuse generated derivative')):
+   self.assertEqual(download(file['preview_path'])[0],preview)
+  self.assertEqual(hashlib.sha256(download(file['path'])[0]).digest(),hashlib.sha256(raw).digest())
