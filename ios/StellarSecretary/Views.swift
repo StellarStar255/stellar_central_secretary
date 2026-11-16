@@ -162,14 +162,64 @@ private struct OriginalPreview: UIViewControllerRepresentable {
         func previewController(_ controller:QLPreviewController,previewItemAt index:Int) -> QLPreviewItem {url as NSURL}
     }
 }
+private struct TagFlowLayout: Layout {
+    var spacing:CGFloat=8
+    private func arrange(_ subviews:Subviews,width:CGFloat) -> (CGSize,[CGPoint],[CGSize]) {
+        var points:[CGPoint]=[],sizes:[CGSize]=[];var x:CGFloat=0,y:CGFloat=0,row:CGFloat=0
+        for view in subviews {
+            let ideal=view.sizeThatFits(.unspecified)
+            let size=view.sizeThatFits(ProposedViewSize(width:min(ideal.width,width),height:nil))
+            if x>0 && x+size.width>width {x=0;y+=row+spacing;row=0}
+            points.append(CGPoint(x:x,y:y));sizes.append(size);x+=size.width+spacing;row=max(row,size.height)
+        }
+        return (CGSize(width:width,height:y+row),points,sizes)
+    }
+    func sizeThatFits(proposal:ProposedViewSize,subviews:Subviews,cache:inout ()) -> CGSize {
+        arrange(subviews,width:max(1,proposal.width ?? 320)).0
+    }
+    func placeSubviews(in bounds:CGRect,proposal:ProposedViewSize,subviews:Subviews,cache:inout ()) {
+        let (_,points,sizes)=arrange(subviews,width:max(1,bounds.width))
+        for index in subviews.indices {subviews[index].place(at:CGPoint(x:bounds.minX+points[index].x,y:bounds.minY+points[index].y),proposal:ProposedViewSize(sizes[index]))}
+    }
+}
+private struct InlineAttachmentImage: View {
+    @EnvironmentObject var model:Companion
+    let file:PhoneAttachment
+    @State private var image:UIImage?
+    @State private var failed=false
+    @State private var retry=0
+    var body:some View {
+        VStack(alignment:.leading,spacing:8) {
+            if let image {
+                Image(uiImage:image).resizable().scaledToFit().frame(maxWidth:.infinity,maxHeight:280)
+                    .clipShape(RoundedRectangle(cornerRadius:10)).accessibilityLabel("图片预览 · "+file.name)
+            } else if failed {
+                HStack {Text("图片预览暂未加载").font(.footnote).foregroundStyle(.secondary);Button("重试") {retry+=1}}
+            } else {
+                HStack {ProgressView();Text("正在加载图片预览…").font(.footnote).foregroundStyle(.secondary)}.frame(maxWidth:.infinity,minHeight:100)
+            }
+        }.task(id:file.version+String(model.online)+String(retry)) {
+            guard image == nil else {return};failed=false
+            do {
+                let url=try await model.downloadAttachment(file.previewPath,name:file.name+".preview.jpg",version:file.version) {_,_ in}
+                guard !Task.isCancelled else {return}
+                guard let value=UIImage(contentsOfFile:url.path) else {failed=true;return};image=value
+            } catch {if !Task.isCancelled {failed=true}}
+        }
+    }
+}
 struct DetailView: View {
     @EnvironmentObject var model: Companion
     let record:Record
     @State private var title=""
-    @State private var tags=""
+    @State private var tags:[String]=[]
+    @State private var newTag=""
+    @State private var addingTag=false
+    @State private var deletingTag:String?
+    @State private var confirmTagDeletion=false
     @State private var updated=""
     @State private var savedTitle=""
-    @State private var savedTags=""
+    @State private var savedTags:[String]=[]
     @State private var summary=""
     @State private var text=""
     @State private var originals:[PhoneLink]=[]
@@ -199,11 +249,11 @@ struct DetailView: View {
                         ForEach(attachments) {file in
                             VStack(alignment:.leading,spacing:8) {
                                 if !file.previewPath.isEmpty {
-                                    Button {fileTask=Task {await open(file,lightweight:true)}} label:{Label("查看图片 · "+file.name,systemImage:"photo")}
+                                    InlineAttachmentImage(file:file)
                                 }
-                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}
+                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}.disabled(working || !model.online)
                                 if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? " · 图片预览更快，原件保持完整":"")).font(.caption).foregroundStyle(.secondary)}
-                            }.disabled(working || !model.online)
+                            }
                         }
                     }.frame(maxWidth:.infinity,alignment:.leading).padding().background(.quaternary,in:RoundedRectangle(cornerRadius:14))
                 }
@@ -222,10 +272,20 @@ struct DetailView: View {
                 if !notice.isEmpty {Text(notice).foregroundStyle(.secondary)}
                 if loaded {
                     VStack(alignment:.leading,spacing:12) {
-                        Text("标题与标签").font(.headline)
+                        Text("标题").font(.headline)
                         TextField("资料标题",text:$title,axis:.vertical).textFieldStyle(.roundedBorder).accessibilityIdentifier("detail-title")
-                        TextField("标签，用逗号分隔",text:$tags).textFieldStyle(.roundedBorder).accessibilityIdentifier("detail-tags")
-                        Button("保存标题与标签") {Task {await save()}}.buttonStyle(.borderedProminent)
+                        Button("保存标题") {Task {await save()}}.buttonStyle(.borderedProminent)
+                        Text("标签").font(.headline)
+                        TagFlowLayout {
+                            ForEach(tags,id:\.self) {tag in
+                                HStack(spacing:4) {
+                                    Text(tag).font(.subheadline).fixedSize(horizontal:false,vertical:true).accessibilityIdentifier("tag-chip-"+tag)
+                                    Button {deletingTag=tag;confirmTagDeletion=true} label:{Image(systemName:"xmark.circle.fill").foregroundStyle(.secondary).frame(width:32,height:36)}
+                                        .buttonStyle(.plain).accessibilityLabel("删除标签 "+tag).accessibilityIdentifier("tag-remove-"+tag)
+                                }.padding(.leading,12).padding(.trailing,4).padding(.vertical,4).background(Color.accentColor.opacity(0.12),in:RoundedRectangle(cornerRadius:16))
+                            }
+                            Button {newTag="";addingTag=true} label:{Label("添加标签",systemImage:"plus")}.buttonStyle(.bordered)
+                        }
                     }.disabled(working || !model.online)
                     VStack(alignment:.leading,spacing:12) {
                         Text("添加附件").font(.headline)
@@ -256,6 +316,15 @@ struct DetailView: View {
                     .toolbar {ToolbarItem(placement:.topBarTrailing) {Button("关闭") {preview=nil}}}
             }
         }
+        .alert("添加标签",isPresented:$addingTag) {
+            TextField("标签名称",text:$newTag)
+            Button("添加") {Task {await addTag()}}
+            Button("取消",role:.cancel) {}
+        }
+        .alert("删除标签？",isPresented:$confirmTagDeletion) {
+            Button("删除标签",role:.destructive) {if let tag=deletingTag {Task {await saveTags(tags.filter {$0 != tag},notice:"标签已删除")}}}
+            Button("取消",role:.cancel) {deletingTag=nil}
+        } message: {Text("确定删除标签“"+(deletingTag ?? "")+"”？")}
         .onDisappear {fileTask?.cancel();if preview == nil {clearPreview()}}
         .onChange(of:photo) {_,value in Task {
             guard let value else {return}
@@ -272,7 +341,7 @@ struct DetailView: View {
         }
     }
     private func apply(_ value:[String:Any]) {
-        title=value["title"] as? String ?? record.title;tags=(value["tags"] as? [String] ?? []).joined(separator:", ")
+        title=value["title"] as? String ?? record.title;tags=value["tags"] as? [String] ?? []
         savedTitle=title;savedTags=tags
         updated=value["updated"] as? String ?? "";summary=value["summary"] as? String ?? "";text=value["text"] as? String ?? ""
         var links=(value["links"] as? [[String:Any]] ?? []).compactMap(PhoneLink.init)
@@ -287,9 +356,23 @@ struct DetailView: View {
     }
     private func save() async {
         working=true;defer {working=false};notice=""
-        let values=tags.components(separatedBy:CharacterSet(charactersIn:",，、\n")).map {$0.trimmingCharacters(in:.whitespacesAndNewlines)}.filter {!$0.isEmpty}
-        do {apply(try await model.saveMetadata(record.id,title:title,tags:values,updated:updated));error="";notice="标题与标签已保存"}
+        do {apply(try await model.saveMetadata(record.id,title:title,tags:tags,updated:updated));error="";notice="标题已保存"}
         catch {self.error=error.localizedDescription}
+    }
+    private func addTag() async {
+        let tag=newTag.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !tag.isEmpty,tag.count<=60,tags.count<50 else {error="标签需为 1–60 个字符，最多 50 个标签";return}
+        guard !tags.contains(where:{$0.caseInsensitiveCompare(tag) == .orderedSame}) else {error="这个标签已存在";return}
+        await saveTags(tags+[tag],notice:"标签已添加")
+    }
+    private func saveTags(_ values:[String],notice message:String) async {
+        guard !working else {return};working=true;defer {working=false}
+        let draftTitle=title,titleChanged=title != savedTitle
+        do {
+            apply(try await model.saveMetadata(record.id,title:savedTitle,tags:values,updated:updated))
+            if titleChanged {title=draftTitle}
+            error="";notice=message
+        } catch {self.error=error.localizedDescription}
     }
     private func select(_ data:Data,name:String) {
         guard data.count<=10*1024*1024 else {error="每个附件最多 10 MB";return}

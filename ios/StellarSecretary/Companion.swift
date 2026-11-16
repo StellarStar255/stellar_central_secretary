@@ -470,21 +470,27 @@ enum CredentialStore {
         if FileManager.default.fileExists(atPath:target.path) {return target}
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         var request=URLRequest(url:url);request.setValue("Bearer "+pair.credential,forHTTPHeaderField:"Authorization");request.timeoutInterval=120
-        let transfer=AttachmentTransfer(pin:pair.info.fingerprint,destination:target,progress:progress)
+        let staging=attachmentCacheFolder.appendingPathComponent(".pending-"+UUID().uuidString,isDirectory:true)
+        try FileManager.default.createDirectory(at:staging,withIntermediateDirectories:true)
+        let incoming=staging.appendingPathComponent(target.lastPathComponent)
+        let transfer=AttachmentTransfer(pin:pair.info.fingerprint,destination:incoming,progress:progress)
         do {
-            let result=try await transfer.run(request)
+            _ = try await transfer.run(request)
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+            if !FileManager.default.fileExists(atPath:target.path) {try FileManager.default.moveItem(at:incoming,to:target)}
+            try? FileManager.default.removeItem(at:staging)
             // Keep completed files for repeated opens, bounded to 200 MB plus
             // the currently opened file. iOS may reclaim this cache as needed.
             let files=(try? FileManager.default.contentsOfDirectory(at:attachmentCacheFolder,includingPropertiesForKeys:[.contentModificationDateKey])) ?? []
-            let ordered=files.sorted {((try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast)}
+            let ordered=files.filter {!$0.lastPathComponent.hasPrefix(".pending-")}.sorted {((try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast)}
             var kept=0
             for entry in [folder]+ordered.filter({$0 != folder}) {
                 let children=(try? FileManager.default.contentsOfDirectory(at:entry,includingPropertiesForKeys:[.fileSizeKey])) ?? []
                 let size=children.reduce(0) {$0+((try? $1.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? 0)}
                 if kept+size>200*1024*1024 && entry != folder {try? FileManager.default.removeItem(at:entry)} else {kept+=size}
             }
-            return result
-        } catch {try? FileManager.default.removeItem(at:folder);throw error}
+            return target
+        } catch {try? FileManager.default.removeItem(at:staging);throw error}
     }
     func detail(_ id: String) async throws -> [String:Any] { let response = try await request("/items/"+id);return response["item"] as? [String:Any] ?? [:] }
     func disconnect() { try? FileManager.default.removeItem(at:attachmentCacheFolder);cancelLibraryRefresh();libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage="";answer="";sources=[];try? FileManager.default.removeItem(at:libraryCacheURL);connectionGeneration=UUID();connectionTask?.cancel();connectionTask=nil;connecting=false;bluetoothRelay?.stop();bluetoothRelay=nil;wifiRelay?.stop();wifiRelay=nil;relayServerID="";discoveredURLs=[];browser.stop();discovering = false;services.removeAll();session?.invalidateAndCancel();try? CredentialStore.save(nil);paired = nil;online = false;status = "连接你的 Mac" }
