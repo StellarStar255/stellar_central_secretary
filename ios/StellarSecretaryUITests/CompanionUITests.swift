@@ -1,6 +1,19 @@
 import XCTest
 
 final class CompanionUITests: XCTestCase {
+    @MainActor func clearSavedComputers(_ app:XCUIApplication) {
+        if app.tabBars.buttons["连接"].exists {app.tabBars.buttons["连接"].tap()}
+        // Keychain pairings can survive a simulator uninstall. Remove only the
+        // test app's saved computers through its real UI before each scenario.
+        for _ in 0..<12 {
+            let remove=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'computer-remove-'")).firstMatch
+            guard remove.exists else {break}
+            let id=remove.identifier
+            app.buttons[id].tap();app.buttons["解除配对"].tap()
+            let removed=expectation(for:NSPredicate(format:"exists == false"),evaluatedWith:app.buttons[id])
+            wait(for:[removed],timeout:5)
+        }
+    }
     func fixture(_ path:String) throws -> [String:Any] {
         let done = expectation(description:path);var result: [String:Any] = [:];var failure: Error?
         URLSession.shared.dataTask(with:URL(string:"http://127.0.0.1:18769"+path)!) { data,_,error in
@@ -8,7 +21,7 @@ final class CompanionUITests: XCTestCase {
         }.resume();wait(for:[done],timeout:15);if let failure { throw failure };return result
     }
     @MainActor func testScannerStaysVisibleUntilCancel() throws {
-        let app = XCUIApplication();app.launch()
+        let app = XCUIApplication();app.launch();clearSavedComputers(app)
         if app.tabBars.buttons["连接"].exists {
             app.tabBars.buttons["连接"].tap();app.buttons["解除手机上的配对"].tap();app.buttons["解除配对"].tap()
         }
@@ -25,7 +38,7 @@ final class CompanionUITests: XCTestCase {
     }
     @MainActor func testPairCaptureSearchAndOfflineOutbox() throws {
         continueAfterFailure = false
-        let app = XCUIApplication();app.launch()
+        let app = XCUIApplication();app.launch();clearSavedComputers(app)
         if app.tabBars.buttons["连接"].exists {
             app.tabBars.buttons["连接"].tap();app.buttons["解除手机上的配对"].tap();app.buttons["解除配对"].tap()
         }
@@ -159,7 +172,7 @@ final class CompanionUITests: XCTestCase {
     }
     @MainActor func testSharedDesktopChatAndOfflineRecovery() throws {
         continueAfterFailure=false
-        let app=XCUIApplication();app.launch()
+        let app=XCUIApplication();app.launch();clearSavedComputers(app)
         if app.buttons["扫描 Mac 配对码"].exists {
             let pair=try fixture("/pair.json");app.open(URL(string:pair["url"] as! String)!)
             XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
@@ -186,11 +199,13 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Offline shared answer"].waitForExistence(timeout:30),app.debugDescription)
         XCTAssertEqual(try fixture("/chat-inspect")["offline_count"] as? Int,1)
         let backgroundInput=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
-        backgroundInput.tap();backgroundInput.typeText("Background shared question");app.buttons["chat-send"].tap()
+        backgroundInput.tap();backgroundInput.typeText("Background shared question")
+        let sendReady=expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:app.buttons["chat-send"])
+        wait(for:[sendReady],timeout:10);app.buttons["chat-send"].tap()
         XCTAssertTrue(try fixture("/wait-background")["started"] as? Bool == true)
         app.terminate();_ = try fixture("/finish-background")
         app.launch();app.tabBars.buttons["聊天"].tap()
-        XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:20))
+        XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:20),app.debugDescription)
         XCTAssertEqual(try fixture("/chat-inspect")["background_calls"] as? Int,1)
         let shot=XCTAttachment(screenshot:app.screenshot());shot.name="Shared desktop chat on iPhone";shot.lifetime = .keepAlways;add(shot)
         app.buttons["新建聊天"].tap()
@@ -199,4 +214,86 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:10))
     }
 
+    @MainActor func testZZMultipleComputersKeepCachesAndOutboxesSeparate() throws {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch();clearSavedComputers(app)
+        let ids=try fixture("/computers"),work=ids["first"] as! String,home=ids["second"] as! String
+        if app.tabBars.buttons["连接"].exists {app.tabBars.buttons["连接"].tap()}
+        // Start with a fresh approved work computer, then add the home computer.
+        let first=try fixture("/pair.json");app.open(URL(string:first["url"] as! String)!)
+        if app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20) {_ = try fixture("/approve")}
+        XCTAssertTrue(app.tabBars.buttons["连接"].waitForExistence(timeout:20))
+        app.tabBars.buttons["连接"].tap()
+        app.buttons["computer-rename-"+work].tap()
+        app.alerts.textFields.firstMatch.tap();app.alerts.textFields.firstMatch.typeText("公司电脑")
+        app.alerts.buttons["保存"].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · 公司电脑"].waitForExistence(timeout:5))
+        app.tabBars.buttons["检索"].tap()
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format:"label CONTAINS 'Reference fixture'")).firstMatch.waitForExistence(timeout:10))
+        app.tabBars.buttons["聊天"].tap();app.buttons["会话"].tap();app.buttons["Shared fixture chat"].tap()
+        XCTAssertTrue(app.navigationBars["Shared fixture chat"].waitForExistence(timeout:10))
+        // Start a list refresh on A; its delayed completion must never appear on B.
+        app.tabBars.buttons["检索"].tap();_ = try fixture("/hold-items");app.buttons["搜索资料"].tap()
+        let second=try fixture("/second/pair.json");app.open(URL(string:second["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/second/approve");_ = try fixture("/release-items")
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].waitForExistence(timeout:20),app.debugDescription)
+        app.tabBars.buttons["检索"].tap()
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format:"label CONTAINS 'Home-only reference'")).firstMatch.waitForExistence(timeout:15))
+        XCTAssertFalse(app.buttons.containing(NSPredicate(format:"label CONTAINS 'Reference fixture'")).firstMatch.exists)
+        app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Home private reply"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.staticTexts["Desktop context fixture"].exists,"Same chat/message IDs on two Macs must remain isolated")
+        app.tabBars.buttons["连接"].tap()
+        XCTAssertTrue(app.buttons["computer-select-"+work].exists)
+        app.buttons["computer-select-"+work].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · 公司电脑"].waitForExistence(timeout:10))
+        _ = try fixture("/offline")
+        app.terminate();app.launch();app.tabBars.buttons["归档"].tap()
+        let editor=app.textViews["归档内容"];editor.tap();editor.typeText("Company queued note")
+        app.buttons["暂存，连接后发送"].tap()
+        XCTAssertTrue(app.staticTexts["Company queued note"].waitForExistence(timeout:5))
+        app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.navigationBars["Shared fixture chat"].waitForExistence(timeout:3),"Company chat cache survives switching and restart")
+        let input=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        input.tap();input.typeText("Company unsent input");app.buttons["完成"].tap()
+        app.tabBars.buttons["连接"].tap();app.buttons["computer-select-"+home].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].waitForExistence(timeout:10))
+        app.tabBars.buttons["归档"].tap();XCTAssertFalse(app.staticTexts["Company queued note"].exists)
+        app.tabBars.buttons["聊天"].tap();XCTAssertTrue(app.staticTexts["Home private reply"].waitForExistence(timeout:10))
+        let homeInput=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        XCTAssertTrue((homeInput.value as? String ?? "").isEmpty || homeInput.value as? String=="发消息，继续这段对话…")
+        app.tabBars.buttons["连接"].tap();app.buttons["computer-select-"+work].tap();app.tabBars.buttons["聊天"].tap()
+        let restoredInput=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
+        XCTAssertEqual(restoredInput.value as? String,"Company unsent input")
+        app.tabBars.buttons["连接"].tap();app.buttons["computer-select-"+home].tap()
+        app.terminate();_ = try fixture("/second/offline");app.launch();app.tabBars.buttons["聊天"].tap()
+        XCTAssertTrue(app.staticTexts["Home private reply"].waitForExistence(timeout:3),"Home chat cache survives restart while offline")
+        app.tabBars.buttons["连接"].tap();app.buttons["computer-select-"+work].tap()
+        app.tabBars.buttons["归档"].tap();XCTAssertTrue(app.staticTexts["Company queued note"].waitForExistence(timeout:3))
+        _ = try fixture("/online")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20))
+        let gone=NSPredicate(format:"exists == false");expectation(for:gone,evaluatedWith:app.staticTexts["Company queued note"]);waitForExpectations(timeout:15)
+        XCTAssertTrue((try fixture("/first/inspect")["titles"] as! [String]).contains("Company queued note"))
+        XCTAssertFalse((try fixture("/second/inspect")["titles"] as! [String]).contains("Company queued note"))
+        _ = try fixture("/second/online")
+        // Cancelling a new approval leaves the active computer and saved list intact.
+        app.tabBars.buttons["连接"].tap()
+        let repair=try fixture("/second/pair.json");app.open(URL(string:repair["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].waitForExistence(timeout:15))
+        app.tabBars.buttons["连接"].tap()
+        XCTAssertTrue(app.buttons["computer-select-"+work].exists)
+        let unapproved=try fixture("/third/pair.json");app.open(URL(string:unapproved["url"] as! String)!)
+        XCTAssertTrue(app.buttons["取消添加电脑"].waitForExistence(timeout:20))
+        app.buttons["取消添加电脑"].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.staticTexts["Unapproved Mac"].exists)
+        let canRemove=NSPredicate(format:"enabled == true");expectation(for:canRemove,evaluatedWith:app.buttons["computer-remove-"+home]);waitForExpectations(timeout:10)
+        let shot=XCTAttachment(screenshot:app.screenshot());shot.name="Multiple paired computers";shot.lifetime = .keepAlways;add(shot)
+        app.buttons["computer-remove-"+home].tap();app.buttons["解除配对"].tap()
+        XCTAssertTrue(app.buttons["computer-select-"+work].waitForExistence(timeout:5),"Removing active computer must not remove the other pairing")
+        XCTAssertFalse(app.staticTexts["当前电脑 · 公司电脑"].exists,"Removing active computer must not silently send to another Mac")
+        app.buttons["computer-select-"+work].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · 公司电脑"].waitForExistence(timeout:10))
+    }
 }

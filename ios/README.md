@@ -12,6 +12,12 @@ Native SwiftUI companion for iOS 17 or later. The Mac keeps the library and perf
 
 Credentials are saved in the phone Keychain; the QR contains a short-lived invitation and the server certificate fingerprint. Only the fingerprint-matching TLS server is trusted. Desktop APIs, settings, model credentials and arbitrary file downloads are not exposed by the companion listener. Pairing and revocation are available only through the desktop UI. The listener is off by default.
 
+## Multiple computers and phones
+
+Each desktop can approve up to ten phones independently. The phone's **连接 → 添加电脑** saves up to ten computers without replacing an existing pairing. Approve each computer once, optionally give it a local name such as 公司电脑 or 家里电脑, then use **使用这台电脑** to switch. The current computer appears on capture, chat and library screens. Reopening the app reconnects to the last selected computer; it never silently switches to another reachable computer.
+
+Each computer keeps its own library and chats. Phone list/chat caches, attachment identities and offline queues are separated by computer ID and pinned certificate. Switching computers preserves queued content for its original destination and the in-memory editor contents. Submissions and downloads must finish or be cancelled before switching; an answer already accepted by a desktop continues there. Removing a computer affects only its phone credential and does not automatically select another computer. Its queued content and caches remain on the phone and become available after pairing the same computer and certificate again; revoke phone access separately on that desktop. This feature does not synchronize desktop libraries or add internet remote access. Existing single-computer credentials and caches migrate automatically when upgrading the phone app in place.
+
 ## Reconnection and offline behavior
 
 - The Mac source needs its nearby carrier built once: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer .venv/bin/python packaging/build_peer_bridge.py`. Packaged Mac builds include this component automatically.
@@ -26,7 +32,7 @@ Credentials are saved in the phone Keychain; the QR contains a short-lived invit
 
 ## Library list cache
 
-The phone keeps the last successful list results (titles and summaries) for up to eight queries, scoped to the paired Mac ID and pinned certificate. Opening the library displays that snapshot immediately, including after restarting offline. Results less than a minute old are reused; older results refresh in the background. Pull to refresh or use Search to update immediately. A failed update keeps the previous list, and successful phone captures mark the cache for refresh. The cache is protected on the phone, excluded from backup, and cleared when unpairing; original documents and AI answers are not cached.
+The phone keeps the last successful list results (titles and summaries) for up to eight queries per computer, scoped to the Mac ID and pinned certificate. Opening the library displays that snapshot immediately, including after restarting offline. Results less than a minute old are reused; older results refresh in the background. Pull to refresh or use Search to update immediately. A failed update keeps the previous list, and successful phone captures mark the cache for refresh. The cache is protected on the phone and excluded from backup; original documents and AI answers are not stored in the list cache.
 
 ## Shared desktop chat
 

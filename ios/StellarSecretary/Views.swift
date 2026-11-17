@@ -36,7 +36,9 @@ struct ContentView: View {
     @State private var pairingTask: Task<Void, Never>?
     var body: some View {
         Group {
-            if model.paired == nil {
+            if model.paired == nil && !model.computers.computers.isEmpty {
+                DeviceView(addComputer: {scan=true})
+            } else if model.paired == nil {
                 NavigationStack {
                     VStack(spacing:24) {
                         Image(systemName:"sparkle").font(.system(size:64,weight:.light)).foregroundStyle(.orange)
@@ -50,10 +52,10 @@ struct ContentView: View {
                 }
             } else {
                 TabView(selection:$model.selectedTab) {
-                    CaptureView().tabItem { Label("归档",systemImage:"square.and.pencil") }.tag("archive")
-                    ChatView().tabItem {Label("聊天",systemImage:"bubble.left.and.bubble.right")}.tag("chat")
-                    LibraryView().tabItem { Label("检索",systemImage:"magnifyingglass") }.tag("library")
-                    DeviceView().tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }.tag("device")
+                    CaptureView().id(model.workspaceID).tabItem { Label("归档",systemImage:"square.and.pencil") }.tag("archive")
+                    ChatView().id(model.workspaceID).tabItem {Label("聊天",systemImage:"bubble.left.and.bubble.right")}.tag("chat")
+                    LibraryView().id(model.workspaceID).tabItem { Label("检索",systemImage:"magnifyingglass") }.tag("library")
+                    DeviceView(addComputer: {scan=true}).id(model.workspaceID).tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }.tag("device")
                 }.tint(.orange)
             }
         }.fullScreenCover(isPresented:$scan) {
@@ -69,14 +71,19 @@ struct ContentView: View {
 }
 struct ConnectionBanner: View {
     @EnvironmentObject var model: Companion
-    var body: some View { Label(model.status,systemImage:model.online ? "checkmark.circle.fill":"wifi.slash").font(.footnote).foregroundStyle(model.online ? .green:.secondary).padding(.vertical,4) }
+    var body: some View {
+        VStack(alignment:.leading,spacing:4) {
+            if let pair=model.paired {Text("当前电脑 · "+pair.displayName).font(.caption).foregroundStyle(.secondary)}
+            Label(model.status,systemImage:model.online ? "checkmark.circle.fill":"wifi.slash").font(.footnote).foregroundStyle(model.online ? .green:.secondary)
+        }.padding(.vertical,4)
+    }
 }
 struct CaptureView: View {
     @EnvironmentObject var model: Companion
-    @State private var text = ""
+    private var text: String {model.captureEditor.text}
     @State private var photo: PhotosPickerItem?
-    @State private var image: Data?
-    @State private var filename: String?
+    private var image: Data? {model.captureEditor.data}
+    private var filename: String? {model.captureEditor.filename}
     @State private var importing = false
     @State private var saving = false
     @FocusState private var editing: Bool
@@ -84,29 +91,31 @@ struct CaptureView: View {
         NavigationStack {
             Form {
                 Section { ConnectionBanner() }
-                Section("链接、笔记或安排") { TextEditor(text:$text).focused($editing).frame(minHeight:150).accessibilityLabel("归档内容") }
+                Section("链接、笔记或安排") { TextEditor(text:$model.captureEditor.text).focused($editing).frame(minHeight:150).accessibilityLabel("归档内容") }
                 Section {
                     PhotosPicker(selection:$photo,matching:.images) { Label("添加截图或照片",systemImage:"photo") }
                     Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
-                    if let filename { HStack { Text(filename);Spacer();Button("移除") { image = nil;self.filename = nil;photo = nil } } }
-                    Button { editing = false;saving = true;Task { if await model.enqueue(text:text,filename:filename,data:image) { text = "";image = nil;filename = nil;photo = nil };saving = false } } label: { Label(model.online ? "保存到知识库":"暂存，连接后发送",systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
+                    if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
+                    Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(model.online ? "保存到知识库":"暂存，连接后发送",systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
                 } footer: { Text("链接先收藏，网页正文可在电脑端继续读取。附件最多 10 MB。") }
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
-                if !model.drafts.isEmpty {
-                    Section("待发送 · \(model.drafts.count)") {
-                        ForEach(model.drafts) { draft in VStack(alignment:.leading) { Text(draft.filename ?? draft.text).lineLimit(2);if draft.serverID != model.paired?.info.server_id { Text("属于其他 Mac，重新配对原设备后发送").font(.caption).foregroundStyle(.secondary) } }.swipeActions { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
+                if !model.currentDrafts.isEmpty {
+                    Section("待发送 · \(model.currentDrafts.count)") {
+                        ForEach(model.currentDrafts) { draft in VStack(alignment:.leading) { Text(draft.filename ?? draft.text).lineLimit(2) }.swipeActions { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
                         Button("重新发送") { Task { await model.connect() } }
                     }
                 }
             }.navigationTitle("随手归档").scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
             .onChange(of:photo) { _,value in Task {
                 guard let value else { return }
+                let id=model.workspaceID
                 if let data = try? await value.loadTransferable(type:Data.self), data.count <= 10*1024*1024 {
-                    image = data;let type = value.supportedContentTypes.first;filename = "Photo." + (type?.preferredFilenameExtension ?? "jpg")
+                    guard id==model.workspaceID else {return}
+                    model.captureEditor.data = data;let type = value.supportedContentTypes.first;model.captureEditor.filename = "Photo." + (type?.preferredFilenameExtension ?? "jpg")
                 } else { model.error = "照片读取失败或超过 10 MB" }
             } }
             .fileImporter(isPresented:$importing,allowedContentTypes:[.item]) { result in
-                do { let url = try result.get();let access = url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } };let values = try url.resourceValues(forKeys:[.fileSizeKey]);guard (values.fileSize ?? Int.max) <= 10*1024*1024 else { model.error = "文件超过 10 MB";return };image = try Data(contentsOf:url);filename = url.lastPathComponent }
+                do { let url = try result.get();let access = url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } };let values = try url.resourceValues(forKeys:[.fileSizeKey]);guard (values.fileSize ?? Int.max) <= 10*1024*1024 else { model.error = "文件超过 10 MB";return };model.captureEditor.data = try Data(contentsOf:url);model.captureEditor.filename = url.lastPathComponent }
                 catch { model.error = "无法读取文件" }
             }
         }
@@ -114,8 +123,7 @@ struct CaptureView: View {
 }
 struct ChatView: View {
     @EnvironmentObject var model:Companion
-    @State private var input=""
-    @State private var inputDrafts:[String:String]=[:]
+    private var input:String {model.chatInput}
     @State private var choosing=false
     @State private var removing:PendingChatMessage?
     @State private var confirmingRemoval=false
@@ -161,7 +169,7 @@ struct ChatView: View {
                                             if !model.chatPartial.isEmpty {Text(model.chatPartial).textSelection(.enabled);Text("回答生成中").font(.caption).foregroundStyle(.secondary)}
                                             Button("停止回答") {Task {await model.stopChatAnswer(message)}}.disabled(!model.online)
                                         }
-                                        ForEach(Array(message.sources.enumerated()),id:\.offset) {_,source in NavigationLink {DetailView(record:source)} label:{Label(source.title,systemImage:"doc.text").font(.footnote)}}
+                                        ForEach(Array(message.sources.enumerated()),id:\.offset) {_,source in NavigationLink {DetailView(record:source,workspace:model.workspaceID)} label:{Label(source.title,systemImage:"doc.text").font(.footnote)}}
                                     }.padding(12).background(message.role=="user" ? Color.accentColor.opacity(0.12):Color.secondary.opacity(0.08),in:RoundedRectangle(cornerRadius:14)).id(message.id)
                                     if message.role != "user" {Spacer(minLength:20)}
                                 }
@@ -179,18 +187,20 @@ struct ChatView: View {
                             Color.clear.frame(height:1).id("chat-bottom")
                         }.padding()
                     }.scrollDismissesKeyboard(.interactively)
-                    .onChange(of:messages.last?.id) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
+                    .onChange(of:messages.last?.id,initial:true) {_,_ in reader.scrollTo("chat-bottom",anchor:.bottom)}
+                    .onChange(of:model.chatSnapshot?.running) {old,new in if old==true && new==false {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                     .onChange(of:queued.count) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                 }
                 HStack(alignment:.bottom) {
-                    TextField("发消息，继续这段对话…",text:$input,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).accessibilityIdentifier("chat-input").disabled(model.selectedChatID.isEmpty)
+                    TextField("发消息，继续这段对话…",text:$model.chatInput,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).accessibilityIdentifier("chat-input").disabled(model.selectedChatID.isEmpty)
                     Button("发送") {
-                        let value=input;typing=false
-                        Task {if await model.enqueueChat(value),input==value {input=""}}
+                        let value=input,id=model.workspaceID,chat=model.selectedChatID;typing=false
+                        Task {if await model.enqueueChat(value,workspace:id,chatID:chat),model.workspaceID==id,input==value {model.chatInput=""}}
                     }.buttonStyle(.borderedProminent).accessibilityIdentifier("chat-send").disabled(model.selectedChatID.isEmpty || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || model.chatSubmitting)
                 }.padding()
             }.navigationTitle(model.chatSnapshot?.title ?? "聊天").navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement:.keyboard) {Spacer();Button("完成") {typing=false}}
                 ToolbarItem(placement:.topBarLeading) {Button("会话") {choosing=true}}
                 ToolbarItem(placement:.topBarTrailing) {Button {Task {await model.createChat()}} label:{Image(systemName:"square.and.pencil")}.accessibilityLabel("新建聊天").disabled(!model.online || model.chatSubmitting)}
             }
@@ -205,8 +215,7 @@ struct ChatView: View {
                 }
             }
             .alert("移除待发消息？",isPresented:$confirmingRemoval) {Button("移除",role:.destructive) {if let pending=removing {model.removeQueuedChatMessage(pending.id)}};Button("取消",role:.cancel) {}} message:{Text("这条尚未发送的内容将从手机移除。")}
-            .onChange(of:model.selectedChatID) {old,new in inputDrafts[old]=input;input=inputDrafts[new] ?? ""}
-            .task(id:model.selectedChatID+String(model.online)) {
+            .task(id:model.workspaceID+model.selectedChatID+String(model.online)+model.deviceGeneration.uuidString) {
                 guard model.online else {return};var tick=0
                 while !Task.isCancelled && model.online {
                     if tick%5==0 {await model.syncChatList()}
@@ -233,8 +242,8 @@ struct LibraryView: View {
                 }
                 if !model.libraryMessage.isEmpty { Section { Text(model.libraryMessage).font(.footnote).foregroundStyle(.secondary) } }
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
-                if !model.answer.isEmpty { Section("回答") { Text(model.answer).textSelection(.enabled);ForEach(model.sources) { item in NavigationLink(item.title) { DetailView(record:item) } } } }
-                Section("资料") { ForEach(model.records) { item in NavigationLink { DetailView(record:item) } label: { VStack(alignment:.leading,spacing:5) { Text(item.title);if !item.summary.isEmpty { Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) } } } } }
+                if !model.answer.isEmpty { Section("回答") { Text(model.answer).textSelection(.enabled);ForEach(model.sources) { item in NavigationLink(item.title) { DetailView(record:item,workspace:model.workspaceID) } } } }
+                Section("资料") { ForEach(model.records) { item in NavigationLink { DetailView(record:item,workspace:model.workspaceID) } label: { VStack(alignment:.leading,spacing:5) { Text(item.title);if !item.summary.isEmpty { Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) } } } } }
             }.navigationTitle("知识库")
             .task(id:model.online) {await model.openLibrary()}
             .refreshable {await model.search(query)}
@@ -291,6 +300,7 @@ private struct TagFlowLayout: Layout {
 private struct InlineAttachmentImage: View {
     @EnvironmentObject var model:Companion
     let file:PhoneAttachment
+    let workspace:String
     @State private var image:UIImage?
     @State private var failed=false
     @State private var retry=0
@@ -307,7 +317,7 @@ private struct InlineAttachmentImage: View {
         }.task(id:file.version+String(model.online)+String(retry)) {
             guard image == nil else {return};failed=false
             do {
-                let url=try await model.downloadAttachment(file.previewPath,name:file.name+".preview.jpg",version:file.version) {_,_ in}
+                let url=try await model.downloadAttachment(file.previewPath,name:file.name+".preview.jpg",version:file.version,workspace:workspace) {_,_ in}
                 guard !Task.isCancelled else {return}
                 guard let value=UIImage(contentsOfFile:url.path) else {failed=true;return};image=value
             } catch {if !Task.isCancelled {failed=true}}
@@ -317,6 +327,7 @@ private struct InlineAttachmentImage: View {
 struct DetailView: View {
     @EnvironmentObject var model: Companion
     let record:Record
+    let workspace:String
     @State private var title=""
     @State private var tags:[String]=[]
     @State private var newTag=""
@@ -355,7 +366,7 @@ struct DetailView: View {
                         ForEach(attachments) {file in
                             VStack(alignment:.leading,spacing:8) {
                                 if !file.previewPath.isEmpty {
-                                    InlineAttachmentImage(file:file)
+                                    InlineAttachmentImage(file:file,workspace:workspace)
                                 }
                                 Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}.disabled(working || !model.online)
                                 if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? " · 图片预览更快，原件保持完整":"")).font(.caption).foregroundStyle(.secondary)}
@@ -457,12 +468,12 @@ struct DetailView: View {
     }
     private func load() async {
         guard !working else {return};working=true;defer {working=false}
-        do {apply(try await model.detail(record.id));error=""}
+        do {apply(try await model.detail(record.id,workspace:workspace));error=""}
         catch {self.error=error.localizedDescription}
     }
     private func save() async {
         working=true;defer {working=false};notice=""
-        do {apply(try await model.saveMetadata(record.id,title:title,tags:tags,updated:updated));error="";notice="标题已保存"}
+        do {apply(try await model.saveMetadata(record.id,title:title,tags:tags,updated:updated,workspace:workspace));error="";notice="标题已保存"}
         catch {self.error=error.localizedDescription}
     }
     private func addTag() async {
@@ -475,7 +486,7 @@ struct DetailView: View {
         guard !working else {return};working=true;defer {working=false}
         let draftTitle=title,titleChanged=title != savedTitle
         do {
-            apply(try await model.saveMetadata(record.id,title:savedTitle,tags:values,updated:updated))
+            apply(try await model.saveMetadata(record.id,title:savedTitle,tags:values,updated:updated,workspace:workspace))
             if titleChanged {title=draftTitle}
             error="";notice=message
         } catch {self.error=error.localizedDescription}
@@ -488,7 +499,7 @@ struct DetailView: View {
         guard let data=pendingData else {return};working=true;defer {working=false};notice=""
         do {
             let draftTitle=title,draftTags=tags,titleChanged=title != savedTitle,tagsChanged=tags != savedTags
-            apply(try await model.addAttachment(record.id,name:pendingName,data:data,updated:updated,requestID:attachmentRequestID))
+            apply(try await model.addAttachment(record.id,name:pendingName,data:data,updated:updated,requestID:attachmentRequestID,workspace:workspace))
             if titleChanged {title=draftTitle};if tagsChanged {tags=draftTags}
             pendingData=nil;photo=nil;error="";notice="附件已添加"
         } catch {self.error=error.localizedDescription}
@@ -498,7 +509,7 @@ struct DetailView: View {
         operationLabel=lightweight ? "正在加载图片预览（非原件）…":"正在下载完整原件…"
         defer {working=false;fileTask=nil}
         do {
-            let url=try await model.downloadAttachment(lightweight ? file.previewPath:file.path,name:lightweight ? file.name+".preview.jpg":file.name,version:file.version) {done,total in
+            let url=try await model.downloadAttachment(lightweight ? file.previewPath:file.path,name:lightweight ? file.name+".preview.jpg":file.name,version:file.version,workspace:workspace) {done,total in
                 Task {@MainActor in downloadDone=done;downloadTotal=total}
             }
             guard !Task.isCancelled else {return}
@@ -513,8 +524,54 @@ struct DetailView: View {
 }
 struct DeviceView: View {
     @EnvironmentObject var model: Companion
-    @State private var confirm = false
-    var body: some View { NavigationStack { Form { Section("已配对的 Mac") { Text(model.paired?.info.name ?? "");ConnectionBanner();Button("重新连接") { Task { await model.connect() } } };Section { Text("连接同一局域网时，App 打开后会自动寻找已配对的 Mac。电脑休眠或网络隔离时可能无法连接。手机不下载 AI 模型，检索和问答由电脑完成。").font(.callout).foregroundStyle(.secondary) };Section { Button("解除手机上的配对",role:.destructive) { confirm = true } } }.navigationTitle("连接").confirmationDialog("解除配对？待发送内容仍保留在手机，Mac 端可移除此设备。",isPresented:$confirm,titleVisibility:.visible) { Button("解除配对",role:.destructive) { model.disconnect() } } } }
+    var addComputer: () -> Void
+    @State private var removing:PairedMac?
+    @State private var renaming:PairedMac?
+    @State private var nickname=""
+    @State private var showRemove=false
+    @State private var showRename=false
+    var body: some View {
+        NavigationStack {
+            Form {
+                if model.paired != nil {
+                    Section("当前电脑") {ConnectionBanner();Button("重新连接") {Task {await model.connect()}}.disabled(model.pairingInFlight)}
+                }
+                if model.pairingInFlight {Section("添加电脑") {if model.waiting {Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(model.status)};ProgressView();Button("取消添加电脑") {model.cancelPairing()}}}
+                Section {
+                    ForEach(model.computers.computers) {pair in
+                        VStack(alignment:.leading,spacing:8) {
+                            HStack {Text(pair.displayName).font(.headline);Spacer();if pair.id==model.paired?.id {Label("当前",systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(.green)}}
+                            if pair.displayName != pair.info.name {Text(pair.info.name).font(.caption).foregroundStyle(.secondary)}
+                            if model.pendingCount(pair)>0 {Text("此电脑有 \(model.pendingCount(pair)) 条待发送内容").font(.caption).foregroundStyle(.secondary)}
+                            HStack {
+                                if pair.id != model.paired?.id {Button("使用这台电脑") {Task {await model.selectComputer(pair.id)}}.accessibilityIdentifier("computer-select-"+pair.info.server_id)}
+                                Button("备注名") {renaming=pair;nickname=pair.nickname ?? "";showRename=true}.accessibilityIdentifier("computer-rename-"+pair.info.server_id)
+                                Spacer()
+                                Button("移除",role:.destructive) {removing=pair;showRemove=true}.accessibilityIdentifier("computer-remove-"+pair.info.server_id)
+                            }.buttonStyle(.borderless).disabled(!model.canChangeComputer)
+                        }.padding(.vertical,4)
+                    }
+                    Button {addComputer()} label:{Label("添加电脑",systemImage:"qrcode.viewfinder")}.disabled(!model.canChangeComputer)
+                } header:{Text("我的电脑 · \(model.computers.computers.count)")} footer:{Text("分别扫码授权后即可切换，无需重新绑定。每台电脑最多绑定 10 部手机，手机最多保存 10 台电脑。")}
+                if !model.canChangeComputer {Section {Text(model.pairingInFlight ? "正在配对，请先完成或取消配对":"正在提交内容，完成后即可切换电脑").font(.footnote).foregroundStyle(.secondary)}}
+                if !model.error.isEmpty {Section {Text(model.error).foregroundStyle(.orange)}}
+                Section {
+                    Text("每台电脑的知识库、聊天记录和手机待发送内容分别保存。切换不会同步或合并电脑资料。连接需要电脑开机运行，且网络或附近连接可达。").font(.callout).foregroundStyle(.secondary)
+                }
+                if model.paired != nil {
+                    Section {Button("解除手机上的配对",role:.destructive) {removing=model.paired;showRemove=true}.disabled(!model.canChangeComputer)}
+                }
+            }.navigationTitle("连接")
+            .alert("电脑备注名",isPresented:$showRename) {
+                TextField("例如：公司电脑、家里电脑",text:$nickname)
+                Button("保存") {if let pair=renaming {model.renameComputer(pair.id,name:nickname)}}
+                Button("取消",role:.cancel) {}
+            } message:{Text("只修改这部手机上的显示名称。")}
+            .confirmationDialog("移除 \(removing?.displayName ?? "这台电脑") 的配对？",isPresented:$showRemove,titleVisibility:.visible) {
+                Button("解除配对",role:.destructive) {if let pair=removing {model.removeComputer(pair.id)}}
+            } message:{Text("仅移除这台电脑的手机凭据。待发送内容和缓存保留，重新配对原电脑后可继续使用；电脑端可另外撤销此手机的访问权限。")}
+        }
+    }
 }
 struct ScannerView: UIViewControllerRepresentable {
     var scanned: (String, @escaping (String) -> Void) -> Void

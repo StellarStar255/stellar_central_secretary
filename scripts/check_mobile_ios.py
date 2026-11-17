@@ -39,6 +39,13 @@ if __name__=='__main__':
   service.chat_history({'activeId':shared_id,'conversations':[{'id':shared_id,'title':'Shared fixture chat','updated':1,'messages':[
    {'id':'desktop-q','role':'user','text':'Desktop question fixture','knowledgeQuestion':True},
    {'id':'desktop-a','role':'assistant','text':'Desktop context fixture','sources':[]}]}]})
+  second=Service(Path(folder)/'second');second.archive.configure('codex',False);other=second.mobile
+  other.enable(advertise=False,bind='127.0.0.1')
+  third=Service(Path(folder)/'third');third.archive.configure('codex',False);third.mobile.enable(advertise=False,bind='127.0.0.1')
+  home_item,_=second.archive.add('Home-only reference','Only the home computer has this record.')
+  second.chat_history({'activeId':shared_id,'conversations':[{'id':shared_id,'title':'Home fixture chat','updated':1,'messages':[
+   {'id':'desktop-q','role':'user','text':'Home question fixture','knowledgeQuestion':True},
+   {'id':'desktop-a','role':'assistant','text':'Home private reply','sources':[]}]}]})
   chat_calls=[];background_started=threading.Event();background_release=threading.Event()
   def synthetic_answer(question,history=None,progress=None,**kwargs):
    if question in ('Mobile shared question','Offline shared follow-up','Background shared question'):
@@ -58,6 +65,22 @@ if __name__=='__main__':
      with patch('secretary.mobile.addresses',return_value=['192.168.1.20']):mobile.invitation()
      info={'v':1,'server_id':mobile.state['server_id'],'name':'Fixture Mac','url':f'https://127.0.0.1:{port}','fingerprint':mobile.fingerprint,'secret':mobile.invite['secret']}
      value={'url':'stellar-secretary://pair?'+urlencode({'data':base64.b64encode(json.dumps(info).encode()).decode()})}
+    elif self.path=='/second/pair.json':
+     with patch('secretary.mobile.addresses',return_value=['192.168.1.20']):other.invitation()
+     info={'v':1,'server_id':other.state['server_id'],'name':'Home Mac','url':f'https://127.0.0.1:{other.server.server_port}','fingerprint':other.fingerprint,'secret':other.invite['secret']}
+     value={'url':'stellar-secretary://pair?'+urlencode({'data':base64.b64encode(json.dumps(info).encode()).decode()})}
+    elif self.path=='/third/pair.json':
+     with patch('secretary.mobile.addresses',return_value=['192.168.1.20']):third.mobile.invitation()
+     info={'v':1,'server_id':third.mobile.state['server_id'],'name':'Unapproved Mac','url':f'https://127.0.0.1:{third.mobile.server.server_port}','fingerprint':third.mobile.fingerprint,'secret':third.mobile.invite['secret']}
+     value={'url':'stellar-secretary://pair?'+urlencode({'data':base64.b64encode(json.dumps(info).encode()).decode()})}
+    elif self.path=='/second/approve':
+     pending=other.status()['pending'];assert len(pending)==1
+     other.decide({'id':pending[0]['id'],'approve':True});value={'ok':True}
+    elif self.path=='/computers':value={'first':mobile.state['server_id'],'second':other.state['server_id']}
+    elif self.path=='/second/inspect':value={'titles':[i['title'] for i in second.archive.list()],'devices':len(other.state['devices'])}
+    elif self.path=='/first/inspect':value={'titles':[i['title'] for i in service.archive.list()]}
+    elif self.path=='/second/offline':other.stop();value={'ok':True}
+    elif self.path=='/second/online':other.enable(advertise=False,bind='127.0.0.1');value={'ok':True}
     elif self.path=='/approve':
      pending=mobile.status()['pending'];assert len(pending)==1
      mobile.decide({'id':pending[0]['id'],'approve':True});value={'ok':True}
@@ -105,13 +128,22 @@ if __name__=='__main__':
     command=['xcodebuild','-project','ios/StellarSecretary.xcodeproj','-scheme','StellarSecretary','-configuration','Debug','-destination','platform=iOS Simulator,id='+sys.argv[1],'-derivedDataPath','build/ios','-resultBundlePath',str(Path('/tmp')/('stellar-ios-results-'+os.urandom(4).hex())),'CODE_SIGN_IDENTITY=-','CODE_SIGNING_ALLOWED=YES','test']
     # Each run owns a synthetic simulator library and outbox. A previous failed
     # run must not leave drafts scoped to an unrelated fixture server ID.
+    command += sys.argv[2:]
     inventory=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','--json'],env=env))
     device=next(d for values in inventory['devices'].values() for d in values if d['udid']==sys.argv[1])
     assert device['name']=='Stellar Secretary Trial','Use the dedicated trial simulator only'
     subprocess.run(['xcrun','simctl','uninstall',sys.argv[1],'io.github.stellarstar255.secretary.companion'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     result=subprocess.run(command,cwd=ROOT,env=env)
-    if result.returncode:print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
+    if result.returncode:
+     print('Fixture archive titles:',[item['title'] for item in service.archive.list()],flush=True)
+     print('Fixture chat calls:',chat_calls,flush=True)
+     print('Fixture shared messages:',[(m.get('role'),m.get('text'),m.get('requestState')) for c in service.chat_history()['conversations'] if c['id']==shared_id for m in c['messages']],flush=True)
     result.check_returncode()
-    assert len(service.archive.list())==3
-    print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, tag chips with add and confirmed deletion, automatic inline image previews, top original links and attachment controls, original file cache and download cancellation, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives, shared desktop chat context, bidirectional messages and offline chat retry')
-  finally:background_release.set();control.shutdown();control.server_close();mobile.stop(disable=True);service.close()
+    if len(sys.argv)==2:assert len(service.archive.list())==4
+    assert 'Company queued note' not in [i['title'] for i in second.archive.list()]
+    if len(sys.argv)>2:
+     print('PASS: selected native iOS scenarios: '+', '.join(sys.argv[2:]))
+    else:
+     print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, tag chips with add and confirmed deletion, automatic inline image previews, top original links and attachment controls, original file cache and download cancellation, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives, shared desktop chat context, bidirectional messages and offline chat retry')
+     print('PASS: multiple approved computers, local names, explicit switching, cache/chat ID isolation, offline queues scoped to original computer, editor restoration, cancelled additions and independent removal')
+  finally:background_release.set();control.shutdown();control.server_close();mobile.stop(disable=True);service.close();second.close();third.close()

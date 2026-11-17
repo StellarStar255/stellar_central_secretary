@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.119** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.119.md)
+Version **v0.1.120** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.120.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -19,6 +19,8 @@ The demo uses fictional documents and a prewritten summary. Waiting is accelerat
 The optional **Phone connection** setting enables a separate authenticated HTTPS LAN listener. Install the native app in `ios/`, scan the Mac QR from the app, compare the six digits, and approve on the computer. The companion supports note/link/image/file capture, library search, cited text and questions. Bonjour reconnects to the paired computer while the app is open; pending captures survive offline periods and are retried without duplication. Keep the computer awake on the same reachable LAN. Remote access, cloud sync and background delivery with the app closed are not included.
 
 The listener is off by default; paired devices can be revoked on the desktop. Phone attachments are limited to 10 MB. Links are initially bookmarked; complete webpage capture on the computer. See [iPhone build, installation and validation instructions](ios/README.md). This is not an App Store or TestFlight release.
+
+The phone source trial saves up to ten computers in **连接**, with local names and manual switching. Each desktop can approve ten phones. Current-computer labels, separate caches and destination-bound offline queues keep work and home libraries distinct; pairing does not sync libraries or add remote access. Update the phone app in place to retain its existing pairing.
 
 ## Chat with your library
 

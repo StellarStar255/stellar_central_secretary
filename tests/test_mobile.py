@@ -43,6 +43,16 @@ class MobileTest(unittest.TestCase):
   with patch('secretary.mobile.addresses',return_value=['192.168.1.20']):self.m.invitation()
   self.m.invite['expires']=0
   self.assertEqual(self.request('/pair',{'secret':self.m.invite['secret'],'credential':self.credential,'name':'Phone'})[0],403)
+ def test_multiple_phones_keep_independent_approval_and_revocation(self):
+  first=self.approve();first_credential=self.credential
+  self.credential=secrets.token_urlsafe(48);second=self.approve()
+  self.assertEqual(len(self.m.status()['devices']),2)
+  for credential in (first_credential,self.credential):
+   self.assertEqual(self.request('/status',credential=credential)[0],200)
+  self.m.revoke(first['id'])
+  self.assertEqual(self.request('/status',credential=first_credential)[0],401)
+  self.assertEqual(self.request('/status',credential=self.credential)[0],200)
+  self.assertEqual(self.m.device(self.credential),second['id'])
  def test_offline_replay_and_attachment_use_existing_archive_without_duplicate(self):
   self.approve();body={'request_id':'offline-1','content':{'text':'Fixture arrangement tomorrow 11:00'}}
   code,result=self.request('/ingest',body,self.credential);self.assertEqual(code,200)
