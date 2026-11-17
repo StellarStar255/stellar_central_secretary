@@ -1,4 +1,5 @@
 import hashlib
+import base64
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -7,9 +8,54 @@ from secretary.core import extract
 from secretary.server import Service
 from secretary import ai
 from pdf_fixture import pdf_bytes
+from test_large_pdf_preview import fixture
+from pathlib import Path
 
 
 class PdfExtractionTest(unittest.TestCase):
+    def test_parser_limit_falls_back_to_bounded_native_preview(self):
+        from pypdf.errors import LimitReachedError
+        import pypdfium2 as pdfium
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'complex.pdf';fixture(path,pages=8,text_size=20000)
+            original=pdfium.PdfDocument.__getitem__;visited=[]
+            def page(document,index):visited.append(index);return original(document,index)
+            with patch('pypdf._page.PageObject.extract_text',side_effect=LimitReachedError('Reached maximum number of tokens per stream.')),patch.object(pdfium.PdfDocument,'__getitem__',page):
+                text,warning=extract(path.name,path.read_bytes())
+            self.assertEqual(visited,list(range(5)))
+            self.assertIn('第 1–5 页 / 共 8 页',text)
+            self.assertIn('PAGETOKEN5',text);self.assertNotIn('PAGETOKEN6',text)
+            self.assertLess(len(text),41000)
+            self.assertIn('自动切换',warning);self.assertIn('8000',warning)
+            self.assertNotIn('tokens',warning)
+            item={'text':text,'title':'Complex PDF','filename':path.name}
+            with patch('secretary.ai.summarize',return_value={'summary':'Overview','tags':[]}) as summarize:
+                result=ai.summary_fields(item,'codex')
+            self.assertIn('未覆盖后续页面',result['summary'])
+            self.assertNotIn('PAGETOKEN6',summarize.call_args.args[0])
+            with self.assertRaisesRegex(ValueError,'仅提取了前 5 页'):
+                ai.summary_fields(item,'codex',full_pdf=True)
+
+    def test_parser_limit_upload_and_reextract_keep_original(self):
+        from pypdf.errors import LimitReachedError
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'complex.pdf';fixture(path,pages=8)
+            data=path.read_bytes();service=Service(Path(temp)/'archive')
+            service.archive.configure('codex',False)
+            try:
+                with patch('pypdf._page.PageObject.extract_text',side_effect=LimitReachedError('Reached maximum number of tokens per stream.')):
+                    item=service.ingest({'filename':path.name,'data':base64.b64encode(data).decode(),'archive_only':True})['item']
+                    self.assertIn('PAGETOKEN5',item['text'])
+                    self.assertEqual((service.archive.root/'files'/item['id']).read_bytes(),data)
+                    result=service.reextract(item['id'])
+                    self.assertTrue(result['parsed']);self.assertNotIn('PAGETOKEN6',result['item']['text'])
+                    from secretary import bundles
+                    bundle,source=bundles.create('',[{'name':path.name,'data':base64.b64encode(data).decode()}])
+                    prompt,_,scope=bundles.model_material(bundle,source)
+                    self.assertIn('PAGETOKEN5',prompt);self.assertNotIn('PAGETOKEN6',prompt)
+                    self.assertIn('自动切换',scope)
+            finally:service.close()
+
     def test_aes_document_with_empty_open_password_extracts_text(self):
         text,error=extract('fixture.pdf',pdf_bytes(password=''))
         self.assertIn('Encrypted PDF extraction fixture',text)

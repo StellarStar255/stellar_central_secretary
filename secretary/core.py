@@ -62,7 +62,7 @@ def extract(name, data):
             return read(data)
         try:
             from pypdf import PdfReader
-            from pypdf.errors import DependencyError, FileNotDecryptedError, PdfReadError
+            from pypdf.errors import DependencyError, FileNotDecryptedError, PyPdfError
         except ImportError:
             return '', 'PDF 解析组件未安装，请运行启动脚本安装依赖。'
         try:
@@ -74,8 +74,11 @@ def extract(name, data):
             return '', 'PDF 加密读取组件不完整，请升级程序后点击「重新解析原文件」。'
         except FileNotDecryptedError:
             return '', '此 PDF 需要打开密码，请先使用密码打开并导出可读取版本，再重新导入。'
-        except PdfReadError:
-            return '', 'PDF 文件损坏或结构无法读取，请确认原文件能正常打开后重试。'
+        except PyPdfError:
+            # Parser resource limits describe PDF instructions, not model tokens.
+            # Keep those limits and use the bounded native reader instead.
+            from .pdf_preview import read
+            return read(data,reason='常规 PDF 解析未完成，已自动切换为前部限量读取。')
         if sum(len(text) for text in pages)<20:
             return '', '此 PDF 没有足够的可读取文字，可能是扫描件，需要先做 OCR。'
         return '\n\n'.join(f'[第 {i+1} 页]\n{text}' for i,text in enumerate(pages) if text), ''

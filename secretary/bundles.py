@@ -187,7 +187,7 @@ def model_material(data,current_text,link_values=None):
         for file in value['files']:
             source=file['text']
             if file['name'].lower().endswith('.pdf'):
-                if file['size']>INLINE_MAX:pdf_scopes.append(file['name']+'：'+file['warning'])
+                if file['size']>INLINE_MAX or source.startswith(('【大 PDF 前部概览','【PDF 前部概览')):pdf_scopes.append(file['name']+'：'+file['warning'])
                 later=re.search(r'^\[第 (?:[6-9]|[1-9][0-9]+) 页\]$',source,re.M)
                 if later:source=source[:later.start()];limited=True
             if len(source)>allowance:source=source[:allowance];limited=True

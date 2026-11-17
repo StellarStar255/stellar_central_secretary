@@ -9,7 +9,7 @@ CHARS_PER_PAGE=8000
 SCOPE='大 PDF 仅概览前 5 页可读取文字，未覆盖后续页面；原件完整保留。'
 EMPTY='PDF 前部页面没有可读取文字，可能是扫描件；可补充文字或使用 OCR。'
 
-def read(source):
+def read(source,*,reason=''):
     import pypdfium2 as pdfium
     try:
         with LOCK,ExitStack() as stack:
@@ -24,8 +24,9 @@ def read(source):
                         if text:parts.append(f'[第 {index+1} 页]\n'+text[:CHARS_PER_PAGE])
                 except Exception:failed=True
             if not parts:return '',EMPTY
-            scope=f'【大 PDF 前部概览：第 1–{count} 页 / 共 {total} 页】'
-            warning=SCOPE
+            label='PDF 前部概览' if reason else '大 PDF 前部概览'
+            scope=f'【{label}：第 1–{count} 页 / 共 {total} 页】'
+            warning=(reason+' '+SCOPE.removeprefix('大 ')) if reason else SCOPE
             if truncated:warning+=' 每页最多提取 8000 个字符，部分文字已截断。'
             if failed:warning+=' 部分预览页面无法读取。'
             return scope+'\n'+warning+'\n\n'+'\n\n'.join(parts),warning
