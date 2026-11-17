@@ -182,7 +182,7 @@ class ManualLoginTest(unittest.TestCase):
         session={'websocket':'ws://127.0.0.1:9371/devtools/browser/original'}
         result=browser_reader.read_from_browser(pw,session,target,Mock(),threading.Event(),timeout=2)
         self.assertIn('保留原件',result['text'])
-        pw.chromium.connect_over_cdp.assert_called_once_with(session['websocket'],timeout=15000)
+        pw.chromium.connect_over_cdp.assert_called_once_with(session['websocket'],timeout=15000,no_defaults=True)
         pw.chromium.launch_persistent_context.assert_not_called()
         browser.new_context.assert_not_called();context.new_page.assert_not_called()
         browser.close.assert_not_called();context.close.assert_not_called();page.close.assert_not_called();page.goto.assert_not_called()

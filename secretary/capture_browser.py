@@ -46,7 +46,7 @@ def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, b
     confirmed = login_complete if login_complete is not None else threading.Event()
     page = None
     with sync_playwright() as pw:
-        browser = pw.chromium.connect_over_cdp(session['websocket'], timeout=15000)
+        browser = reader.connect_browser(pw, session)
         try:
             if cancelled.is_set(): raise reader.CaptureCancelled('已停止读取。')
             page = create_task_page(browser, session, background)

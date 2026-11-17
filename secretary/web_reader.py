@@ -263,7 +263,7 @@ def read(url,profile_dir,notify,cancelled,timeout=600,login_complete=None,backgr
     confirmed=login_complete if login_complete is not None else threading.Event()
     page=None;completed=False
     with sync_playwright() as pw:
-        browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
+        browser=reader.connect_browser(pw,session)
         try:
             page=create_task_page(browser,session,background)
             # Do not route/intercept page requests. The user may spend minutes

@@ -4,6 +4,14 @@ from unittest.mock import Mock,patch
 from secretary import browser_reader,browser_session
 
 class BrowserSessionTest(unittest.TestCase):
+ def test_attach_preserves_persistent_browser_settings(self):
+  pw=Mock();session={'websocket':'ws://127.0.0.1:9371/devtools/browser/fixture'}
+  browser=browser_reader.connect_browser(pw,session)
+  self.assertIs(browser,pw.chromium.connect_over_cdp.return_value)
+  pw.chromium.connect_over_cdp.assert_called_once_with(session['websocket'],timeout=15000,no_defaults=True)
+  browser_reader.connect_browser(pw,session,timeout=3000)
+  pw.chromium.connect_over_cdp.assert_called_with(session['websocket'],timeout=3000,no_defaults=True)
+
  def test_recovers_changed_nonce_only_from_exact_owned_profile(self):
   with tempfile.TemporaryDirectory() as root:
    profile=Path(root);old={'endpoint':'http://127.0.0.1:9371','websocket':'ws://127.0.0.1:9371/devtools/browser/old','confirmed':True}

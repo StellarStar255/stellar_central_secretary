@@ -320,8 +320,15 @@ def collect_messages(page, cancelled, notify=None, scope='full'):
     raise RuntimeError('会话超过本次滚动读取范围，尚未确认到达底部；旧正文保持不变。请分段导入。')
 
 
+def connect_browser(pw, session, timeout=15000):
+    # Attach without changing downloads, focus, fonts or media in the user's
+    # persistent context. Chrome started without a window can reject Playwright's
+    # default Browser.setDownloadBehavior before we even create the capture tab.
+    return pw.chromium.connect_over_cdp(session['websocket'], timeout=timeout, no_defaults=True)
+
+
 def read_from_browser(pw, session, target, notify, cancelled, timeout=90, diagnose=None, capture_page=None, on_login_required=None, browser=None, scope='full'):
-    browser=browser or pw.chromium.connect_over_cdp(session['websocket'],timeout=15000)
+    browser=browser or connect_browser(pw, session)
     if not browser.contexts: raise RuntimeError('无法找到原浏览器会话，登录窗口保持打开，请重试。')
     # Inspect every matching tab, since sign-in may leave an earlier guest tab.
     context=browser.contexts[0]

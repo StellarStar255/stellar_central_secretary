@@ -644,7 +644,7 @@ class Service:
                 from .browser_session import owned_processes
                 old_pids={process['pid'] for process in owned_processes(self.archive.root/name,browser_reader.chrome_executable())}
                 with sync_playwright() as pw:
-                    browser=pw.chromium.connect_over_cdp(session['websocket'],timeout=3000)
+                    browser=browser_reader.connect_browser(pw,session,timeout=3000)
                     pages=[page for context in browser.contexts for page in context.pages]
                     if only_empty and any(page.url not in ('about:blank','') and not page.url.startswith('about:blank#stellar-') for page in pages):continue
                     try:browser.new_browser_cdp_session().send('Browser.close')
