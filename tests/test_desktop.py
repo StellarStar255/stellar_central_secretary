@@ -117,6 +117,18 @@ class NativeDesktopTest(unittest.TestCase):
                             delegate.window_controller[0].windowNumber(),None,'w','w',False,13)
                         self.assertTrue(app.mainMenu().performKeyEquivalent_(event))
                     evaluate("document.querySelector('#library-dialog').showModal(); document.querySelector('#detail-dialog').showModal(); StellarImageViewer.open([{name:'photo.png',src:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZV8AAAAASUVORK5CYII='}]); undefined")
+                    wait_for(lambda:evaluate("document.querySelector('#image-viewer img').naturalWidth > 0"))
+                    self.assertTrue(evaluate("""(() => {
+                        const stage = document.querySelector('.image-viewer-stage');
+                        const label = document.querySelector('[data-viewer="zoom"]');
+                        stage.dispatchEvent(new WheelEvent('wheel', {deltaX:25, deltaY:40, cancelable:true}));
+                        if(label.textContent !== '100%' || getComputedStyle(stage.querySelector('img')).cursor !== 'none')return false;
+                        const gesture = (type,scale) => stage.dispatchEvent(Object.assign(new Event(type,{cancelable:true}),{scale}));
+                        gesture('gesturestart',1);
+                        gesture('gesturechange',1.5);
+                        gesture('gestureend',1.5);
+                        return label.textContent === '150%';
+                    })()"""))
                     for closed,remaining in [('image-viewer',['detail-dialog','library-dialog']),('detail-dialog',['library-dialog']),('library-dialog',[])]:
                         callAfter(close_with_shortcut)
                         wait_for(lambda:not evaluate("document.getElementById("+repr(closed)+").open"))

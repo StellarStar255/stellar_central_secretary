@@ -1,7 +1,8 @@
 /* Local image viewing stays inside the app, above the current detail dialog. */
 (()=>{
  const t=value=>StellarI18n.t(value);
- let dialog,stage,picture,caption,status,motionHint,motionButton,items=[],index=0,scale=1,x=0,y=0,drag=null,opener,revision=0;
+ let dialog,stage,picture,caption,status,motionHint,motionButton,items=[],index=0,scale=1,x=0,y=0,drag=null,pinchStart=null,opener,revision=0;
+ let zoomLabel,panFrame=0,scrollIdle=0;
  const catalogs=new Map();
  async function motion(image,request){
   let url;try{url=new URL(image.src,location.href)}catch{return}
@@ -19,8 +20,15 @@
    }else if(/\.(heic|heif|hif)$/i.test(file?.name||image.name))motionHint.textContent=t('当前仅有静态照片。可在“追加材料”中补入同名 MOV，再重新打开照片播放实况。');
   }catch{if(request===revision&&dialog.open)motionHint.textContent=t('未能检查实况视频，请关闭预览后重试。')}
  }
- function paint(){picture.style.transform=`translate(${x}px,${y}px) scale(${scale})`;dialog.querySelector('[data-viewer="zoom"]').textContent=Math.round(scale*100)+'%'}
- function reset(){scale=1;x=y=0;paint()}
+ function paintTransform(){picture.style.transform=`translate3d(${x}px,${y}px,0) scale(${scale})`}
+ function paint(){paintTransform();const label=Math.round(scale*100)+'%';if(zoomLabel.textContent!==label)zoomLabel.textContent=label}
+ function queuePan(){
+  if(!panFrame)panFrame=requestAnimationFrame(()=>{panFrame=0;if(dialog.open)paintTransform()});
+ }
+ function endScrollPan(){clearTimeout(scrollIdle);stage.classList.remove('is-scroll-panning')}
+ function endDrag(){drag=null;stage.classList.remove('is-dragging')}
+ function clearPan(){cancelAnimationFrame(panFrame);panFrame=0;endScrollPan();endDrag()}
+ function reset(){clearPan();scale=1;x=y=0;pinchStart=null;paint()}
  function show(offset=0){
   index=(index+offset+items.length)%items.length;reset();
   motionButton.hidden=true;delete motionButton.dataset.videoSrc;motionHint.textContent='';const request=++revision;
@@ -30,7 +38,25 @@
   picture.src=items[index].src;
   void motion(items[index],request);
  }
- function zoom(factor){scale=Math.max(.25,Math.min(8,scale*factor));paint()}
+ function zoom(factor,start=scale){scale=Math.max(.25,Math.min(8,start*factor));paint()}
+ function wheel(event){
+  event.preventDefault();
+  if(pinchStart!==null)return;
+  // Chromium sends touchpad pinches as control-modified wheel events.
+  const unit=event.deltaMode===1?16:event.deltaMode===2?stage.clientHeight:1;
+  if(event.ctrlKey){
+   if(event.deltaY)zoom(Math.exp(-event.deltaY*unit/100));
+   return;
+  }
+  if(drag||!picture.naturalWidth||(!event.deltaX&&!event.deltaY))return;
+  const horizontal=Math.abs(stage.clientWidth-picture.offsetWidth*scale)/2;
+  const vertical=Math.abs(stage.clientHeight-picture.offsetHeight*scale)/2;
+  x=Math.max(-horizontal,Math.min(horizontal,x-event.deltaX*unit));
+  y=Math.max(-vertical,Math.min(vertical,y-event.deltaY*unit));
+  stage.classList.add('is-scroll-panning');
+  clearTimeout(scrollIdle);scrollIdle=setTimeout(endScrollPan,160);
+  queuePan();
+ }
  function build(){
   if(dialog)return;
   dialog=document.createElement('dialog');dialog.id='image-viewer';dialog.setAttribute('aria-label',t('图片查看器'));
@@ -38,6 +64,7 @@
   for(const [action,label,text] of [['previous','上一张','‹'],['next','下一张','›'],['motion','播放实况','▶'],['out','缩小','−'],['zoom','适应窗口','100%'],['in','放大','＋'],['close','关闭','×']]){
    const button=document.createElement('button');button.type='button';button.dataset.viewer=action;button.textContent=text;button.title=t(label);button.setAttribute('aria-label',t(label));header.append(button);
    if(action==='motion'){motionButton=button;button.hidden=true}
+   if(action==='zoom')zoomLabel=button;
    button.onclick=()=>({previous:()=>show(-1),next:()=>show(1),motion:()=>globalThis.StellarVideoViewer?.open(button),out:()=>zoom(1/1.25),in:()=>zoom(1.25),zoom:reset,close:()=>dialog.close()})[action]();
   }
   stage=document.createElement('div');stage.className='image-viewer-stage';picture=document.createElement('img');picture.draggable=false;
@@ -45,11 +72,17 @@
   picture.onload=()=>{status.textContent=''};picture.onerror=()=>{status.textContent=t('图片加载失败，请关闭后重试。')};
   motionHint=document.createElement('p');motionHint.className='image-viewer-motion-hint';motionHint.setAttribute('role','status');
   stage.append(picture,status,motionHint);dialog.append(header,stage);document.body.append(dialog);
-  stage.addEventListener('wheel',event=>{event.preventDefault();zoom(event.deltaY<0?1.15:1/1.15)},{passive:false});
+  stage.addEventListener('wheel',wheel,{passive:false});
+  stage.addEventListener('gesturestart',event=>{event.preventDefault();endScrollPan();pinchStart=scale},{passive:false});
+  stage.addEventListener('gesturechange',event=>{
+   event.preventDefault();
+   if(pinchStart!==null&&Number.isFinite(event.scale)&&event.scale>0)zoom(event.scale,pinchStart);
+  },{passive:false});
+  stage.addEventListener('gestureend',event=>{event.preventDefault();pinchStart=null},{passive:false});
   stage.ondblclick=()=>scale===1?zoom(2):reset();
-  stage.onpointerdown=event=>{if(event.button!==0)return;drag={id:event.pointerId,x:event.clientX-x,y:event.clientY-y};stage.setPointerCapture(event.pointerId)};
-  stage.onpointermove=event=>{if(drag&&drag.id===event.pointerId){x=event.clientX-drag.x;y=event.clientY-drag.y;paint()}};
-  stage.onpointerup=stage.onpointercancel=()=>{drag=null};
+  stage.onpointerdown=event=>{if(event.button!==0)return;endScrollPan();drag={id:event.pointerId,x:event.clientX-x,y:event.clientY-y};stage.classList.add('is-dragging');stage.setPointerCapture(event.pointerId)};
+  stage.onpointermove=event=>{if(drag&&drag.id===event.pointerId){x=event.clientX-drag.x;y=event.clientY-drag.y;queuePan()}};
+  stage.onpointerup=stage.onpointercancel=stage.onlostpointercapture=event=>{if(drag?.id===event.pointerId)endDrag()};
   // Only a press and release outside the frame dismisses the viewer; panning stays local.
   const outside=event=>{const rect=dialog.getBoundingClientRect();return event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom};
   let backdropPress=false;
@@ -61,7 +94,7 @@
    const action={ArrowLeft:()=>show(-1),ArrowRight:()=>show(1),'+':()=>zoom(1.25),'=':()=>zoom(1.25),'-':()=>zoom(1/1.25),'0':reset}[event.key];
    if(action){event.preventDefault();event.stopPropagation();action()}
   },true);
-  dialog.addEventListener('close',()=>{revision++;catalogs.clear();picture.removeAttribute('src');items=[];drag=null;if(opener?.isConnected)opener.focus()});
+  dialog.addEventListener('close',()=>{revision++;catalogs.clear();clearPan();picture.removeAttribute('src');items=[];pinchStart=null;if(opener?.isConnected)opener.focus()});
  }
  function open(images,selected=0,trigger=null){
   if(!images.length)return;build();items=images;index=Math.max(0,Math.min(selected,items.length-1));opener=trigger;

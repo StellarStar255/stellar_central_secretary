@@ -28,6 +28,32 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('[data-note-open]').click();expect(page.locator('#image-viewer')).to_be_visible()
     page.wait_for_function("()=>document.querySelector('#image-viewer img').naturalWidth===12")
     assert len(browser.contexts[0].pages)==1 and launch.call_count==0
+    pan=page.locator('.image-viewer-stage').evaluate("""async stage => {
+      const image=stage.querySelector('img'), before=image.style.transform;
+      stage.dispatchEvent(new WheelEvent('wheel', {deltaX: 40, deltaY: 60, cancelable: true}));
+      stage.dispatchEvent(new WheelEvent('wheel', {deltaX: -10, cancelable: true}));
+      const result={cursor:getComputedStyle(image).cursor,deferred:image.style.transform===before};
+      await new Promise(requestAnimationFrame);
+      const transform=new DOMMatrix(getComputedStyle(image).transform);
+      return {...result,x:transform.m41,y:transform.m42};
+    }""")
+    assert pan=={'cursor':'none','deferred':True,'x':-30,'y':-60},pan
+    expect(page.locator('#image-viewer img')).to_have_css('cursor','grab')
+    expect(page.locator('[data-viewer="zoom"]')).to_have_text('100%')
+    page.locator('.image-viewer-stage').evaluate("""stage => {
+      const gesture = (type,scale) => stage.dispatchEvent(Object.assign(new Event(type,{cancelable:true}),{scale}));
+      gesture('gesturestart',1);
+      gesture('gesturechange',1.5);
+      gesture('gesturechange',2);
+      gesture('gestureend',2);
+    }""")
+    expect(page.locator('[data-viewer="zoom"]')).to_have_text('200%')
+    page.locator('[data-viewer="zoom"]').click()
+    page.locator('.image-viewer-stage').evaluate("""stage => {
+      stage.dispatchEvent(new WheelEvent('wheel', {ctrlKey: true, deltaY: 20, cancelable: true}));
+    }""")
+    expect(page.locator('[data-viewer="zoom"]')).to_have_text('82%')
+    page.locator('[data-viewer="zoom"]').click()
     page.locator('[data-viewer="in"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('125%')
     frame=page.locator('#image-viewer').bounding_box()
     assert frame['x']>=50 and frame['y']>=50 and frame['width']<=1100*.9 and frame['height']<=950*.86
@@ -42,7 +68,10 @@ with tempfile.TemporaryDirectory() as root:
     page.keyboard.press('ArrowLeft');expect(page.locator('#image-viewer-caption')).to_contain_text('1 / 2')
     page.locator('[data-viewer="in"]').click()
     stage=page.locator('.image-viewer-stage');box=stage.bounding_box();page.mouse.move(box['x']+100,box['y']+100);page.mouse.down();page.mouse.move(box['x']+150,box['y']+130);page.mouse.up()
-    assert 'translate(50px,30px)' in page.locator('#image-viewer img').get_attribute('style').replace(' ', '')
+    page.wait_for_function("""() => {
+      const transform=new DOMMatrix(getComputedStyle(document.querySelector('#image-viewer img')).transform);
+      return transform.m41===50 && transform.m42===30;
+    }""")
     page.locator('[data-viewer="zoom"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('100%')
     page.screenshot(path='/tmp/secretary-image-viewer.png');page.keyboard.press('Escape');assert launch.call_count==0
     service.archive.update(item,summary='AI-generated summary',tags=['AI tag']);page.evaluate('refresh()');expect(page.locator('#note-text')).to_have_value(saved['note'])

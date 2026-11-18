@@ -84,8 +84,10 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 #image-viewer header{display:flex;gap:8px;align-items:center;padding:12px;border-bottom:1px solid #444;flex-shrink:0}
 #image-viewer-caption{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 #image-viewer header button{min-width:36px;height:36px;padding:4px 10px;background:#292929;color:#eee;border:1px solid #555;border-radius:6px;cursor:pointer}#image-viewer header button:disabled{opacity:.35;cursor:default}
-.image-viewer-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;cursor:grab;user-select:none}.image-viewer-stage:active{cursor:grabbing}
-#image-viewer .image-viewer-stage img{max-width:100%;max-height:100%;object-fit:contain;flex-shrink:0;transform-origin:center}
+.image-viewer-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;contain:paint;background:#171717;user-select:none}
+#image-viewer .image-viewer-stage img{max-width:100%;max-height:100%;object-fit:contain;flex-shrink:0;transform-origin:center;will-change:transform;cursor:grab}
+#image-viewer .image-viewer-stage.is-dragging,#image-viewer .image-viewer-stage.is-dragging img{cursor:grabbing}
+#image-viewer .image-viewer-stage.is-scroll-panning,#image-viewer .image-viewer-stage.is-scroll-panning img{cursor:none}
 .image-viewer-status{position:absolute;bottom:20px;background:#222b;padding:8px;pointer-events:none}.image-viewer-status:empty{display:none}
 .image-viewer-motion-hint{position:absolute;bottom:0;left:12px;right:12px;margin:8px auto;padding:6px 10px;width:fit-content;max-width:calc(100% - 24px);box-sizing:border-box;border-radius:6px;background:#222d;color:#eee;font-size:12px;line-height:1.5;pointer-events:none}.image-viewer-motion-hint:empty{display:none}
 #attachments img,#append-files img{cursor:zoom-in}
