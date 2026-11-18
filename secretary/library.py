@@ -1,5 +1,6 @@
 """Library result ranking, filters and bounded result pages."""
 from datetime import datetime,timedelta,timezone
+from . import attachment_editor, bundles, image_formats, media
 from .note_dates import date_summary
 
 SORTS=('', 'relevance','created','updated','viewed')
@@ -99,6 +100,13 @@ def query(archive,q='',category='',kind='',state='',days='',sort='',favorite='',
     if words:
         hits=archive.retrieve(q,100)
         for item in items:item['source_matches']=[{'text':hit['text'][:240],'origin':hit['origin']} for hit in hits if hit['item_id']==item['id'] and hit.get('origin')][:3]
+    for item in items:
+        name=item['filename']
+        if not name or bundles.is_bundle(name):continue
+        if name.lower().endswith('.pdf') or image_formats.is_image(name) or media.video_type(name):
+            item['original_file_action']='preview'
+        elif attachment_editor.can_open(name):
+            item['original_file_action']='open'
     return {'items':items,'total':total,'offset':offset,'limit':limit}
 
 def rank_values(title,tags,filename,summary,batches,q):

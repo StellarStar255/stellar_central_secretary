@@ -1,5 +1,5 @@
 """Real-browser library checks with isolated synthetic material and no model calls."""
-import json,os,sys,tempfile,threading
+import io,json,os,sys,tempfile,threading
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
@@ -96,7 +96,35 @@ with tempfile.TemporaryDirectory() as folder:
     page.locator('#library-open').click();page.locator('#search').fill('robot camera');page.locator('#items [data-id="'+linked+'"]').click()
     expect(page.locator('#preview-timestamps')).to_contain_text('Archived at')
     expect(page.locator('#preview-timestamps [data-record-created]')).to_have_text('2025-01-02 11:04:05')
+    from pypdf import PdfWriter
+    from PIL import Image
+    page.locator('#state-filter').select_option('')
+    pdf=PdfWriter();pdf.add_blank_page(width=240,height=320);pdf_bytes=io.BytesIO();pdf.write(pdf_bytes)
+    png=io.BytesIO();Image.new('RGB',(16,16),'orange').save(png,format='PNG')
+    for name,content,mime in [('Direct original.PDF',pdf_bytes.getvalue(),'application/pdf'),('Direct original.png',png.getvalue(),'image/jpeg')]:
+     ident,_=service.archive.add(name,filename=name,data=content)
+     page.locator('#search').fill(name)
+     original=page.locator('#items [data-id="'+ident+'"]')
+     original.click();expect(page.locator('#preview-title')).to_have_text(name)
+     expect(page.locator('#detail-dialog')).not_to_be_visible()
+     page.locator('#preview-close').click()
+     url=base+'/api/items/'+ident+'/preview'
+     with page.context.expect_event('response',lambda response:response.url==url) as response:
+      with page.expect_popup() as opened:original.dblclick()
+     assert response.value.status==200 and response.value.headers['content-type']==mime
+     opened.value.close()
+    name='Direct text fixture.txt';ident,_=service.archive.add(name,filename=name,data=b'Default app fixture')
+    page.locator('#search').fill(name);original=page.locator('#items [data-id="'+ident+'"]')
+    with patch('secretary.attachment_editor.launch') as launch:
+     with page.expect_response(lambda response:response.url.endswith('/'+ident+'/editor/open')) as opened:original.dblclick()
+     assert opened.value.ok
+     assert launch.call_args.args[0].read_bytes()==b'Default app fixture'
+    page.locator('#search').fill('Other record 12')
+    page.locator('#items .library-row').filter(has_text='Other record 12').dblclick()
+    expect(page.locator('#detail-dialog')).to_be_visible()
+    expect(page.locator('#edit-title')).to_contain_text('Other record 12')
     print('PASS: preview shows full archive timestamp and independent updated timestamp in local timezone; rename preserves archive time, refreshes updated time, and English labels work')
+    print('PASS: rapid double-click opens the original link, PDF, image or desktop file; notes open full details')
     assert not errors,errors
     print('PASS: compact scope badges, inline preview title edit, Enter save, Esc cancel, refresh preserves draft, persisted rename without source changes, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
    except Exception:

@@ -262,18 +262,47 @@ function locateCitedPassage(button){
   return;
  }
 }
+async function openLocalOriginal(item){
+ const result=await api('/api/items/'+item.id+'/open-local-path',{path:item.local_path_target,open_file:true});
+ toast(t(result.directory?'已打开本地文件夹':result.opened_file?'已打开本地文件':'已在文件夹中定位文件'));
+}
+async function openLibraryOriginal(item){
+ if(!item)return;
+ const path='/api/items/'+item.id,url=originalLink(item);
+ if(item.local_path_target)return openLocalOriginal(item);
+ if(url||item.original_file_action==='preview'){
+  window.open(url||path+'/preview','_blank','noopener,noreferrer');
+ }else if(item.original_file_action==='open'){
+  const result=await api(path+'/editor/open',{});
+  toast(t(result.conflict?'归档附件已更新，本机编辑文件仍保留，请先核对版本。':'已在默认程序中打开编辑副本'));
+ }else return detail(item.id,true);
+ void api(path+'/view',{}).catch(()=>{});
+}
 function bindDetails(container,items=allItems){container.querySelectorAll('[data-id]').forEach(button=>{
  if(button.dataset.sourceState){button.onclick=()=>toast(t(button.dataset.sourceState==='trashed'?'资料已移入回收站，可恢复后查看。':'资料已删除，无法打开原文。'));return}
  const inLibrary=container===$('#items');
  const show=()=>{const action=inLibrary&&globalThis.StellarLibraryPreview?.select;return (action?action(button.dataset.id):detail(button.dataset.id,true).then(()=>locateCitedPassage(button))).catch(error=>toast(error.message))};
- const linkedRow=container===$('#messages')&&(button.classList.contains('archive-card')||button.classList.contains('source'))||container===$('#items')&&button.classList.contains('library-row');
- const url=linkedRow?originalLink(items.find(item=>item.id===button.dataset.id)):'';
- const localTarget=items.find(item=>item.id===button.dataset.id)?.local_path_target;
+ const item=items.find(item=>item.id===button.dataset.id);
+ if(inLibrary&&button.classList.contains('library-row')){
+  button.title=t(item?.local_path_target?'单击查看资料；双击打开本地位置':originalLink(item)?'单击查看资料；双击打开原始链接':item?.original_file_action?'单击预览资料；双击打开原件':'单击预览资料；双击打开完整资料');
+  button.onclick=event=>{if(!(event?.detail>1))void show()};
+  let opening=false;
+  button.ondblclick=async event=>{
+   event.preventDefault();event.stopPropagation();
+   if(opening)return;opening=true;
+   try{await openLibraryOriginal(libraryResults.find(result=>result.id===button.dataset.id))}
+   catch(error){toast(error.message)}finally{opening=false}
+  };
+  return;
+ }
+ const linkedRow=container===$('#messages')&&(button.classList.contains('archive-card')||button.classList.contains('source'));
+ const url=linkedRow?originalLink(item):'';
+ const localTarget=item?.local_path_target;
  if(localTarget){
   let pending;button.title=t('单击查看资料；双击打开本地位置');
-  button.onclick=event=>{clearTimeout(pending);if(inLibrary||!event?.detail){if(!(event?.detail>1))void show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)void show()},200)};
+  button.onclick=event=>{clearTimeout(pending);if(!event?.detail){void show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)void show()},200)};
   let opening=false;
-  button.ondblclick=async event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);if(opening)return;opening=true;try{const result=await api('/api/items/'+button.dataset.id+'/open-local-path',{path:localTarget,open_file:true});toast(t(result.directory?'已打开本地文件夹':result.opened_file?'已打开本地文件':'已在文件夹中定位文件'))}catch(error){toast(error.message)}finally{opening=false}};
+  button.ondblclick=async event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);if(opening)return;opening=true;try{await openLocalOriginal(item)}catch(error){toast(error.message)}finally{opening=false}};
   return;
  }
 
@@ -283,7 +312,7 @@ function bindDetails(container,items=allItems){container.querySelectorAll('[data
  let pending;
  button.title=t(button.classList.contains('source')?'双击打开原链接':'单击查看资料；双击打开原始链接');
  // Keep the first click from opening a modal over the second mouse click.
- button.onclick=event=>{clearTimeout(pending);if(inLibrary){if(!(event?.detail>1))show();return}if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},200)};
+ button.onclick=event=>{clearTimeout(pending);if(!event?.detail){show();return}if(event.detail>1)return;pending=setTimeout(()=>{if(button.isConnected)show()},200)};
  button.ondblclick=event=>{event.preventDefault();event.stopPropagation();clearTimeout(pending);window.open(url,'_blank','noopener,noreferrer');void api('/api/items/'+button.dataset.id+'/view',{}).catch(()=>{})};
 })}
 function summaryProgress(item){
@@ -967,7 +996,7 @@ globalThis.StellarBundles?.bind({api,toast,nativeVideo:()=>latestStatus?.desktop
 
 globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});
 
-globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),link:originalLink,describe:libraryPresentation,onSaved:refresh});
+globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),openOriginal:openLibraryOriginal,link:originalLink,describe:libraryPresentation,onSaved:refresh});
 
 async function localBackupList(){
  const result=await api('/api/backups');globalThis.StellarBackups?.sync(result.status);const target=$('#backup-entries');target.innerHTML='';

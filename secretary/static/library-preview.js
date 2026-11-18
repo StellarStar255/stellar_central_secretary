@@ -1,7 +1,7 @@
 /* A bounded preview with inline title editing. */
 (()=>{
  const $=selector=>document.querySelector(selector),t=value=>StellarI18n.t(value);
- let api,toast,openDetails,link,describe,onSaved,loadingId='',items=[],selected='',cached=null,revision=0,editing=null;
+ let api,toast,openDetails,openOriginal,link,describe,onSaved,loadingId='',items=[],selected='',cached=null,revision=0,editing=null;
  const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  function timestamp(value){
   if(typeof value!=='string'||!value.trim())return null;
@@ -42,7 +42,7 @@
   }catch(error){if(request===revision){loadingId='';$('#preview-status').textContent=error.message}}
  }
  function sync(values){items=values;if(selected&&!items.some(item=>item.id===selected)){clear();return}markSelection();if(editing)return;const current=items.find(item=>item.id===selected);if(current&&((!cached&&loadingId!==selected)||(cached&&cached.updated!==current.updated))){cached=null;void select(selected,false)}}
- function bind(options){({api,toast,openDetails,link,describe,onSaved}=options);clear();$('#preview-close').onclick=()=>{clear();$('#search').focus()};$('#preview-trash').onclick=()=>selected&&StellarArchiveActions.trash(selected);$('#preview-full').onclick=()=>selected&&openDetails(selected);
+ function bind(options){({api,toast,openDetails,openOriginal,link,describe,onSaved}=options);clear();$('#preview-close').onclick=()=>{clear();$('#search').focus()};$('#preview-trash').onclick=()=>selected&&StellarArchiveActions.trash(selected);$('#preview-full').onclick=()=>selected&&openDetails(selected);
   $('#preview-content').ondblclick=event=>{
    if(!selected||!cached||$('#preview-full').disabled)return;
    if(event.target.closest('button,a,input,textarea,select,summary,details,[role="button"],[contenteditable]'))return;
@@ -61,8 +61,9 @@
    if(!['ArrowDown','ArrowUp','Enter'].includes(event.key)||(!event.target.closest('#items .library-row')&&event.target.id!=='search'))return;
    const rows=[...$('#items').querySelectorAll('.library-row')];if(!rows.length)return;event.preventDefault();let index=rows.findIndex(row=>row.dataset.id===selected);
    if(event.key!=='Enter'){index=index<0?0:Math.max(0,Math.min(rows.length-1,index+(event.key==='ArrowDown'?1:-1)));const row=rows[index];row.focus({preventScroll:true});row.scrollIntoView({block:'nearest'});void select(row.dataset.id);return}
-   const id=(index<0?rows[0]:rows[index]).dataset.id;
-   if(event.metaKey||event.ctrlKey){const url=link(items.find(item=>item.id===id));if(url){window.open(url,'_blank','noopener,noreferrer');void api('/api/items/'+id+'/view',{}).catch(()=>{})}else toast(t('这份资料没有原网页链接，可在完整资料中打开原件。'))}else void select(id);
+   const id=event.target.closest('#items .library-row')?.dataset.id||(index<0?rows[0]:rows[index]).dataset.id;
+   if(event.metaKey||event.ctrlKey)void openOriginal(items.find(item=>item.id===id)).catch(error=>toast(error.message));
+   else void select(id);
   });
  }
  globalThis.StellarLibraryPreview={bind,select,sync,clear,timestamps,refresh:()=>{if(editing)return;cached=null;if(selected&&$('#library-dialog').open)void select(selected,false)},selected:()=>selected};
