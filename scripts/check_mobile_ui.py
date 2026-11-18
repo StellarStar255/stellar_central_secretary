@@ -22,6 +22,13 @@ with tempfile.TemporaryDirectory() as root:
    with http.open(urllib.request.Request(url+'/pair',data=json.dumps(body).encode()),timeout=5) as r:pending=json.load(r)
    expect(page.locator('#mobile-pending')).to_contain_text(pending['code']);expect(page.locator('#mobile-pending')).to_contain_text('Fixture iPhone')
    page.locator('[data-approve]').click();expect(page.locator('#mobile-devices')).to_contain_text('Fixture iPhone')
+   expect(page.locator('#mobile-devices')).to_contain_text('配对时间')
+   page.locator('[data-rename]').click();editor=page.locator('#mobile-device-editor');nickname=page.locator('#mobile-device-nickname')
+   nickname.fill('试用版 <iPhone>');editor.locator('[type="submit"]').click()
+   expect(page.locator('.mobile-device-name strong')).to_have_text('试用版 <iPhone>');expect(editor).not_to_be_visible()
+   assert manager.device(credential)==pending['id']
+   page.locator('[data-rename]').click();expect(nickname).to_have_value('试用版 <iPhone>')
+   nickname.fill('');editor.locator('[type="submit"]').click();expect(page.locator('.mobile-device-name strong')).to_have_text('Fixture iPhone')
    assert manager.device(credential)
    page.screenshot(path='/tmp/stellar-mobile-desktop.png')
    page.locator('[data-revoke]').click();expect(page.locator('#mobile-devices')).to_contain_text('尚未配对手机');assert manager.device(credential) is None

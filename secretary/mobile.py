@@ -156,7 +156,7 @@ class Mobile:
             now=time.time();self.pending={key:value for key,value in self.pending.items() if value['expires']>now}
             return {'nearby_active':self.peer_bridge is not None and self.peer_bridge.poll() is None,'enabled':self.server is not None,'server_id':self.state['server_id'],'name':socket.gethostname(),'port':self.server.server_port if self.server else None,'addresses':addresses(include_alternates=True) if self.server else [],'error':self.error,
                 'pending':[{'id':key,'name':value['name'],'code':value['code']} for key,value in self.pending.items()],
-                'devices':[{'id':key,'name':value['name'],'created':value['created']} for key,value in self.state['devices'].items()]}
+                'devices':[{'id':key,'name':value['name'],'created':value['created'],'nickname':value.get('nickname','')} for key,value in self.state['devices'].items()]}
     def invitation(self):
         with self.lock:
             if not self.server:raise ValueError('请先开启手机连接')
@@ -190,6 +190,20 @@ class Mobile:
     def revoke(self,key):
         with self.lock:self.state['devices'].pop(key,None);self.save()
         return self.status()
+
+    def rename_device(self,body):
+        key=body.get('id');nickname=body.get('nickname')
+        if not isinstance(key,str) or not isinstance(nickname,str) or len(nickname.strip())>80:
+            raise ValueError('设备备注名最多 80 个字符。')
+        with self.lock:
+            entry=self.state['devices'].get(key)
+            if entry is None:raise ValueError('设备已移除，请刷新列表。')
+            self.state['devices'][key]={**entry,'nickname':nickname.strip()}
+            try:self.save()
+            except OSError:
+                self.state['devices'][key]=entry
+                raise
+            return self.status()
 
     def model_privacy(self, device):
         try:

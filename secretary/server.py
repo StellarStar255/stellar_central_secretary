@@ -1417,6 +1417,7 @@ def handler(service):
                 if path=='/api/mobile/invite':return self.send(200,service.mobile.invitation())
                 if path=='/api/mobile/decide':return self.send(200,service.mobile.decide(body))
                 if path=='/api/mobile/revoke':return self.send(200,service.mobile.revoke(body.get('id')))
+                if path=='/api/mobile/rename':return self.send(200,service.mobile.rename_device(body))
                 if path=='/api/ingest':
                     if body.get('browser_extension') is True:
                         from .extension_chat import ingest

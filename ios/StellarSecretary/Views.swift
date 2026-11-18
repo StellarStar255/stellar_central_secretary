@@ -135,7 +135,9 @@ struct ChatView: View {
     @State private var choosing=false
     @State private var removing:PendingChatMessage?
     @State private var confirmingRemoval=false
-    @FocusState private var typing:Bool
+    @State private var composing=false
+    @State private var dismissKeyboard=0
+    @State private var sending=false
     private var messages:[ChatMessage] {model.chatSnapshot?.messages ?? []}
     private var queued:[PendingChatMessage] {
         let known=Set(messages.map(\.clientID))
@@ -200,15 +202,29 @@ struct ChatView: View {
                     .onChange(of:queued.count) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                 }
                 HStack(alignment:.bottom) {
-                    TextField("发消息，继续这段对话…",text:$model.chatInput,axis:.vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).accessibilityIdentifier("chat-input").disabled(model.selectedChatID.isEmpty)
+                    ChatComposer(text:$model.chatInput,composing:$composing,
+                                 enabled:!model.selectedChatID.isEmpty,dismissKeyboard:dismissKeyboard)
+                        .id(model.selectedChatID)
+                        .overlay(alignment:.topLeading) {
+                            if input.isEmpty && !composing {
+                                Text("发消息，继续这段对话…").foregroundStyle(.secondary).padding(8)
+                                    .allowsHitTesting(false).accessibilityHidden(true)
+                            }
+                        }
                     Button("发送") {
-                        let value=input,id=model.workspaceID,chat=model.selectedChatID;typing=false
-                        Task {if await model.enqueueChat(value,workspace:id,chatID:chat),model.workspaceID==id,input==value {model.chatInput=""}}
-                    }.buttonStyle(.borderedProminent).accessibilityIdentifier("chat-send").disabled(model.selectedChatID.isEmpty || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || model.chatSubmitting)
+                        guard !composing else {return}
+                        let value=input,id=model.workspaceID,chat=model.selectedChatID
+                        dismissKeyboard+=1;sending=true
+                        Task {
+                            defer {sending=false}
+                            if await model.enqueueChat(value,workspace:id,chatID:chat),
+                               model.workspaceID==id,model.selectedChatID==chat,input==value,!composing {model.chatInput=""}
+                        }
+                    }.buttonStyle(.borderedProminent).accessibilityIdentifier("chat-send").disabled(model.selectedChatID.isEmpty || composing || sending || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || model.chatSubmitting)
                 }.padding()
             }.navigationTitle(model.chatSnapshot?.title ?? "聊天").navigationBarTitleDisplayMode(.inline)
+            .onChange(of:model.selectedChatID) {composing=false}
             .toolbar {
-                ToolbarItemGroup(placement:.keyboard) {Spacer();Button("完成") {typing=false}}
                 ToolbarItem(placement:.topBarLeading) {Button("会话") {choosing=true}}
                 ToolbarItem(placement:.topBarTrailing) {Button {Task {await model.createChat()}} label:{Image(systemName:"square.and.pencil")}.accessibilityLabel("新建聊天").disabled(!model.online || model.chatSubmitting)}
             }
@@ -232,6 +248,88 @@ struct ChatView: View {
                 }
             }
         }
+    }
+}
+
+private struct ChatComposer: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var composing: Bool
+    let enabled: Bool
+    let dismissKeyboard: Int
+    private let placeholder = "发消息，继续这段对话…"
+
+    // UIKit owns the marked range until the keyboard commits its candidate.
+    final class Editor: UITextView {
+        var onInput: (() -> Void)?
+        private var changingMark = 0
+        var isComposing: Bool { changingMark > 0 || markedTextRange != nil }
+
+        override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+            changingMark += 1
+            super.setMarkedText(markedText, selectedRange: selectedRange)
+            changingMark -= 1
+            onInput?()
+        }
+
+        override func unmarkText() {
+            changingMark += 1
+            super.unmarkText()
+            changingMark -= 1
+            onInput?()
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: ChatComposer
+        init(_ parent: ChatComposer) { self.parent = parent }
+
+        func publish(_ editor: Editor) {
+            let marked = editor.isComposing
+            if parent.composing != marked { parent.composing = marked }
+            if !marked, parent.text != editor.text { parent.text = editor.text }
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            if let editor = textView as? Editor { publish(editor) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> Editor {
+        let editor = Editor()
+        editor.font = .preferredFont(forTextStyle:.body)
+        editor.adjustsFontForContentSizeCategory = true
+        editor.textContainerInset = UIEdgeInsets(top:8,left:8,bottom:8,right:8)
+        editor.textContainer.lineFragmentPadding = 0
+        editor.backgroundColor = .clear
+        editor.layer.borderWidth = 1
+        editor.layer.cornerRadius = 8
+        editor.accessibilityIdentifier = "chat-input"
+        editor.accessibilityLabel = placeholder
+        editor.delegate = context.coordinator
+        editor.onInput = { [weak editor, weak coordinator = context.coordinator] in
+            if let editor { coordinator?.publish(editor) }
+        }
+        return editor
+    }
+
+    func updateUIView(_ editor: Editor, context: Context) {
+        let shouldDismiss = context.coordinator.parent.dismissKeyboard != dismissKeyboard
+        context.coordinator.parent = self
+        editor.isEditable = enabled
+        editor.layer.borderColor = UIColor.separator.resolvedColor(with:editor.traitCollection).cgColor
+        guard !editor.isComposing else {return}
+        if editor.text != text {editor.text = text}
+        if shouldDismiss {editor.resignFirstResponder()}
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView editor: Editor, context: Context) -> CGSize? {
+        guard let width=proposal.width, width>0 else {return nil}
+        let lineHeight=editor.font?.lineHeight ?? 22
+        let inset=editor.textContainerInset.top+editor.textContainerInset.bottom
+        let full=editor.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height
+        return CGSize(width:width,height:ceil(min(max(full,lineHeight+inset),lineHeight*5+inset)))
     }
 }
 struct LibraryView: View {

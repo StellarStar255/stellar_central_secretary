@@ -71,6 +71,18 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(self.request('/items?q=arrangement',credential=self.credential)[1]['items'][0]['id'],ident)
   self.assertEqual(self.request('/items/'+ident,credential=self.credential)[1]['item']['text'],body['content']['text'])
   self.s.trash_item(ident);self.assertEqual(self.request('/items/'+ident,credential=self.credential)[0],400)
+ def test_device_nickname_persists_without_changing_identity_or_model_consent(self):
+  ident=self.approve()['id'];info=self.approve_model()
+  before=dict(self.m.state['devices'][ident])
+  status=self.m.rename_device({'id':ident,'nickname':'  试用版  '})
+  self.assertEqual(status['devices'],[{'id':ident,'name':'Fixture phone','created':before['created'],'nickname':'试用版'}])
+  self.assertEqual(self.m.state['devices'][ident],{**before,'nickname':'试用版'})
+  self.assertEqual(json.loads(self.m.path.read_text())['devices'][ident]['nickname'],'试用版')
+  self.assertEqual(self.request('/status',credential=self.credential)[0],200)
+  self.assertEqual(self.request('/model-privacy',credential=self.credential)[1],info)
+  self.assertEqual(self.request('/api/mobile/rename',{'id':ident,'nickname':'mobile change'},self.credential)[0],404)
+  with self.assertRaises(ValueError):self.m.rename_device({'id':ident,'nickname':'x'*81})
+  self.assertEqual(self.m.rename_device({'id':ident,'nickname':' '})['devices'][0]['nickname'],'')
  def test_credentials_receipts_and_certificate_survive_restart(self):
   self.approve();self.request('/ingest',{'request_id':'persist','content':{'text':'Persist unique note'}},self.credential)
   fingerprint=self.m.fingerprint;self.m.stop(disable=True);self.s.close();self.s=Service(self.temp.name);self.m=self.s.mobile

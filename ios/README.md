@@ -30,6 +30,18 @@ The sample demo works locally with synthetic records and discards its changes wh
 
 Before publication, confirm the publisher and privacy contact, publish the policy at a public URL and link to it in the app and App Store Connect.
 
+### App Store listing (draft)
+
+**名称**　Stellar Secretary 知识秘书
+
+**副标题**　随手归档，检索电脑知识库
+
+**描述**　用 iPhone 把网页链接、笔记、照片和文件存入自己的 Stellar Secretary 知识库。扫码连接已运行知识秘书的电脑，搜索归档、查看原件，或继续电脑上的对话。发送 AI 问答前，你可以查看并确认电脑当前使用的模型服务。连接暂时中断时，手机会保留待发送内容，恢复连接后继续提交。
+
+正式使用需配对运行 Stellar Secretary v0.1.123 或以上版本的电脑，电脑需开机且手机能通过局域网或附近连接访问它。首次打开可进入演示模式，用样例资料试用归档、检索和带来源的回答。
+
+**App Review notes**　On a fresh install, choose **演示模式 / Demo** from the welcome screen. In **Library**, open “Rain garden checklist.” In **Archive**, save a sample note and find it in the library. In **Chat**, select **Ask** and open the cited record. The sample workspace is cleared when closed. For the live features, use the desktop companion and the pairing and file transfer recording that accompanies the submission.
+
 ## Multiple computers and phones
 
 Each desktop can approve up to ten phones independently. The phone's **连接 → 添加电脑** saves up to ten computers without replacing an existing pairing. Approve each computer once, optionally give it a local name such as 公司电脑 or 家里电脑, then use **使用这台电脑** to switch. The current computer appears on capture, chat and library screens. Reopening the app reconnects to the last selected computer; it never silently switches to another reachable computer.
