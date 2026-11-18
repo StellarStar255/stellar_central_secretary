@@ -42,7 +42,7 @@
   text.onblur=()=>void save();
   text.oninput=()=>{draft.text=text.value;changed()};
   text.onkeydown=event=>{if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();void save()}if(event.key==='Escape'&&(draft.busy||draft.dirty)){event.preventDefault();event.stopPropagation();void save()}};
-  text.onpaste=event=>{const clipboard=event.clipboardData;if(!clipboard)return;const files=clipboard.files?.length?[...clipboard.files]:Array.from(clipboard.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();event.stopPropagation();const plain=clipboard.getData('text/plain');if(plain){text.setRangeText(plain,text.selectionStart,text.selectionEnd,'end');draft.text=text.value;changed()}addFiles(files)}};
+  text.onpaste=event=>{const clipboard=event.clipboardData;if(!clipboard)return;const files=clipboard.files?.length?[...clipboard.files]:Array.from(clipboard.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();event.stopPropagation();const plain=clipboard.getData('text/plain');if(plain){text.setRangeText(plain,text.selectionStart,text.selectionEnd,'end');draft.text=text.value;changed()}addFiles(files,true)}};
   saveButton.onclick=()=>void save();images();paint();if(draft.dirty&&!draft.error)draft.timer=setTimeout(save,500);
  }
  addEventListener('blur',()=>{for(const draft of drafts.values())if(draft.dirty)void draft.save?.()});

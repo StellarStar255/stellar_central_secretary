@@ -1,9 +1,12 @@
 import io
 import os
 import json
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from urllib.request import Request, urlopen
 from unittest.mock import Mock, patch
 from secretary import paths, updater
 
@@ -66,6 +69,49 @@ class UpdateTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '安装版'): updater.start(Mock())
         self.assertFalse(updater._can_replace_in_place(None))
         self.assertFalse(updater._can_replace_in_place(Path('/Volumes/Installer/Test.app')))
+
+    def test_install_endpoint_releases_service_lock_and_defers_backup(self):
+        from secretary.server import Service, handler
+        with tempfile.TemporaryDirectory() as root:
+            service = Service(root)
+            service.desktop['enabled'] = True
+            server = ThreadingHTTPServer(('127.0.0.1', 0), handler(service))
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            address = f'http://127.0.0.1:{server.server_port}'
+            with urlopen(address+'/api/status', timeout=3) as response:
+                token = json.load(response)['token']
+            request = Request(address+'/api/update/install', data=b'{}', headers={
+                'Content-Type': 'application/json', 'X-Knowledge-Token': token})
+            native_status = service.desktop_status
+            def require_unlocked_status():
+                self.assertFalse(service.lock.locked())
+                return native_status()
+            try:
+                with patch.object(service, 'desktop_status', side_effect=require_unlocked_status), \
+                     patch.object(service.backups, 'create') as backup, patch.object(updater, 'start') as start:
+                    with urlopen(request, timeout=3) as response:
+                        self.assertEqual(response.status, 200)
+                    self.assertIs(start.call_args.kwargs['desktop'], True)
+                    backup.assert_not_called()
+                    start.call_args.kwargs['before_install']()
+                    backup.assert_called_once_with('upgrade')
+                    service.busy.add('active-summary')
+                    with self.assertRaisesRegex(ValueError, '请等待'):
+                        start.call_args.kwargs['before_install']()
+                    with self.assertRaisesRegex(ValueError, '请等待'):
+                        start.call_args.kwargs['before_handoff']()
+            finally:
+                server.shutdown()
+                server.server_close()
+                service.close()
+
+    def test_mac_handoff_uses_the_release_checksum(self):
+        with patch.object(updater, '_can_replace_in_place', return_value=True), \
+             patch('secretary.update_transaction.prepare', return_value=True) as prepare:
+            updater._set(latest='99.0.0')
+            self.assertTrue(updater._mac_install(Path('app.dmg'), Path('work'), 'a'*64))
+            prepare.assert_called_once_with(Path('app.dmg'), Path('work'), 'a'*64, '99.0.0', desktop=True, kind='mac', before_handoff=None)
 
     def test_data_override_is_explicit_and_source_default_is_unchanged(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict('os.environ', {'SECRETARY_DATA_DIR':temp}):

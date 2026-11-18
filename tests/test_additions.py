@@ -2,7 +2,7 @@ import base64,io,json,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
-from secretary import additions,ai
+from secretary import additions,ai,bundles,local_ocr
 from secretary.server import Service
 from secretary.backup_import import import_backup
 
@@ -11,6 +11,32 @@ def files():
     return [{'name':'new.png','data':base64.b64encode(stream.getvalue()).decode()}]
 
 class AdditionTests(unittest.TestCase):
+    def test_pasted_generic_image_gets_local_title_and_preserves_original(self):
+        with tempfile.TemporaryDirectory() as root:
+            service = Service(root)
+            self.addCleanup(service.close)
+            item_id, _ = service.archive.add('A note', 'Original source')
+            image = files()[0]
+            original = base64.b64decode(image['data'])
+            for name, pasted, expected in [('image.png', False, 'image.png'), ('experiment.png', True, 'experiment.png'),
+                                           ('image.png', True, '训练 验证损失-'), ('image', True, '训练 验证损失-')]:
+                with self.subTest(name=name, pasted=pasted), patch.object(local_ocr, 'recognize', return_value='OK\n训练 / 验证损失'):
+                    bundle, _ = bundles.create('', [dict(image, name=name, clipboard_image=pasted)])
+                    attachment = bundles.metadata(bundle)[0]
+                    self.assertTrue(attachment['name'].startswith(expected))
+                    self.assertTrue(attachment['name'].endswith('.png'))
+                    self.assertEqual(bundles.attachment(bundle, attachment['id'])[1], original)
+
+            upload = service.uploads.start('image.png', len(original))
+            service.uploads.chunk(upload['id'], 0, io.BytesIO(original), len(original))
+            with patch.object(local_ocr, 'recognize', return_value=''), patch.object(local_ocr, 'classify', return_value='line_chart'):
+                result = service.append_material(item_id, {
+                    'attachments': [{'name': 'image.png', 'upload_id': upload['id'], 'clipboard_image': True}],
+                    'expected_updated': service.archive.get(item_id)['updated'], 'summarize': False,
+                })
+            saved = result['item']['additions'][0]['attachments'][0]
+            self.assertTrue(saved['name'].startswith('line_chart-'))
+
     def test_unread_link_can_receive_searchable_supplemental_materials(self):
         with tempfile.TemporaryDirectory() as root:
             service=Service(root);service.archive.configure('codex',False)

@@ -12,6 +12,27 @@ IMAGE_MEDIA={'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'ima
 
 def is_bundle(name):return str(name).lower().endswith('.stellar.zip')
 
+CLIPBOARD_IMAGE_NAME = re.compile(r'(?:(?:image|clipboard|pasted[-_ ]image)?\.(?:png|jpe?g|gif|webp|heic|heif|hif)|image)', re.I)
+
+def clipboard_image_name(name, raw, digest, media):
+    from .core import extract
+    from . import local_ocr
+    extension = Path(name).suffix.lower() or '.' + media.removeprefix('image/')
+    text, _ = extract('image' + extension, raw)
+    def clean(value):
+        value = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]+', ' ', value)
+        return ' '.join(value.split()).strip(' .')[:56].rstrip(' .')
+
+    for line in text.splitlines():
+        title = clean(line)
+        if sum(char.isalpha() for char in title) >= 4 or len(re.findall(r'[\u3400-\u9fff]', title)) >= 3:
+            return f'{title}-{digest[:8]}{extension}'
+    try:
+        title = clean(local_ocr.classify(raw))
+    except Exception:
+        title = ''
+    return f'{title or "剪贴板图片"}-{digest[:8]}{extension}'
+
 def assemble(manifest):
     parts=[f"【组合资料】同一次发送的文字与 {len(manifest['files'])} 个附件。"+(f"另有 {len(manifest['links'])} 个相关链接。" if manifest.get('links') else '')]
     if manifest['text']:parts.append('用户文字：\n'+manifest['text'])
@@ -64,6 +85,8 @@ def create(text,files,urls=None,existing=None):
         if media.startswith('image/'):
             images+=1
             if images>8:raise ValueError('每份组合资料最多包含 8 张图片')
+            if file.get('clipboard_image') is True and CLIPBOARD_IMAGE_NAME.fullmatch(name):
+                name=clipboard_image_name(name,raw,digest,media)
         if video_type(name):media=video_type(name);warning='视频原件已保存，可直接播放；暂未提取字幕或音轨正文。'
         if len(source)>remaining:source=source[:remaining];warning+=' 正文超过组合资料索引上限，仅保存可索引的前部文字；原件完整保留。'
         remaining-=len(source)

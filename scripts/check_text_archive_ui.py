@@ -24,6 +24,10 @@ with tempfile.TemporaryDirectory() as root:
      page.locator('#message-input').fill(text);page.locator('#send-button').click()
      expect(page.locator('#messages .archive-card')).to_have_count(index)
      expect(page.locator('#send-button')).to_be_disabled() # empty composer after completed send
+     if index==1:
+      page.evaluate("window.originalMessage = document.querySelector('#messages .message.user')")
+     else:
+      assert page.evaluate("originalMessage === document.querySelector('#messages .message.user')"), 'Unchanged messages must survive archive updates'
     assert not sentinel.exists() and not ask.called and not fetch.called
     items=[service.archive.get(item["id"]) for item in service.archive.list()];assert len(items)==4
     item=next(item for item in items if item['text']==command);assert item['title']=='cd /mnt/data/example' and item['kind']=='note'
@@ -32,7 +36,19 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('#library-open').click();page.locator('#search').fill('tar samples')
     page.locator('#items [data-id="'+item['id']+'"]').click();page.locator('#preview-full').click();expect(page.locator('#detail-content')).to_contain_text('tar -czf samples.tar.gz samples/')
     page.screenshot(path='/tmp/secretary-command-archive.png')
-    page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()
+    delayed=[]
+    detail_url='**/api/items/'+item['id']
+    page.route(detail_url,lambda route:delayed.append(route))
+    service.archive.update(item['id'],summary='Updated archive during detail polling')
+    with page.expect_request(lambda request:request.url.endswith('/api/items/'+item['id'])):
+     page.evaluate('window.detailPoll = refresh(); undefined')
+    page.locator('#detail-dialog .dialog-head button').click()
+    assert delayed
+    delayed.pop(0).continue_()
+    page.evaluate('window.detailPoll')
+    expect(page.locator('#detail-dialog')).not_to_be_visible()
+    page.unroute(detail_url)
+    page.locator('#library-dialog .dialog-head button').click()
     page.locator('#input-mode').select_option('ask');page.locator('#message-input').fill('这条命令如何使用？');page.locator('#send-button').click()
     expect(page.locator('#messages')).to_contain_text('Synthetic question answer.');assert ask.call_count==1 and len(service.archive.list())==4
     page.locator('#input-mode').select_option('note');page.locator('#message-input').fill('为什么命令需要引号？');page.locator('#send-button').click()

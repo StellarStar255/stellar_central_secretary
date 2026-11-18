@@ -92,7 +92,7 @@ class Uploads:
                 if 'upload_id' not in file:result.append(file);continue
                 value=self._read(file['upload_id']);self._lease(value,file.get('lease'));path=self.path(file['upload_id'])
                 if file.get('name')!=value['name'] or path.stat().st_size!=value['size']:raise ValueError('附件尚未完整上传')
-                result.append({'name':value['name'],'source':path})
+                result.append({'name':value['name'],'source':path,'clipboard_image':file.get('clipboard_image') is True})
         return result
     def discard(self,key,lease=None):
         with self.lock:

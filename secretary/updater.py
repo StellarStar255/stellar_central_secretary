@@ -189,22 +189,22 @@ def _can_replace_in_place(bundle):
         and os.access(bundle.parent, os.W_OK)
 
 
-def _mac_install(dmg, work,desktop=True):
+def _mac_install(dmg, work, expected_sha, desktop=True, before_handoff=None):
     bundle = _current_app_bundle()
     if not _can_replace_in_place(bundle):
         subprocess.Popen(["open", str(dmg)])  # let the user drag it to Applications
         _set(phase="manual", error=None)
         return False
     from .update_transaction import prepare
-    return prepare(dmg,work,_sha256(dmg),status()['latest'],desktop=desktop,kind='mac')
+    return prepare(dmg,work,expected_sha,status()['latest'],desktop=desktop,kind='mac',before_handoff=before_handoff)
 
 
-def _windows_install(setup, work, expected_sha, desktop=False):
+def _windows_install(setup, work, expected_sha, desktop=False, before_handoff=None):
     from .update_transaction import prepare
-    return prepare(setup,work,expected_sha,status()['latest'],desktop=desktop,kind='windows')
+    return prepare(setup,work,expected_sha,status()['latest'],desktop=desktop,kind='windows',before_handoff=before_handoff)
 
 
-def start(on_ready_to_quit, desktop=False):
+def start(on_ready_to_quit, desktop=False, before_install=None, before_handoff=None):
     """Download + verify + hand over to the installer helper, in the background.
     Calls on_ready_to_quit() once the helper is waiting for us to exit."""
     if not supported():
@@ -235,13 +235,15 @@ def start(on_ready_to_quit, desktop=False):
                 raise RuntimeError("下载的文件校验失败（SHA256 不一致），已删除，请稍后重试")
             if not expected:
                 raise RuntimeError("这个版本没有提供校验文件，为了安全不自动安装，请到 Release 页面手动下载")
+            if before_install:
+                before_install()
             _set(phase="installing")
-            if MAC:ready=_mac_install(dest,work,desktop=desktop)
-            elif WINDOWS:ready=_windows_install(dest,work,expected,desktop=desktop)
+            if MAC:ready=_mac_install(dest,work,expected,desktop=desktop,before_handoff=before_handoff)
+            elif WINDOWS:ready=_windows_install(dest,work,expected,desktop=desktop,before_handoff=before_handoff)
             else:
                 from .linux_update import install_kind,ManualInstall
                 from .update_transaction import prepare
-                try:ready=prepare(dest,work,expected,st['latest'],desktop=desktop,kind=install_kind())
+                try:ready=prepare(dest,work,expected,st['latest'],desktop=desktop,kind=install_kind(),before_handoff=before_handoff)
                 except ManualInstall as error:
                     from .system_integration import open_browser
                     open_browser(work.as_uri());_set(phase='manual',error=str(error));ready=False

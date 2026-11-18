@@ -1406,11 +1406,18 @@ def handler(service):
                         return self.send(200,service.backups.restore(body.get('id')))
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/install':
-                    with service.lock:
-                        if service.busy or service.captures or service.questions: raise ValueError('请等待摘要和会话读取完成后再升级')
-                    service.backups.create('upgrade')
+                    def require_idle():
+                        if any(service.runtime().values()):
+                            raise ValueError('请等待摘要和会话读取完成后再升级')
+
+                    def backup_before_upgrade():
+                        require_idle()
+                        service.backups.create('upgrade')
+
+                    require_idle()
                     updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
-                                  desktop=bool(service.desktop_status().get('enabled')))
+                                  desktop=bool(service.desktop_status().get('enabled')),
+                                  before_install=backup_before_upgrade, before_handoff=require_idle)
                     return self.send(200, updater.status())
                 if path=='/api/shutdown':
                     if body.get('force'):service.close()

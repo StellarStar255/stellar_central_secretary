@@ -97,6 +97,12 @@ class NativeDesktopTest(unittest.TestCase):
                     else:raise AssertionError('Desktop page did not load')
                     self.assertEqual(evaluate("document.querySelector('#interface-toggle').textContent"),'切到网页模式')
                     self.assertEqual(evaluate("currentChat()?.title"),'共享历史记录')
+                    self.assertTrue(evaluate("""(() => {
+                        const message = document.querySelector('[data-message="m1"]');
+                        if (!message) return false;
+                        addMessage(currentChat(), 'assistant', 'Fixture archive receipt');
+                        return message === document.querySelector('[data-message="m1"]');
+                    })()"""))
                     self.assertTrue(evaluate("typeof refresh==='function' && typeof crypto.randomUUID==='function'"))
                     self.assertTrue(evaluate("document.querySelector('#settings-dialog').contains(document.querySelector('#interface-toggle')) && !document.querySelector('#sidebar').contains(document.querySelector('#interface-toggle'))"))
                     self.assertTrue(evaluate("window.__stellarDesktop===true"))

@@ -3,6 +3,21 @@ const html=fs.readFileSync('secretary/static/index.html','utf8');
 const elements=new Map();
 function element(){return {value:'',textContent:'',innerHTML:'',disabled:false,hidden:false,open:false,style:{},dataset:{},scrollHeight:100,scrollTop:0,clientHeight:500,classList:{add(){},remove(){},toggle(){}},querySelectorAll(){return[]},querySelector(){return element()},addEventListener(type,callback){this.listeners??={};(this.listeners[type]??=[]).push(callback)},focus(){},showModal(){this.open=true},close(){this.open=false},append(){}}}
 for(const id of html.matchAll(/id="([^"]+)"/g))elements.set('#'+id[1],element());
+const messageList=elements.get('#messages');
+messageList.children=[];
+function messageNode(markup){
+ const node=element();node.markup=markup;node.dataset.message=markup.match(/data-message="([^"]+)"/)[1];
+ node.remove=()=>messageList.children.splice(messageList.children.indexOf(node),1);
+ node.insertAdjacentHTML=(_,html)=>messageList.insertBefore(messageNode(html),node);
+ return node;
+}
+Object.defineProperty(messageList,'innerHTML',{get:()=>messageList.children.map(node=>node.markup).join('')});
+messageList.insertBefore=(node,target)=>{
+ if(messageList.children.includes(node))node.remove();
+ const index=target?messageList.children.indexOf(target):messageList.children.length;
+ messageList.children.splice(index,0,node);
+};
+messageList.insertAdjacentHTML=(_,html)=>messageList.insertBefore(messageNode(html),null);
 elements.get('#backend').value='codex';elements.get('#input-mode').value='auto';
 const timerDelays=[],calls=[],stored=new Map(),listeners={};let rejectNextConfirmation=false,failNextConfirmation=false;let archive=[];let captureCapability=true,captureReplyMode='current',askReply=null;
 const context={URL,AbortController,console,crypto:require('crypto').webcrypto,setTimeout:(callback,delay)=>{timerDelays.push(delay);return 1},clearTimeout(){},setInterval(){},clearInterval(){},navigator:{clipboard:{writeText:async()=>{}}},localStorage:{getItem:k=>stored.get(k),setItem:(k,v)=>stored.set(k,v)},window:{innerWidth:1200,addEventListener(){}},document:{body:element(),hidden:false,querySelector(selector){if(!elements.has(selector))throw Error('Missing DOM element '+selector);return elements.get(selector)},querySelectorAll(){return[]},addEventListener(type,callback){(listeners[type]??=[]).push(callback)},createElement:()=>element()},fetch:async(path,options)=>{

@@ -57,7 +57,7 @@ def last_result():
     try:return json.loads((paths.DATA_DIR/'update-result.json').read_text(encoding='utf-8'))
     except (OSError,ValueError):return {}
 
-def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None):
+def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,before_handoff=None):
     executable=Path(sys.executable).resolve();root=executable.parent
     kind=kind or ('mac' if sys.platform=='darwin' else 'windows' if sys.platform=='win32' else 'portable')
     if kind=='mac':root=next(p for p in executable.parents if p.suffix=='.app')
@@ -83,7 +83,16 @@ def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None):
     deadline=time.monotonic()+25
     while time.monotonic()<deadline:
         if (work/'worker-ready').exists():
-            (work/'proceed').write_text('ready');threading.Thread(target=process.wait,daemon=True).start();return True
+            try:
+                if before_handoff:
+                    before_handoff()
+                (work/'proceed').write_text('ready')
+            except Exception:
+                process.terminate()
+                threading.Thread(target=process.wait,daemon=True).start()
+                raise
+            threading.Thread(target=process.wait,daemon=True).start()
+            return True
         if process.poll() is not None:raise RuntimeError('更新助手未能启动，当前程序继续运行；请查看 transaction.log。')
         time.sleep(.1)
     raise RuntimeError('更新助手未就绪，当前程序继续运行；请查看 transaction.log。')

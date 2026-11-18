@@ -32,6 +32,23 @@ def capability():
     if sys.platform=='win32':return {'available':True,'engine':'Windows OCR'}
     return {'available':bool(shutil.which('tesseract')),'engine':'Tesseract','message':'本机 OCR 需要安装 Tesseract 和识别语言包。'}
 
+def classify(raw):
+    if sys.platform != 'darwin':
+        return ''
+    import Vision
+    from Foundation import NSData
+    from .image_formats import preview
+    image = preview(raw)
+    data = NSData.dataWithBytes_length_(image, len(image))
+    request = Vision.VNClassifyImageRequest.alloc().init()
+    handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(data, None)
+    ok, _ = handler.performRequests_error_([request], None)
+    if ok:
+        for result in request.results() or []:
+            if result.confidence() >= 0.5:
+                return str(result.identifier()).replace('_', ' ')
+    return ''
+
 def recognize(image):
     if sys.platform=='darwin':
         import Vision

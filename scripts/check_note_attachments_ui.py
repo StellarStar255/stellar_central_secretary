@@ -23,8 +23,10 @@ with tempfile.TemporaryDirectory() as root:
     def paste(files,text=''):
      page.locator('#note-text').focus();page.locator('#note-text').evaluate('''(node,value)=>{const data=new DataTransfer();for(const file of value.files)data.items.add(new File([Uint8Array.from(atob(file.data),c=>c.charCodeAt(0))],file.name,{type:file.type}));if(value.text)data.setData('text/plain',value.text);node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}))}''',{'files':files,'text':text})
     def file(name,data,kind='text/plain'):return {'name':name,'data':base64.b64encode(data).decode(),'type':kind}
-    paste([{'name':'粘贴图片.png','data':encoded,'type':'image/png'},file('剪贴板说明.txt',b'Attachment text unique')],'速记文字 PasteMemo')
-    expect(page.locator('#detail-attachments .material-card')).to_have_count(2,timeout=20000)
+    with patch('secretary.local_ocr.recognize',return_value='Validation Loss'):
+     paste([{'name':'image.png','data':encoded,'type':'image/png'},file('剪贴板说明.txt',b'Attachment text unique')],'速记文字 PasteMemo')
+     expect(page.locator('#detail-attachments .material-card')).to_have_count(2,timeout=20000)
+     expect(page.locator('#detail-attachments')).to_contain_text('Validation Loss-')
     expect(page.locator('#note-text')).to_have_value('速记文字 PasteMemo');expect(page.locator('#note-status')).to_have_text('已保存')
     expect(page.locator('#note-attachment-status')).to_contain_text('附件已追加到全部附件')
     assert page.locator('#note-text').evaluate('(node)=>node===document.activeElement')
