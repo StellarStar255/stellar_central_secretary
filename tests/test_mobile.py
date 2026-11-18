@@ -25,6 +25,12 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(status,200);return pending
  def approve(self):
   pending=self.pair();self.m.decide({'id':pending['id'],'approve':True});return pending
+ def approve_model(self):
+  status,info=self.request('/model-privacy',credential=self.credential)
+  self.assertEqual(status,200);self.assertFalse(info['approved'])
+  status,info=self.request('/model-privacy',{'approved':True,'fingerprint':info['fingerprint']},self.credential)
+  self.assertEqual(status,200);self.assertTrue(info['approved'])
+  return info
  def test_only_local_confirmation_grants_access_and_revoke_is_immediate(self):
   self.assertEqual(self.request('/items')[0],401)
   pending=self.pair();self.assertEqual(self.request('/pair/status',credential=self.credential)[0],202)
@@ -75,6 +81,9 @@ class MobileTest(unittest.TestCase):
  def test_ask_returns_citations_without_settings_or_credentials(self):
   self.approve()
   with patch.object(self.s,'ask_library',return_value={'answer':'Synthetic answer','sources':[],'private':'no'}) as ask:
+   code,value=self.request('/ask',{'question':'Find fixture'},self.credential)
+   self.assertEqual(code,403);self.assertTrue(value['model_consent_required']);ask.assert_not_called()
+   self.approve_model()
    status,value=self.request('/ask',{'question':'Find fixture'},self.credential)
   self.assertEqual(status,200);self.assertEqual(value['answer'],'Synthetic answer');self.assertNotIn('private',value);ask.assert_called_once_with('Find fixture')
   self.assertEqual(self.s.runtime()['answering'],0)
@@ -96,22 +105,23 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(info['url'],f'https://172.23.1.2:{port}')
   self.assertEqual(info['urls'],[f'https://{ip}:{port}' for ip in ['172.23.1.2','100.83.1.2','169.254.1.2']])
   self.assertEqual(info['fingerprint'],self.m.fingerprint)
- def test_phone_photo_ocr_summary_chat_and_replay(self):
-  import io,time
+ def test_phone_photo_ocr_archive_and_replay_never_auto_summarize(self):
+  import io
   from PIL import Image
   self.approve();self.s.archive.configure('codex',True)
   self.s.chat_history({'activeId':'phone-chat','conversations':[{'id':'phone-chat','title':'Phone','updated':1,'messages':[]}]})
   stream=io.BytesIO();Image.new('RGB',(48,32),'white').save(stream,'JPEG');raw=stream.getvalue()
   body={'request_id':'photo-source','content':{'filename':'Photo.jpeg','data':base64.b64encode(raw).decode()}}
-  fields={'title':'Fixture image','summary':'Synthetic image summary','category':'Test','tags':['Photo'],'vision_text':'Synthetic visible text','state':'ready','error':''}
-  with patch('secretary.local_ocr.recognize',return_value='Synthetic OCR text'),patch('secretary.ai.analyze_material',return_value=(fields,'')) as model:
-   status,result=self.request('/ingest',body,self.credential);self.assertEqual(status,200);self.assertTrue(result['chat_synced'])
-   ident=result['item']['id'];deadline=time.monotonic()+3
-   while self.s.archive.get(ident)['state']!='ready' and time.monotonic()<deadline:time.sleep(.01)
-   item=self.s.archive.get(ident);self.assertEqual(item['summary'],fields['summary']);self.assertEqual(item['text'],'Synthetic OCR text')
-   self.assertEqual(model.call_count,1);self.assertEqual(len(model.call_args.args[3]),1)
+  with patch('secretary.local_ocr.recognize',return_value='Synthetic OCR text'),patch.object(self.s,'queue') as queue:
+   status,result=self.request('/privacy-v1/ingest',body,self.credential);self.assertEqual(status,200);self.assertTrue(result['chat_synced'])
+   ident=result['item']['id']
+   item=self.s.archive.get(ident);self.assertEqual(item['state'],'saved');self.assertEqual(item['text'],'Synthetic OCR text')
    self.assertEqual((self.s.archive.root/'files'/ident).read_bytes(),raw)
-   self.assertTrue(self.request('/ingest',body,self.credential)[1]['duplicate']);self.assertEqual(model.call_count,1)
+   self.assertTrue(self.request('/ingest',body,self.credential)[1]['duplicate']);queue.assert_not_called()
+   with patch.object(self.s,'process_addition') as addition:
+    file={'filename':'note.txt','data':base64.b64encode(b'Privacy attachment').decode(),'request_id':'append','expected_updated':item['updated']}
+    status,_=self.request('/privacy-v1/items/'+ident+'/attachments',file,self.credential)
+    self.assertEqual(status,200);addition.assert_not_called();self.assertNotIn(ident,self.s.busy)
   messages=self.s.chat_history()['conversations'][0]['messages'];self.assertEqual(len(messages),1);self.assertEqual(messages[0]['items'],[ident])
  def test_phone_photo_respects_disabled_auto_ai(self):
   import io
@@ -259,6 +269,8 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(self.request('/chats/'+created+'/messages',{'request_id':'not-paired','text':'Hello'})[0],401)
   with patch.object(self.s,'ask_library',return_value={'answer':'A shared desktop answer','sources':[]}) as model:
    path='/chats/'+created+'/messages';body={'request_id':'shared-phone-message','text':'A chat message'}
+   self.assertEqual(self.request(path,body,self.credential)[0],403);model.assert_not_called()
+   self.approve_model()
    self.assertTrue(self.request(path,body,self.credential)[1]['accepted'])
    import time
    deadline=time.monotonic()+3
@@ -270,3 +282,32 @@ class MobileTest(unittest.TestCase):
   self.assertNotIn('token',json.dumps(data));self.assertNotIn('fingerprint',json.dumps(data))
   ident=self.m.device(self.credential);self.m.revoke(ident)
   self.assertEqual(self.request('/chats/'+created,credential=self.credential)[0],401)
+
+ def test_model_change_and_revocation_fence_already_admitted_worker(self):
+  import threading
+  self.approve();first=self.approve_model()
+  chat=self.request('/chats',{'request_id':'privacy-fixture'},self.credential)[1]['chat_id']
+  path='/privacy-v1/chats/'+chat+'/messages'
+  started=threading.Event();resume=threading.Event()
+  def answer(*args,**kwargs):
+   started.set()
+   if not resume.wait(5):raise RuntimeError('fixture timed out')
+   self.s.model_backend()
+   return {'answer':'must not reach answer','sources':[]}
+  with patch.object(self.s,'ask_library',side_effect=answer):
+   body={'request_id':'queued-with-consent','text':'Privacy fixture'}
+   self.assertEqual(self.request(path,body,self.credential)[0],200)
+   self.assertTrue(started.wait(3))
+   try:
+    self.s.archive.configure('claude',False)
+    status,value=self.request('/model-privacy',credential=self.credential)
+    self.assertEqual(status,200);self.assertFalse(value['approved']);self.assertNotEqual(value['fingerprint'],first['fingerprint'])
+    self.assertEqual(self.request('/model-privacy',{'approved':True,'fingerprint':first['fingerprint']},self.credential)[0],403)
+    self.assertEqual(self.request('/model-privacy',{'approved':False},self.credential)[0],200)
+    self.approve_model()
+   finally:resume.set()
+   import time
+   deadline=time.monotonic()+3
+   while self.s.question_jobs.active_count() and time.monotonic()<deadline:time.sleep(.01)
+   result=self.request('/chats/'+chat,credential=self.credential)[1]['messages'][-1]
+   self.assertEqual(result['requestState'],'error');self.assertIn('隐私与 AI',result['text'])

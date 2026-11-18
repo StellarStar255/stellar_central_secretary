@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 
 from .shared_chat import ChatBusy
+from . import mobile_privacy
 
 SERVICE_TYPE='_stellar-sec._tcp.local.'
 MAX_BODY=16*1024*1024
@@ -189,6 +190,56 @@ class Mobile:
     def revoke(self,key):
         with self.lock:self.state['devices'].pop(key,None);self.save()
         return self.status()
+
+    def model_privacy(self, device):
+        try:
+            info = mobile_privacy.destination(self.service.model_backend())
+        except ValueError:
+            return {'destination':'请先在电脑上完成模型配置','model':'','fingerprint':'','approved':False}
+        return {**info, 'approved': self.state['devices'].get(device, {}).get('model_consent') == info['fingerprint']}
+
+    def set_model_privacy(self, device, body):
+        with self.lock:
+            entry = self.state['devices'].get(device)
+            if entry is None:
+                raise PermissionError('设备已解除配对')
+            info = self.model_privacy(device)
+            updated = dict(entry)
+            if body.get('approved') is True:
+                if not info['fingerprint'] or body.get('fingerprint') != info['fingerprint']:
+                    raise mobile_privacy.ApprovalRequired()
+                # An in-flight job must not inherit a later grant after revocation.
+                if not info['approved']:
+                    updated.update(model_consent=info['fingerprint'], consent_grant=secrets.token_hex(16))
+            elif body.get('approved') is False:
+                updated.pop('model_consent', None)
+                updated.pop('consent_grant', None)
+            else:
+                raise ValueError('无效的模型授权')
+            self.state['devices'][device] = updated
+            try:
+                self.save()
+            except OSError:
+                self.state['devices'][device] = entry
+                raise
+            return {**info, 'approved': body['approved']}
+
+    def authorize_model(self, device):
+        # Capture the grant at request admission, then recheck it in each model
+        # lookup on the worker. Reading the entry does not take the service lock.
+        entry = dict(self.state['devices'].get(device, {}))
+        grant = entry.get('consent_grant')
+        fingerprint = entry.get('model_consent')
+
+        def authorize(config):
+            current = self.state['devices'].get(device, {})
+            if not grant or current.get('consent_grant') != grant or mobile_privacy.destination(config)['fingerprint'] != fingerprint:
+                raise mobile_privacy.ApprovalRequired()
+
+        info = self.model_privacy(device)
+        if not info['approved']:
+            raise mobile_privacy.ApprovalRequired()
+        return authorize
     def public_item(self,item,detail=False):
         result={key:item.get(key,'') for key in ('id','title','kind','state','summary','url','created','updated','tags')}
         if detail:
@@ -232,7 +283,7 @@ class Mobile:
             if previous:
                 if previous['signature']!=signature:raise ValueError('这次附件内容已改变，请重新选择附件')
             else:
-                self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False})
+                self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False,'summarize':False})
                 receipts[receipt]={'signature':signature,'id':item_id};self.save()
             return {'item':self.public_item(self.service.archive.get(item_id),True),'duplicate':previous is not None}
     def attachment(self,item_id,batch_id,key):
@@ -247,15 +298,14 @@ class Mobile:
     def ingest(self,device,body):
         key=body.get('request_id');content=body.get('content')
         if not isinstance(key,str) or not 1<=len(key)<=80 or not isinstance(content,dict):raise ValueError('归档请求格式无效')
-        allowed={k:content[k] for k in ('text','url','filename','data','note_reference') if k in content};allowed['archive_only']=bool(allowed.get('url') and not allowed.get('filename') and not allowed.get('text'))
-        signature=digest(json.dumps({**allowed,'archive_only':True},sort_keys=True));receipt=device+':'+key
+        allowed={k:content[k] for k in ('text','url','filename','data','note_reference') if k in content};allowed['archive_only']=True
+        signature=digest(json.dumps(allowed,sort_keys=True));receipt=device+':'+key
         with self.lock:
             previous=self.state['receipts'].get(receipt)
             if previous:
                 if previous['signature']!=signature:raise ValueError('这条待发送内容已改变，请重新建档')
                 result={'item':self.service.archive.get(previous['id']),'created':False,'updated':False}
                 target=previous.get('chat_id',self.service.chat_history().get('activeId',''))
-                if not result['item']['summary'] and not allowed['archive_only']:self.service.queue(result['item']['id'])
             else:
                 target=self.service.chat_history().get('activeId','')
                 result=self.service.ingest(allowed)
@@ -263,7 +313,7 @@ class Mobile:
                 # Identifiers only; no documents, invitation secrets or credentials.
                 self.save()
             from .extension_chat import append_receipt
-            text=('手机资料已归档，按电脑设置整理。' if result['created'] else '这份手机资料已存在，可直接查看。')
+            text=('手机资料已归档。可在电脑上选择整理。' if result['created'] else '这份手机资料已存在，可直接查看。')
             result=append_receipt(self.service,result,target,digest(receipt),text,namespace='mobile')
             return {'item':self.public_item(self.service.archive.get(result['item']['id'])),'duplicate':not result['created'],
                     'chat_synced':result.get('chat_synced',False),**({'chat_sync_error':result['chat_sync_error']} if result.get('chat_sync_error') else {})}
@@ -305,6 +355,8 @@ class Mobile:
                     # Native clients only. Browser origins (including null) have no LAN API access.
                     if self.headers.get('Origin') is not None:return self.send(403,{'error':'请使用已配对的手机 App'})
                     parsed=urlsplit(self.path);body={}
+                    if post and re.fullmatch(r'/privacy-v1/(?:ingest|chats/[^/]{1,100}/messages|items/[a-f0-9]{32}/attachments)',parsed.path):
+                        parsed=parsed._replace(path=parsed.path.removeprefix('/privacy-v1'))
                     if post:
                         length=int(self.headers.get('Content-Length','0'))
                         if not 0<length<=MAX_BODY:return self.send(413,{'error':'单次发送不能超过 16 MB'})
@@ -320,14 +372,19 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)]})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1})
+                    if parsed.path=='/model-privacy':
+                        return self.send(200,manager.set_model_privacy(device,body) if post else manager.model_privacy(device))
                     if not post and parsed.path=='/chats':return self.send(200,manager.chats.listing(parse_qs(parsed.query).get('revision',[''])[0]))
                     if post and parsed.path=='/chats':return self.send(200,manager.chats.create(device,body))
                     chat_match=re.fullmatch(r'/chats/([^/]{1,100})(?:/(messages|stop))?',parsed.path)
                     if chat_match:
                         from urllib.parse import unquote
                         chat_id=unquote(chat_match[1])
-                        if post and chat_match[2]=='messages':return self.send(200,manager.chats.send(device,chat_id,body))
+                        if post and chat_match[2]=='messages':
+                            token=mobile_privacy.active.set(manager.authorize_model(device))
+                            try:return self.send(200,manager.chats.send(device,chat_id,body))
+                            finally:mobile_privacy.active.reset(token)
                         if post and chat_match[2]=='stop':return self.send(200,manager.chats.stop(chat_id,body))
                         if not post and chat_match[2] is None:
                             query=parse_qs(parsed.query)
@@ -369,7 +426,9 @@ class Mobile:
                             else:
                                 question=body.get('question','')
                                 if not isinstance(question,str) or not question.strip() or len(question)>4000:raise ValueError('问题需为 1–4000 个字符')
-                                result=manager.service.ask_library(question)
+                                token=mobile_privacy.active.set(manager.authorize_model(device))
+                                try:result=manager.service.ask_library(question)
+                                finally:mobile_privacy.active.reset(token)
                                 result={key:result.get(key) for key in ('answer','sources','retrieval_notice')}
                             return self.send(200,result)
                         finally:
@@ -377,6 +436,7 @@ class Mobile:
                             manager.operations.release()
                     return self.send(404,{'error':'不存在'})
                 except ChatBusy as exc:return self.send(409,{'error':str(exc)})
+                except mobile_privacy.ApprovalRequired as exc:return self.send(403,{'error':str(exc),'model_consent_required':True})
                 except PermissionError as exc:self.send(403,{'error':str(exc)})
                 except (ValueError,KeyError,TypeError) as exc:self.send(400,{'error':str(exc)})
                 except Exception:self.send(500,{'error':'手机请求未完成，请在电脑端检查任务状态'})

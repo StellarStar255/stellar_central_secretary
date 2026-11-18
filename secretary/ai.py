@@ -147,6 +147,8 @@ def _run_api(prompt,config,images,timeout=240):
 
 
 def run(prompt, backend, images=None, timeout=240, reasoning_effort=None):
+    from . import mobile_privacy
+    mobile_privacy.check(backend)
     if isinstance(backend,dict):return _run_api(prompt,backend,images,timeout)
     if backend not in CLI_BACKENDS:raise ValueError('未知模型后端')
     with _process_lock:generation=_cancel_generation

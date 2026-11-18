@@ -28,6 +28,20 @@ struct Draft: Codable, Identifiable {
     var data: String?
     var created = ISO8601DateFormatter().string(from: Date())
 }
+struct ModelPrivacy {
+    let destination: String
+    let model: String
+    let fingerprint: String
+    let approved: Bool
+
+    init(_ value: [String: Any]) {
+        destination = value["destination"] as? String ?? ""
+        model = value["model"] as? String ?? ""
+        fingerprint = value["fingerprint"] as? String ?? ""
+        approved = value["approved"] as? Bool == true
+    }
+}
+
 class PinnedSession: NSObject, URLSessionDelegate {
     let fingerprint: String
     init(_ fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
@@ -99,6 +113,8 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     var workspaceID: String { paired?.id ?? "unpaired" }
     private let storageFolder: URL
     @Published var online = false
+    @Published private(set) var privacySupported = false
+    @Published var showPrivacy = false
     @Published var status = "连接你的 Mac"
     @Published var error = ""
     @Published var code = ""
@@ -208,6 +224,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     }
     private func activateComputer(_ pair:PairedMac?) {
         saveInputs();deviceGeneration=UUID();paired=pair
+        privacySupported = false
         rebuildConnectionTransport()
         candidate=nil;waiting=false;code="";mayRetryConnection=false
         libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage=""
@@ -318,7 +335,14 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         Task { await connect() }
     }
     private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil) async throws -> [String:Any] {
-        guard let pair = pair ?? paired, let url = URL(string:sessionEndpoint + path), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
+        let protectedWrite = body != nil && (path == "/ingest" || path.hasSuffix("/attachments") || path.hasSuffix("/messages"))
+        if protectedWrite {
+            guard privacySupported else {
+                throw NSError(domain:"Companion",code:426,userInfo:[NSLocalizedDescriptionKey:"请先更新电脑端，再从手机归档或发送消息。"])
+            }
+        }
+        let route = protectedWrite ? "/privacy-v1" + path : path
+        guard let pair = pair ?? paired, let url = URL(string:sessionEndpoint + route), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
         guard pair.id == (candidate ?? paired)?.id else {throw CancellationError()}
         let generation=deviceGeneration
         if body != nil {activeWrites += 1}
@@ -332,8 +356,18 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard generation==deviceGeneration, pair.id == (candidate ?? paired)?.id else {throw CancellationError()}
         let result = try JSONSerialization.jsonObject(with:data) as? [String:Any] ?? [:]
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
-        guard (200...299).contains(status) else { throw NSError(domain:"Companion",code:status,userInfo:[NSLocalizedDescriptionKey:result["error"] as? String ?? "连接未完成，请重试"]) }
+        guard (200...299).contains(status) else {
+            let domain = result["model_consent_required"] as? Bool == true ? "MobileModelPrivacy" : "Companion"
+            throw NSError(domain:domain,code:status,userInfo:[NSLocalizedDescriptionKey:result["error"] as? String ?? "连接未完成，请重试"])
+        }
         return result
+    }
+    func modelPrivacy() async throws -> ModelPrivacy {
+        ModelPrivacy(try await request("/model-privacy", timeout: 12))
+    }
+    func setModelPrivacy(_ approved: Bool, fingerprint: String, workspace: String) async throws -> ModelPrivacy {
+        guard workspace == workspaceID else { throw CancellationError() }
+        return ModelPrivacy(try await request("/model-privacy", body: ["approved": approved, "fingerprint": fingerprint], timeout: 12))
     }
     func pair(_ raw: String, requestAccepted: (() -> Void)? = nil) async {
         guard credentialStoreAvailable else {error="无法读取已保存的电脑，请解锁手机后重新打开 App";return}
@@ -490,6 +524,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             if bluetooth {bluetoothRelay?.rememberVerifiedPeer();wifiRelay?.suspendDiscovery()}
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             try remember(pair);paired = computers.selected
+            privacySupported = value["privacy_version"] as? Int == 1
             online = true;status = "已连接 · \(pair.displayName)";error = "";discover();await flush();await flushChatMessages()
         } catch {
             guard connectionGeneration==generation,!Task.isCancelled else {return}
@@ -584,8 +619,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard generation==deviceGeneration else {return}
         if selectedChatID.isEmpty {await createChat()}
         guard generation==deviceGeneration else {return}
-        selectedTab="chat"
-        _ = await enqueueChat(text)
+        if await enqueueChat(text),generation==deviceGeneration { selectedTab="chat" }
     }
     var currentChatQueue:[PendingChatMessage] {
         guard let pair=paired else {return []}
@@ -674,6 +708,16 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard workspace==nil || workspace==workspaceID, chatID==nil || chatID==selectedChatID else {return false}
         guard let pair=paired,!selectedChatID.isEmpty else {chatNotice="请先选择或新建对话";return false}
         guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
+        if online {
+            let generation = deviceGeneration
+            let selected = selectedChatID
+            guard privacySupported else { chatNotice = "请更新电脑端后再发送消息。"; return false }
+            do {
+                let permission = try await modelPrivacy()
+                guard generation == deviceGeneration, selected == selectedChatID else { return false }
+                guard permission.approved else { showPrivacy = true; return false }
+            } catch { chatNotice = error.localizedDescription; return false }
+        }
         do {try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:selectedChatID,text:text)]);chatNotice="";await flushChatMessages();return true}
         catch {chatNotice="手机暂存失败，请保留输入内容";return false}
     }
@@ -703,10 +747,11 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                     var messages=pendingChatMessages
                     if let index=messages.firstIndex(where:{$0.id==pending.id}) {messages[index].lastError=error.localizedDescription;try? persistChatQueue(messages)}
                 }
+                if ns.domain == "MobileModelPrivacy" {chatNotice=error.localizedDescription;return}
                 if ns.domain != "Companion" {return}
             }
         }
-        if changed {await syncSelectedChat()}
+        if changed {chatNotice="";await syncSelectedChat()}
     }
     func stopChatAnswer(_ message:ChatMessage) async {
         guard online else {chatNotice="连接电脑后才能停止回答";return}

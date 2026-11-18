@@ -33,6 +33,7 @@ import QuickLook
 struct ContentView: View {
     @EnvironmentObject var model: Companion
     @State private var scan = false
+    @State private var showDemo = false
     @State private var pairingTask: Task<Void, Never>?
     var body: some View {
         Group {
@@ -46,7 +47,10 @@ struct ContentView: View {
                         Text("与 Mac 上的 Stellar Secretary 配对，\n共用你的知识库。").multilineTextAlignment(.center).foregroundStyle(.secondary)
                         if model.waiting { Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(model.status);ProgressView() }
                         else { Button { scan = true } label: { Label("扫描 Mac 配对码",systemImage:"qrcode.viewfinder").frame(maxWidth:.infinity) }.buttonStyle(.borderedProminent).controlSize(.large)
-                            Text("电脑端：模型与设置 → 手机连接").font(.footnote).foregroundStyle(.secondary) }
+                            Text("电脑端：模型与设置 → 手机连接").font(.footnote).foregroundStyle(.secondary)
+                            Button("演示模式 / Demo") { showDemo = true }.accessibilityIdentifier("open-review-demo")
+                            Button("隐私与 AI / Privacy") { model.showPrivacy = true }
+                        }
                         if !model.error.isEmpty { Text(model.error).foregroundStyle(.orange).font(.callout) }
                     }.padding(30).navigationTitle("Stellar Secretary")
                 }
@@ -58,6 +62,10 @@ struct ContentView: View {
                     DeviceView(addComputer: {scan=true}).id(model.workspaceID).tabItem { Label("连接",systemImage:"laptopcomputer.and.iphone") }.tag("device")
                 }.tint(.orange)
             }
+        }.sheet(isPresented:$showDemo) {
+            ReviewDemoView()
+        }.sheet(isPresented:$model.showPrivacy) {
+            PrivacyView().environmentObject(model)
         }.fullScreenCover(isPresented:$scan) {
             ScannerView(scanned: { raw, failed in
                 pairingTask = Task {
@@ -97,7 +105,7 @@ struct CaptureView: View {
                     Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
                     if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
                     Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(model.online ? "保存到知识库":"暂存，连接后发送",systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
-                } footer: { Text("链接先收藏，网页正文可在电脑端继续读取。附件最多 10 MB。") }
+                } footer: { Text("手机归档不自动调用 AI。可在电脑上读取链接或整理资料。附件最多 10 MB。") }
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
@@ -555,6 +563,7 @@ struct DeviceView: View {
                 } header:{Text("我的电脑 · \(model.computers.computers.count)")} footer:{Text("分别扫码授权后即可切换，无需重新绑定。每台电脑最多绑定 10 部手机，手机最多保存 10 台电脑。")}
                 if !model.canChangeComputer {Section {Text(model.pairingInFlight ? "正在配对，请先完成或取消配对":"正在提交内容，完成后即可切换电脑").font(.footnote).foregroundStyle(.secondary)}}
                 if !model.error.isEmpty {Section {Text(model.error).foregroundStyle(.orange)}}
+                Section { Button("隐私与 AI") { model.showPrivacy = true } }
                 Section {
                     Text("每台电脑的知识库、聊天记录和手机待发送内容分别保存。切换不会同步或合并电脑资料。连接需要电脑开机运行，且网络或附近连接可达。").font(.callout).foregroundStyle(.secondary)
                 }
@@ -570,6 +579,81 @@ struct DeviceView: View {
             .confirmationDialog("移除 \(removing?.displayName ?? "这台电脑") 的配对？",isPresented:$showRemove,titleVisibility:.visible) {
                 Button("解除配对",role:.destructive) {if let pair=removing {model.removeComputer(pair.id)}}
             } message:{Text("仅移除这台电脑的手机凭据。待发送内容和缓存保留，重新配对原电脑后可继续使用；电脑端可另外撤销此手机的访问权限。")}
+        }
+    }
+}
+struct PrivacyView: View {
+    @EnvironmentObject private var companion: Companion
+    @Environment(\.dismiss) private var dismiss
+    @State private var permission: ModelPrivacy?
+    @State private var message = ""
+    @State private var saving = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let pair = companion.paired {
+                    Section {
+                        if let permission {
+                            LabeledContent("模型服务", value: permission.destination)
+                            if !permission.model.isEmpty { LabeledContent("模型", value: permission.model) }
+                            if !permission.fingerprint.isEmpty {
+                                if permission.approved {
+                                    Button("撤回授权", role: .destructive) { update(false, permission) }.disabled(saving)
+                                } else {
+                                    Button("同意并允许向此服务发送") { update(true, permission) }.disabled(saving)
+                                }
+                            }
+                        } else if !companion.privacySupported {
+                            Text("连接并更新电脑端后，可以查看及管理模型授权。")
+                        } else if message.isEmpty {
+                            ProgressView()
+                        }
+                        if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
+                    } header: {
+                        Text("AI 问答 · \(pair.displayName)")
+                    } footer: {
+                        Text("授权后，电脑可能向所示服务发送问题、相关聊天记录、知识库摘录或图片，包括手机待发送的问答。授权只适用于这台电脑和当前模型服务。撤回后，尚未发出的模型请求将被拦截，已发出的内容无法收回。")
+                    }
+                }
+                Section("数据和权限") {
+                    Text("相机用于扫描电脑的配对码，局域网和蓝牙用于发现并连接附近的电脑。手机将你提交的资料和问题发给所选电脑。配对凭据保存在钥匙串，待发送内容和近期缓存保存在手机。")
+                    Text("手机归档只存入电脑知识库。电脑端可以另行整理资料；如果启用了本机语义索引，电脑会使用配置的本机嵌入服务。演示模式使用样例资料，退出时清除演示改动。")
+                    Text("你可以在 iOS 设置管理权限，在电脑端移除此手机的访问权限，或在这里撤回模型授权。")
+                }
+            }
+            .navigationTitle("隐私与 AI")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("关闭") { dismiss() } } }
+            .task(id: "\(companion.deviceGeneration)-\(companion.privacySupported)-\(companion.online)") { await load() }
+        }
+    }
+
+    private func load() async {
+        permission = nil
+        message = ""
+        guard companion.privacySupported, companion.online else {
+            if companion.privacySupported { message = "先连接电脑，再管理模型授权。" }
+            return
+        }
+        do { permission = try await companion.modelPrivacy() }
+        catch is CancellationError {}
+        catch { message = error.localizedDescription }
+    }
+
+    private func update(_ approved: Bool, _ reviewed: ModelPrivacy) {
+        let workspace = companion.workspaceID
+        saving = true
+        message = ""
+        Task {
+            defer { saving = false }
+            do {
+                permission = try await companion.setModelPrivacy(approved, fingerprint: reviewed.fingerprint, workspace: workspace)
+                message = approved ? "已授权。返回后可继续发送问答。" : "已撤回授权。"
+            } catch is CancellationError {
+            } catch {
+                await load()
+                message = error.localizedDescription
+            }
         }
     }
 }

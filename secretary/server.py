@@ -252,6 +252,8 @@ class Service:
         if backend not in (*ai.CLI_BACKENDS,'api'):raise ValueError('未知模型后端')
         proxy=network.proxy_config(settings['model_proxy'] if proxy is None else proxy)
         config={**model_api.prepare(self.archive.root,api_config or {}),'_proxy':proxy} if backend=='api' else ai.CLIBackend(backend,proxy)
+        from . import mobile_privacy
+        mobile_privacy.check(config)
         return company_ai.require(self.archive,config,item_ids)
 
     def company_model_status(self):

@@ -12,6 +12,24 @@ Native SwiftUI companion for iOS 17 or later. The Mac keeps the library and perf
 
 Credentials are saved in the phone Keychain; the QR contains a short-lived invitation and the server certificate fingerprint. Only the fingerprint-matching TLS server is trusted. Desktop APIs, settings, model credentials and arbitrary file downloads are not exposed by the companion listener. Pairing and revocation are available only through the desktop UI. The listener is off by default.
 
+## App Review demo
+
+On the unpaired welcome screen, tap **演示模式 / Demo**. Reviewers can search the sample library, open a record, and save a note or link under **Archive**. Under **Chat**, tap **Ask** to see a quoted answer and open its source. Demo changes are discarded when the demo closes. It does not connect to a computer or call an AI service.
+
+The demo covers those sample workflows. For the connected workflows, including pairing, attachment transfer, and shared chat, prepare a recording of the iPhone and Mac using a synthetic library and provide pairing instructions in App Review Information.
+
+### App Store privacy copy (draft)
+
+Stellar Secretary for iPhone connects to a desktop library you pair and approve. It uses the camera to scan a pairing code and uses local network access and Bluetooth to discover and connect to nearby computers. The app sends the notes, links, attachments, and questions you choose to submit to your selected computer. Your pairing credential is stored in the iPhone Keychain. The phone keeps local copies of recent results and downloaded files for quicker access, and keeps unsent submissions until they can be sent or you remove them.
+
+The desktop computer stores the library. Phone uploads and appended files are archived without an automatic AI summary. You can choose to summarize them on the desktop. If local semantic indexing is enabled, the desktop uses its configured local embedding service.
+
+To send questions from the phone, first approve the displayed model service under **连接 → 隐私与 AI**. The desktop may send your question, relevant conversation history, and relevant excerpts or images to that service. The provider’s data handling terms apply. Approval is scoped to the phone, computer and model destination. You can withdraw approval in the same screen. Withdrawal blocks later calls and does not recall data already sent. Update the desktop companion before using mobile writes so these rules can be enforced.
+
+The sample demo works locally with synthetic records and discards its changes when closed.
+
+Before publication, confirm the publisher and privacy contact, publish the policy at a public URL and link to it in the app and App Store Connect.
+
 ## Multiple computers and phones
 
 Each desktop can approve up to ten phones independently. The phone's **连接 → 添加电脑** saves up to ten computers without replacing an existing pairing. Approve each computer once, optionally give it a local name such as 公司电脑 or 家里电脑, then use **使用这台电脑** to switch. The current computer appears on capture, chat and library screens. Reopening the app reconnects to the last selected computer; it never silently switches to another reachable computer.

@@ -5,6 +5,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from . import ai
 from .question_progress import QuestionProgress
 
@@ -106,7 +107,7 @@ class QuestionJobs:
             except Exception:
                 self.service.question_progress.update(key,'error');raise
             self.jobs[key]={'chat_id':chat_id,'message_id':message_id,'fingerprint':fingerprint,'ended':None}
-            self.pool.submit(self.run,key,payload,previous)
+            self.pool.submit(copy_context().run,self.run,key,payload,previous)
         return {'request_id':key}
 
     def run(self,key,payload,previous):

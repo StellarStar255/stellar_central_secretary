@@ -20,6 +20,43 @@ final class CompanionUITests: XCTestCase {
             failure = error;if let data { result = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:] };done.fulfill()
         }.resume();wait(for:[done],timeout:15);if let failure { throw failure };return result
     }
+    @MainActor func testReviewDemoWithoutPairing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        clearSavedComputers(app)
+        let openDemo = app.buttons["open-review-demo"]
+        XCTAssertTrue(openDemo.waitForExistence(timeout: 10))
+        openDemo.tap()
+        let garden = app.buttons["Rain garden checklist"]
+        XCTAssertTrue(garden.waitForExistence(timeout: 5))
+        let search = app.textFields["Search sample records"]
+        search.tap()
+        search.typeText("workshop")
+        XCTAssertTrue(app.buttons["Community workshop"].exists)
+        XCTAssertFalse(garden.exists)
+
+        app.buttons["Archive"].tap()
+        let note = app.textViews["Demo note"]
+        note.tap()
+        note.typeText("Test bench checklist")
+        app.buttons["Save to demo library"].tap()
+        let archived = app.buttons["Test bench checklist"]
+        XCTAssertTrue(archived.waitForExistence(timeout: 5))
+        archived.tap()
+        XCTAssertTrue(app.staticTexts["Test bench checklist"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+
+        app.buttons["Chat"].tap()
+        app.buttons["Ask"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "check drainage after rain")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(garden.exists)
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.buttons["扫描 Mac 配对码"].waitForExistence(timeout: 5))
+        openDemo.tap()
+        XCTAssertTrue(garden.waitForExistence(timeout: 5))
+        XCTAssertFalse(archived.exists)
+    }
     @MainActor func testScannerStaysVisibleUntilCancel() throws {
         let app = XCUIApplication();app.launch();clearSavedComputers(app)
         if app.tabBars.buttons["连接"].exists {
@@ -147,7 +184,15 @@ final class CompanionUITests: XCTestCase {
         XCTAssertEqual(try fixture("/metadata")["tags"] as? [String],["Review"])
         app.navigationBars.buttons.firstMatch.tap()
         let search = app.textFields["搜索资料或输入问题"];search.tap();search.typeText("fixture")
-        app.buttons["问知识库"].tap();XCTAssertTrue(app.staticTexts["Synthetic fixture answer [1]"].waitForExistence(timeout:20))
+        app.buttons["问知识库"].tap()
+        let allow = app.buttons["同意并允许向此服务发送"]
+        XCTAssertTrue(allow.waitForExistence(timeout:10))
+        XCTAssertFalse(app.staticTexts["Synthetic fixture answer [1]"].exists)
+        allow.tap()
+        XCTAssertTrue(app.buttons["撤回授权"].waitForExistence(timeout:10))
+        app.buttons["关闭"].tap()
+        app.buttons["问知识库"].tap()
+        XCTAssertTrue(app.staticTexts["Synthetic fixture answer [1]"].waitForExistence(timeout:20))
         _ = try fixture("/offline")
         app.tabBars.buttons["归档"].tap()
         XCTAssertTrue(app.buttons["暂存，连接后发送"].waitForExistence(timeout:20))
@@ -183,6 +228,13 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Desktop context fixture"].waitForExistence(timeout:15))
         let input=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
         input.tap();input.typeText("Mobile shared question");app.buttons["chat-send"].tap()
+        let allow = app.buttons["同意并允许向此服务发送"]
+        XCTAssertTrue(allow.waitForExistence(timeout:10))
+        XCTAssertEqual(try fixture("/chat-inspect")["phone_count"] as? Int,0)
+        allow.tap()
+        XCTAssertTrue(app.buttons["撤回授权"].waitForExistence(timeout:10))
+        app.buttons["关闭"].tap()
+        app.buttons["chat-send"].tap()
         XCTAssertTrue(app.staticTexts["Shared phone reply"].waitForExistence(timeout:15),app.debugDescription)
         XCTAssertEqual(try fixture("/chat-inspect")["phone_count"] as? Int,1)
         _ = try fixture("/desktop-chat-append")
