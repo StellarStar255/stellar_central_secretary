@@ -1,6 +1,17 @@
 /* Bounded chunks, verified resume and per-operation leases. Original files remain local. */
 (()=>{
  let api=null,panel=null;const tasks=new Set(),CHUNK=4*1024*1024;const t=s=>StellarI18n.t(s);
+ const pastedImages=new WeakSet();
+ function fromClipboard(clipboard){
+  const files=clipboard?.files?.length?[...clipboard.files]:
+   Array.from(clipboard?.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);
+  return files.map(file=>{
+   if(!file.type?.startsWith('image/')&&!/\.(png|jpe?g|gif|webp|hei[cf]|hif)$/i.test(file.name))return file;
+   const image=file.name?file:new File([file],'image',{type:file.type});
+   pastedImages.add(image);
+   return image;
+  });
+ }
  let owner;try{owner=sessionStorage.getItem('stellar-upload-owner');if(!owner){owner=crypto.randomUUID();sessionStorage.setItem('stellar-upload-owner',owner)}}catch{owner=String(Date.now())+Math.random()}
  function mount(task){if(!panel){panel=document.createElement('section');panel.id='upload-progress';panel.setAttribute('aria-label',t('附件上传'));const hint=document.createElement('p');hint.textContent=t('中断后重新选择原文件可继续；已上传部分会先核对。');panel.append(hint);document.body.append(panel)}const target=task.context.startsWith('append:')?document.querySelector('#append-dialog[open]'):task.context.startsWith('quick-note:')?document.querySelector('#detail-dialog[open] .quick-note[data-note-item="'+task.context.slice(11)+'"]'):null;if(target)target.append(panel);else if(!panel.closest('dialog[open]'))document.body.append(panel);
   const row=task.row=document.createElement('div');row.className='upload-progress-row';const label=task.label=document.createElement('span');const pause=task.pause=document.createElement('button'),cancel=task.cancel=document.createElement('button'),restart=task.restartButton=document.createElement('button');for(const button of [pause,cancel,restart])button.type='button';restart.textContent=t('重新开始');
@@ -17,7 +28,8 @@
   }return state.offset
  }
  async function encode(file,onProgress=()=>{},context='composer'){
-  if(file.size<=8*1024*1024)return {name:file.name,data:await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error(t('无法读取 ')+file.name));reader.readAsDataURL(file)})};
+  const metadata={name:file.name,...(pastedImages.has(file)?{clipboard_image:true}:{})};
+  if(file.size<=8*1024*1024)return {...metadata,data:await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error(t('无法读取 ')+file.name));reader.readAsDataURL(file)})};
   for(const previous of [...tasks])if(previous.file===file&&previous.context===context){previous.row.remove();tasks.delete(previous)}
   const task={file,context,state:'uploading',percent:0,error:'',session:null,restart:false};tasks.add(task);mount(task);
   while(true){
@@ -27,7 +39,7 @@
     task.session=await api('/api/uploads/start',{name:file.name,size:file.size,fingerprint:JSON.stringify([file.name,file.size,file.lastModified]),owner:owner+':'+context,fresh:task.restart});task.restart=false;if(task.state==='cancelled')throw Error(t('上传已取消，原文件已保留'));
     let offset=await verify(task);task.error='';task.percent=Math.floor(offset/file.size*100);paint(task);onProgress(file.name,task.percent);
     while(offset<file.size){if(task.state==='cancelled')throw Error(t('上传已取消，原文件已保留'));if(task.state==='paused')await wait(task);if(task.restart)break;const result=await raw(task,'chunk',offset,file.slice(offset,offset+CHUNK));offset=result.offset;task.percent=Math.round(offset/file.size*100);paint(task);onProgress(file.name,task.percent)}
-    if(task.restart)continue;if(task.state==='cancelled')throw Error(t('上传已取消，原文件已保留'));task.state='complete';paint(task);return {name:file.name,upload_id:task.session.id,lease:task.session.lease};
+    if(task.restart)continue;if(task.state==='cancelled')throw Error(t('上传已取消，原文件已保留'));task.state='complete';paint(task);return {...metadata,upload_id:task.session.id,lease:task.session.lease};
    }catch(error){if(task.state==='cancelled'){if(task.session)void api('/api/uploads/'+task.session.id+'/cancel',{lease:task.session.lease}).catch(()=>{});paint(task);throw Error(t('上传已取消，原文件已保留'))}if(error.name==='AbortError'&&task.pausedAbort){task.pausedAbort=false;if(task.state==='uploading')continue}if(task.state!=='paused'){task.state='failed';task.error=error.message}paint(task);await wait(task)}
   }
  }
@@ -35,5 +47,5 @@
  function abandon(files){for(const task of tasks)if(files.includes(task.file)&&task.state==='complete'){task.state='staged';paint(task)}}
  document.addEventListener('close',event=>{if(event.target.id==='append-dialog'&&panel)document.body.append(panel)},true);
  globalThis.addEventListener?.('beforeunload',event=>{if([...tasks].some(task=>!['cancelled'].includes(task.state))){event.preventDefault();event.returnValue=''}});
- globalThis.StellarUploads={encode,cleanup,abandon,bind:fn=>{api=fn}};
+ globalThis.StellarUploads={fromClipboard,encode,cleanup,abandon,bind:fn=>{api=fn}};
 })();

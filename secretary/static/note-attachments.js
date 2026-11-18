@@ -4,7 +4,7 @@
  const image=file=>(file.type||'').startsWith('image/')||/\.(png|jpe?g|gif|webp|heic|heif|hif)$/i.test(file.name);
  const pending=id=>{const state=states.get(id);return !!state&&(state.running||state.files.length>0)};
  function bind(id,config){
-  let state=states.get(id);if(!state){state={id,files:[],pasted:new WeakSet(),running:false,error:'',message:'',deleted:false};states.set(id,state)}
+  let state=states.get(id);if(!state){state={id,files:[],running:false,error:'',message:'',deleted:false};states.set(id,state)}
   state.config=config;
   const container=document.querySelector('.quick-note'),panel=container.querySelector('#note-attachment-status');container.dataset.noteItem=id;
   function paint(){if(!panel.isConnected)return;panel.replaceChildren();if(!state.files.length&&!state.message)return;
@@ -18,11 +18,7 @@
    try{while(state.files.length&&!state.deleted){
     const files=state.files.slice(),attachments=[];
     try{
-     for(const file of files){
-      const attachment=await StellarUploads.encode(file,(name,percent)=>{state.message=t('正在上传：')+name+' '+percent+'%';state.paint()},'quick-note:'+id);
-      if(state.pasted.has(file))attachment.clipboard_image=true;
-      attachments.push(attachment);
-     }
+     for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{state.message=t('正在上传：')+name+' '+percent+'%';state.paint()},'quick-note:'+id));
      if(state.deleted)return;
      for(let attempt=0;attempt<3;attempt++){
       const latest=await config.api('/api/items/'+id);
@@ -39,11 +35,10 @@
     try{await state.config.onSaved()}catch(error){config.toast(error.message)}
    }}finally{state.running=false;state.paint()}
   }
-  function add(files,fromClipboard=false){
-   files=Array.from(files,file=>fromClipboard&&!file.name&&image(file)?new File([file],'image',{type:file.type}):file);if(!files.length||state.deleted)return;
+  function add(files){
+   files=Array.from(files);if(!files.length||state.deleted)return;
    const all=[...state.files,...files];
    if(all.length>20||all.filter(image).length>8||all.some(file=>file.size>1024**3)||all.reduce((n,file)=>n+file.size,0)>2*1024**3){config.toast(t('每批最多 20 个文件、8 张图片，单个 1 GB、总计 2 GB'));return}
-   if(fromClipboard)for(const file of files)if(image(file))state.pasted.add(file);
    state.files.push(...files);state.paint();if(!state.error)void start();
   }
   container.querySelector('#note-add-image').onclick=()=>container.querySelector('#note-file').click();

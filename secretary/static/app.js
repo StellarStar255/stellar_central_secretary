@@ -484,7 +484,7 @@ function attach(files){for(const file of files){
  attachedFiles.push(file)
 }renderAttachments();$('#message-input').focus()}
 $('#attach-button').onclick=()=>$('#file-input').click();$('#file-input').onchange=e=>{attach([...e.target.files]);e.target.value=''};
-$('#message-input').addEventListener('paste',event=>{const data=event.clipboardData;if(!data)return;const files=data.files?.length?[...data.files]:Array.from(data.items||[]).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);if(files.length){event.preventDefault();const text=data.getData('text/plain');if(text){const input=$('#message-input');input.setRangeText(text,input.selectionStart,input.selectionEnd,'end');resizeInput()}attach(files)}});
+$('#message-input').addEventListener('paste',event=>{const data=event.clipboardData;if(!data)return;const files=StellarUploads.fromClipboard(data);if(files.length){event.preventDefault();const text=data.getData('text/plain');if(text){const input=$('#message-input');input.setRangeText(text,input.selectionStart,input.selectionEnd,'end');resizeInput()}attach(files)}});
 let dragDepth=0;
 window.addEventListener('drop',()=>{dragDepth=0;$('#drag-overlay').hidden=true},true);
 window.addEventListener('dragenter',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();dragDepth++;$('#drag-overlay').hidden=false}});
