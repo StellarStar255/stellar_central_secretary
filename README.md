@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.120** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.120.md)
+Version **v0.1.121** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.121.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -138,7 +138,7 @@ The tutorial uses fictional material, makes no model calls and does not access l
 - **Search library** supports keywords across titles, text, summaries, tags and filenames. `June Science Monthly` and `Science Monthly June` give the same matches.
 - Open any archive and choose **Append materials** to add new text, pasted images and files to that same record. Enable **Generate a supplemental summary after saving** to append dated findings while retaining the original summary, title, tags and source. Each batch can be previewed, downloaded and summarized again; appended text and image descriptions are searchable and included in backups.
 - Click an item to view its summary and full text. Rename by clicking the title. Renaming alone does not trigger AI processing.
-- PDF overviews use the first five pages by default. The full extracted text and original are retained. Select **Summarize full document** when needed.
+- PDF overviews use the first five pages by default. When the regular parser reaches a content-stream safety limit or cannot read the structure, PDFium automatically reads at most five pages and 8,000 characters per page, with the range and truncation marked. Parser limits are independent of the model's token budget. The original remains intact; **Summarize full document** is available when full text was extracted. A partial overview cannot be presented as a full-document summary; read or OCR additional pages separately.
 - AES-encrypted PDFs without an opening password are supported. Password-protected documents must first be exported as accessible copies. Scanned PDFs need OCR.
 - On Windows, macOS and Linux, choose **Models & settings → Interface mode** to switch between a native desktop window and your browser. Both share the same library and chat history. Closing the window keeps the app running in the notification area (Windows) or menu bar (macOS). Use the tray menu or reopen the app to restore its window. Windows includes its own Chromium engine; no separate WebView2 installation is needed.
 - For authenticated or dynamic webpages, choose **Read webpage in browser**, sign in and expand the content, then click **Page is ready, start reading**. Failed direct text fetches open this flow automatically. Capture includes loaded text and HTML tables, with an explicit scope note; it does not load all comments or pages. Success closes only the new task tab according to settings; failure leaves it open. Canvas, iframe and restricted content may require the extension or manual text.
