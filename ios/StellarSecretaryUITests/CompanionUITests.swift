@@ -114,6 +114,9 @@ final class CompanionUITests: XCTestCase {
         let editor = app.textViews["归档内容"];editor.tap();editor.typeText("Mobile fixture unique note")
         app.buttons["保存到知识库"].tap()
         let empty = NSPredicate(format:"value == ''");expectation(for:empty,evaluatedWith:editor);waitForExpectations(timeout:20)
+        let receipt=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Mobile fixture unique note'")).firstMatch
+        XCTAssertTrue(receipt.waitForExistence(timeout:10))
+        XCTAssertTrue(receipt.label.contains("已归档"))
         app.tabBars.buttons["检索"].tap()
         XCTAssertEqual(try fixture("/count")["count"] as? Int,2)
         let row = app.buttons.containing(NSPredicate(format:"label CONTAINS 'Mobile fixture unique note'")).firstMatch
@@ -211,9 +214,42 @@ final class CompanionUITests: XCTestCase {
         app.tabBars.buttons["连接"].tap();app.buttons["重新连接"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20))
         app.tabBars.buttons["归档"].tap()
-        let sent = NSPredicate(format:"exists == false");expectation(for:sent,evaluatedWith:app.staticTexts["Offline fixture note"]);waitForExpectations(timeout:20)
+        let offlineReceipt=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Offline fixture note'")).firstMatch
+        XCTAssertTrue(offlineReceipt.waitForExistence(timeout:20))
         XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
         let screenshot = XCTAttachment(screenshot:app.screenshot());screenshot.name = "Paired iPhone capture";screenshot.lifetime = .keepAlways;add(screenshot)
+    }
+    @MainActor func testFirstChatCanStartFromComposer() throws {
+        continueAfterFailure=false
+        let app=XCUIApplication();app.launch();clearSavedComputers(app)
+        _ = try fixture("/empty-chats")
+        defer {_ = try? fixture("/restore-chats")}
+        let pair=try fixture("/pair.json");app.open(URL(string:pair["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        let chat=app.tabBars.buttons["聊天"]
+        XCTAssertTrue(chat.waitForExistence(timeout:20));chat.tap()
+        XCTAssertTrue(app.staticTexts["发一条消息开始聊天"].waitForExistence(timeout:10))
+        let input=app.textViews["chat-input"]
+        XCTAssertTrue(input.isEnabled);XCTAssertGreaterThanOrEqual(input.frame.height,55)
+        input.tap();input.typeText("First mobile conversation")
+        let send=app.buttons["chat-send"];send.tap()
+        let allow=app.buttons["同意并允许向此服务发送"]
+        XCTAssertTrue(allow.waitForExistence(timeout:10))
+        XCTAssertEqual(try fixture("/chat-count")["count"] as? Int,0)
+        allow.tap()
+        XCTAssertTrue(app.buttons["撤回授权"].waitForExistence(timeout:10))
+        app.buttons["关闭"].tap()
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Synthetic fixture answer [1]"].waitForExistence(timeout:20))
+        XCTAssertEqual(try fixture("/chat-count")["count"] as? Int,1)
+        input.tap()
+        XCTAssertFalse(send.isEnabled)
+        let addAttachment=app.buttons["chat-add-attachment"]
+        XCTAssertTrue(addAttachment.isEnabled)
+        addAttachment.tap()
+        XCTAssertTrue(app.buttons["截图或照片"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.buttons["文件"].exists)
     }
     @MainActor func testSharedDesktopChatAndOfflineRecovery() throws {
         continueAfterFailure=false

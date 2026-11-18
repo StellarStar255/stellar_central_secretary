@@ -39,6 +39,7 @@ if __name__=='__main__':
   service.chat_history({'activeId':shared_id,'conversations':[{'id':shared_id,'title':'Shared fixture chat','updated':1,'messages':[
    {'id':'desktop-q','role':'user','text':'Desktop question fixture','knowledgeQuestion':True},
    {'id':'desktop-a','role':'assistant','text':'Desktop context fixture','sources':[]}]}]})
+  seeded_chats=service.chat_history()
   second=Service(Path(folder)/'second');second.archive.configure('codex',False);other=second.mobile
   other.enable(advertise=False,bind='127.0.0.1')
   third=Service(Path(folder)/'third');third.archive.configure('codex',False);third.mobile.enable(advertise=False,bind='127.0.0.1')
@@ -86,6 +87,13 @@ if __name__=='__main__':
      mobile.decide({'id':pending[0]['id'],'approve':True});value={'ok':True}
     elif self.path=='/offline':mobile.stop();value={'ok':True}
     elif self.path=='/online':mobile.enable(advertise=True,bind='0.0.0.0');value={'ok':True}
+    elif self.path in ('/empty-chats','/restore-chats'):
+     with service.lock:
+      history=service.question_jobs.read()
+      target=seeded_chats if self.path=='/restore-chats' else {'conversations':[],'activeId':''}
+      service.clean_chat_history(target,service.archive.root/'conversations.json',history)
+     value={'ok':True}
+    elif self.path=='/chat-count':value={'count':len(service.chat_history()['conversations'])}
     elif self.path=='/connections':
      with connection_changed:value=dict(connections)
     elif self.path.startswith('/wait-status?after='):

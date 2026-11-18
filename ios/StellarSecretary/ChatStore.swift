@@ -22,6 +22,11 @@ struct PendingChatMessage: Codable, Identifiable {
     var id=UUID().uuidString
     var serverID:String;var fingerprint:String;var chatID:String;var text:String
     var lastError=""
+    var attachment: ChatAttachment? = nil
+}
+struct ChatAttachment: Codable, Equatable {
+    let name: String
+    let data: Data
 }
 struct ChatCache: Codable {
     var serverID:String;var fingerprint:String

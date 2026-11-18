@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 
 from .shared_chat import ChatBusy
-from . import mobile_privacy
+from . import company_ai, mobile_privacy
 
 SERVICE_TYPE='_stellar-sec._tcp.local.'
 MAX_BODY=16*1024*1024
@@ -293,6 +293,37 @@ class Mobile:
             for batch in item.get('additions',[]):
                 result['links'] += [{'title':link.get('title') or link['url'],'url':link['url']} for link in batch.get('links',[])]
         return result
+
+    def capture_receipt(self,item):
+        progress=self.service.summary_jobs.snapshot(item['id'])
+        state=item['state']
+        message=''
+        if (progress and progress['active']) or state=='processing':
+            stage='processing'
+        elif state=='error':
+            from .task_status import explain
+            stage='error';message=explain(item['error'])['message']
+            if '隐私与 AI' in item['error'] or '当前模型未启用图片输入' in item['error']:message=item['error']
+        elif item['summary']:
+            stage='ready'
+        else:
+            stage='archived'
+            if state=='needs_content':
+                if item['filename']:message='原件已保存，可以直接打开。暂未提取到文字。'
+                elif item['url']:message='链接已保存。可在电脑上读取网页正文。'
+            if not message and (item['error']==company_ai.PENDING or item['error'].startswith('已停止整理')):
+                message=item['error']
+        return {'id':item['id'],'title':item['title'],'stage':stage,'message':message}
+
+    def recent_captures(self,device):
+        with self.lock:
+            ids=list(dict.fromkeys(entry['id'] for key,entry in reversed(self.state['receipts'].items()) if key.startswith(device+':')))
+        records=[]
+        for item_id in ids:
+            try:records.append(self.capture_receipt(self.service.archive.get(item_id)))
+            except KeyError:continue
+            if len(records)==8:break
+        return records
     def edit_metadata(self,item_id,body):
         title=body.get('title');tags=body.get('tags')
         if not isinstance(title,str) or not title.strip() or len(title.strip())>300:raise ValueError('标题需为 1–300 个字符')
@@ -353,7 +384,8 @@ class Mobile:
             from .extension_chat import append_receipt
             text=('手机资料已归档。' if result['created'] else '这份手机资料已存在，可直接查看。')
             result=append_receipt(self.service,result,target,digest(receipt),text,namespace='mobile')
-            return {'item':self.public_item(self.service.archive.get(result['item']['id'])),'duplicate':not result['created'],
+            item=self.service.archive.get(result['item']['id'])
+            return {'item':self.public_item(item),'capture':self.capture_receipt(item),'duplicate':not result['created'],
                     'chat_synced':result.get('chat_synced',False),**({'chat_sync_error':result['chat_sync_error']} if result.get('chat_sync_error') else {})}
     def sync_receipt(self,item_id):
         """Repair a legacy mobile capture receipt when its original is reprocessed."""
@@ -393,8 +425,8 @@ class Mobile:
                     # Native clients only. Browser origins (including null) have no LAN API access.
                     if self.headers.get('Origin') is not None:return self.send(403,{'error':'请使用已配对的手机 App'})
                     parsed=urlsplit(self.path);body={}
-                    if post and re.fullmatch(r'/privacy-v1/(?:ingest|chats/[^/]{1,100}/messages|items/[a-f0-9]{32}/attachments)',parsed.path):
-                        parsed=parsed._replace(path=parsed.path.removeprefix('/privacy-v1'))
+                    if post and re.fullmatch(r'/privacy-v1/(?:ingest|chats/[^/]{1,100}/messages|items/[a-f0-9]{32}/attachments)|/privacy-v2/chats/[^/]{1,100}/messages',parsed.path):
+                        parsed=parsed._replace(path='/' + parsed.path.split('/',2)[2])
                     if post:
                         length=int(self.headers.get('Content-Length','0'))
                         if not 0<length<=MAX_BODY:return self.send(413,{'error':'单次发送不能超过 16 MB'})
@@ -410,7 +442,8 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True})
+                    if not post and parsed.path=='/captures':return self.send(200,{'captures':manager.recent_captures(device)})
                     if parsed.path=='/model-privacy':
                         return self.send(200,manager.set_model_privacy(device,body) if post else manager.model_privacy(device))
                     if not post and parsed.path=='/chats':return self.send(200,manager.chats.listing(parse_qs(parsed.query).get('revision',[''])[0]))

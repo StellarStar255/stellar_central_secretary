@@ -88,6 +88,7 @@ struct ConnectionBanner: View {
 }
 struct CaptureView: View {
     @EnvironmentObject var model: Companion
+    @Environment(\.scenePhase) private var scene
     private var text: String {model.captureEditor.text}
     @State private var photo: PhotosPickerItem?
     private var image: Data? {model.captureEditor.data}
@@ -109,11 +110,36 @@ struct CaptureView: View {
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
-                        ForEach(model.currentDrafts) { draft in VStack(alignment:.leading) { Text(draft.filename ?? draft.text).lineLimit(2) }.swipeActions { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
+                        ForEach(model.currentDrafts) { draft in
+                            VStack(alignment:.leading) {
+                                Text(draft.filename ?? draft.text).lineLimit(2)
+                                Text(model.sendingDraftID == draft.id ? "正在上传" : "待发送").font(.caption).foregroundStyle(.secondary)
+                            }.accessibilityIdentifier("capture-outbox-"+draft.id)
+                            .swipeActions { if model.sendingDraftID != draft.id { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
+                        }
                         Button("重新发送") { Task { await model.connect() } }
                     }
                 }
+                if !model.captureReceipts.isEmpty {
+                    Section {
+                        ForEach(model.captureReceipts) { receipt in
+                            NavigationLink { DetailView(record:receipt.record,workspace:model.workspaceID) } label: {
+                                CaptureReceiptRow(receipt:receipt)
+                            }.accessibilityIdentifier("capture-receipt-"+receipt.id)
+                        }
+                    } header: { Text("最近手机归档") } footer: {
+                        if !model.online { Text("离线 · 显示上次确认的状态") }
+                    }
+                }
             }.navigationTitle("随手归档").scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            .task(id:"\(model.workspaceID)-\(model.selectedTab)-\(model.online)-\(model.captureStatusAvailable)-\(scene)") {
+                guard model.selectedTab == "archive", model.online, model.captureStatusAvailable, scene == .active else {return}
+                while !Task.isCancelled {
+                    await model.refreshCaptureReceipts()
+                    let processing = model.captureReceipts.contains {$0.stage == "processing"}
+                    try? await Task.sleep(for:.seconds(processing ? 3 : 10))
+                }
+            }
             .onChange(of:photo) { _,value in Task {
                 guard let value else { return }
                 let id=model.workspaceID
@@ -129,6 +155,22 @@ struct CaptureView: View {
         }
     }
 }
+
+private struct CaptureReceiptRow: View {
+    let receipt: CaptureReceipt
+    var body: some View {
+        VStack(alignment:.leading,spacing:4) {
+            Text(receipt.record.title).lineLimit(2)
+            switch receipt.stage {
+            case "processing": Label("正在整理", systemImage:"clock")
+            case "ready": Label("摘要已完成", systemImage:"checkmark.circle")
+            case "error": Label("整理未完成", systemImage:"exclamationmark.circle").foregroundStyle(.orange)
+            default: Label("已归档", systemImage:"tray.and.arrow.down")
+            }
+            if !receipt.message.isEmpty {Text(receipt.message).fixedSize(horizontal:false,vertical:true)}
+        }.font(.subheadline)
+    }
+}
 struct ChatView: View {
     @EnvironmentObject var model:Companion
     private var input:String {model.chatInput}
@@ -137,7 +179,13 @@ struct ChatView: View {
     @State private var confirmingRemoval=false
     @State private var composing=false
     @State private var dismissKeyboard=0
+    @State private var composerRevision=0
     @State private var sending=false
+    @State private var pickingPhoto=false
+    @State private var pickingFile=false
+    @State private var loadingAttachment=false
+    @State private var pickedPhoto:PhotosPickerItem?
+    @State private var attachmentError=""
     private var messages:[ChatMessage] {model.chatSnapshot?.messages ?? []}
     private var queued:[PendingChatMessage] {
         let known=Set(messages.map(\.clientID))
@@ -165,7 +213,7 @@ struct ChatView: View {
                         LazyVStack(alignment:.leading,spacing:16) {
                             if model.chatSnapshot?.hasMore==true {Button("加载更早的消息") {Task {await model.syncSelectedChat(older:true)}}.disabled(!model.online)}
                             if messages.isEmpty && queued.isEmpty {
-                                Text(model.selectedChatID.isEmpty ? "选择电脑上的会话，或新建对话":"继续这段对话，电脑会结合相同的上下文处理").foregroundStyle(.secondary).padding(.vertical,24)
+                                Text(model.selectedChatID.isEmpty ? "发一条消息开始聊天":"继续这段对话，电脑会结合相同的上下文处理").foregroundStyle(.secondary).padding(.vertical,24)
                             }
                             ForEach(messages) {message in
                                 HStack(alignment:.top) {
@@ -186,7 +234,8 @@ struct ChatView: View {
                             }
                             ForEach(queued) {pending in
                                 VStack(alignment:.leading,spacing:8) {
-                                    Text(pending.text).textSelection(.enabled)
+                                    if !pending.text.isEmpty {Text(pending.text).textSelection(.enabled)}
+                                    if let file=pending.attachment {Label(file.name,systemImage:"paperclip")}
                                     Text(pending.lastError.isEmpty ? "待发送 · 连接后由电脑处理":pending.lastError).font(.footnote).foregroundStyle(.secondary)
                                     HStack {
                                         if !pending.lastError.isEmpty {Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)}
@@ -201,32 +250,83 @@ struct ChatView: View {
                     .onChange(of:model.chatSnapshot?.running) {old,new in if old==true && new==false {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                     .onChange(of:queued.count) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                 }
-                HStack(alignment:.bottom) {
-                    ChatComposer(text:$model.chatInput,composing:$composing,
-                                 enabled:!model.selectedChatID.isEmpty,dismissKeyboard:dismissKeyboard)
-                        .id(model.selectedChatID)
+                VStack(alignment:.leading,spacing:8) {
+                    if let file=model.chatAttachment {
+                        HStack {
+                            Label(file.name,systemImage:"paperclip").lineLimit(1)
+                            Spacer()
+                            Button {model.chatAttachment=nil} label:{Image(systemName:"xmark.circle.fill")}
+                                .accessibilityLabel("移除聊天附件").disabled(sending)
+                        }.font(.subheadline)
+                    }
+                    if loadingAttachment {ProgressView("正在读取附件…").font(.caption)}
+                    if !attachmentError.isEmpty {Text(attachmentError).font(.footnote).foregroundStyle(.orange)}
+                    HStack(alignment:.bottom) {
+                    Menu {
+                        Button("截图或照片",systemImage:"photo") {pickingPhoto=true}
+                        Button("文件",systemImage:"doc") {pickingFile=true}
+                    } label: {
+                        Image(systemName:"plus.circle").font(.title2).frame(width:44,height:48)
+                    }.tint(.accentColor)
+                    .accessibilityLabel("添加聊天附件")
+                    .accessibilityIdentifier("chat-add-attachment")
+                    .disabled(sending || loadingAttachment)
+                    ChatComposer(text:$model.chatInput,composing:$composing,dismissKeyboard:dismissKeyboard)
+                        .id(composerRevision)
                         .overlay(alignment:.topLeading) {
                             if input.isEmpty && !composing {
-                                Text("发消息，继续这段对话…").foregroundStyle(.secondary).padding(8)
+                                Text(model.selectedChatID.isEmpty ? "输入消息开始聊天…" : "发消息，继续这段对话…")
+                                    .foregroundStyle(.secondary).padding(.horizontal,12).padding(.vertical,10)
                                     .allowsHitTesting(false).accessibilityHidden(true)
                             }
                         }
                     Button("发送") {
                         guard !composing else {return}
-                        let value=input,id=model.workspaceID,chat=model.selectedChatID
+                        let value=input,id=model.workspaceID,chat=model.selectedChatID,file=model.chatAttachment
                         dismissKeyboard+=1;sending=true
                         Task {
                             defer {sending=false}
-                            if await model.enqueueChat(value,workspace:id,chatID:chat),
-                               model.workspaceID==id,model.selectedChatID==chat,input==value,!composing {model.chatInput=""}
+                            if await model.enqueueChat(value,workspace:id,chatID:chat,attachment:file),
+                               model.workspaceID==id,(chat.isEmpty || model.selectedChatID==chat) {
+                                if input==value,!composing {model.chatInput=""}
+                                if model.chatAttachment==file {model.chatAttachment=nil}
+                            }
                         }
-                    }.buttonStyle(.borderedProminent).accessibilityIdentifier("chat-send").disabled(model.selectedChatID.isEmpty || composing || sending || input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || model.chatSubmitting)
+                    }.buttonStyle(.borderedProminent).controlSize(.large).accessibilityIdentifier("chat-send")
+                        .disabled(composing || sending || loadingAttachment || (input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.chatAttachment==nil) || model.chatSubmitting)
+                    }
                 }.padding()
             }.navigationTitle(model.chatSnapshot?.title ?? "聊天").navigationBarTitleDisplayMode(.inline)
-            .onChange(of:model.selectedChatID) {composing=false}
+            .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhoto,matching:.images)
+            .onChange(of:pickedPhoto) {_,photo in
+                guard let photo else {return}
+                let workspace=model.workspaceID,chat=model.selectedChatID
+                loadingAttachment=true;attachmentError=""
+                Task {
+                    defer {loadingAttachment=false;pickedPhoto=nil}
+                    let data = try? await photo.loadTransferable(type:Data.self)
+                    guard workspace==model.workspaceID,chat.isEmpty || chat==model.selectedChatID else {return}
+                    guard let data else {attachmentError="无法读取照片。";return}
+                    let ext=photo.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                    setAttachment(name:"Photo."+ext,data:data)
+                }
+            }
+            .fileImporter(isPresented:$pickingFile,allowedContentTypes:[.item]) { result in
+                do {
+                    let url=try result.get(),access=url.startAccessingSecurityScopedResource()
+                    defer {if access {url.stopAccessingSecurityScopedResource()}}
+                    guard let size=try url.resourceValues(forKeys:[.fileSizeKey]).fileSize,(1...10*1024*1024).contains(size) else {
+                        attachmentError="聊天附件须为非空文件，最多 10 MB。";return
+                    }
+                    setAttachment(name:url.lastPathComponent,data:try Data(contentsOf:url))
+                } catch {attachmentError="无法读取文件。"}
+            }
+            .onChange(of:model.selectedChatID) {old,_ in
+                if !old.isEmpty {composing=false;composerRevision+=1}
+            }
             .toolbar {
-                ToolbarItem(placement:.topBarLeading) {Button("会话") {choosing=true}}
-                ToolbarItem(placement:.topBarTrailing) {Button {Task {await model.createChat()}} label:{Image(systemName:"square.and.pencil")}.accessibilityLabel("新建聊天").disabled(!model.online || model.chatSubmitting)}
+                ToolbarItem(placement:.topBarLeading) {Button("会话") {choosing=true}.disabled(sending)}
+                ToolbarItem(placement:.topBarTrailing) {Button {Task {await model.createChat()}} label:{Image(systemName:"square.and.pencil")}.accessibilityLabel("新建聊天").disabled(!model.online || model.chatSubmitting || sending)}
             }
             .sheet(isPresented:$choosing) {
                 NavigationStack {
@@ -249,12 +349,15 @@ struct ChatView: View {
             }
         }
     }
+    private func setAttachment(name:String,data:Data) {
+        guard (1...10*1024*1024).contains(data.count) else {attachmentError="聊天附件须为非空文件，最多 10 MB。";return}
+        attachmentError="";model.chatAttachment=ChatAttachment(name:name,data:data)
+    }
 }
 
 private struct ChatComposer: UIViewRepresentable {
     @Binding var text: String
     @Binding var composing: Bool
-    let enabled: Bool
     let dismissKeyboard: Int
     private let placeholder = "发消息，继续这段对话…"
 
@@ -300,9 +403,9 @@ private struct ChatComposer: UIViewRepresentable {
         let editor = Editor()
         editor.font = .preferredFont(forTextStyle:.body)
         editor.adjustsFontForContentSizeCategory = true
-        editor.textContainerInset = UIEdgeInsets(top:8,left:8,bottom:8,right:8)
+        editor.textContainerInset = UIEdgeInsets(top:10,left:12,bottom:10,right:12)
         editor.textContainer.lineFragmentPadding = 0
-        editor.backgroundColor = .clear
+        editor.backgroundColor = .secondarySystemBackground
         editor.layer.borderWidth = 1
         editor.layer.cornerRadius = 8
         editor.accessibilityIdentifier = "chat-input"
@@ -317,7 +420,6 @@ private struct ChatComposer: UIViewRepresentable {
     func updateUIView(_ editor: Editor, context: Context) {
         let shouldDismiss = context.coordinator.parent.dismissKeyboard != dismissKeyboard
         context.coordinator.parent = self
-        editor.isEditable = enabled
         editor.layer.borderColor = UIColor.separator.resolvedColor(with:editor.traitCollection).cgColor
         guard !editor.isComposing else {return}
         if editor.text != text {editor.text = text}
@@ -329,7 +431,7 @@ private struct ChatComposer: UIViewRepresentable {
         let lineHeight=editor.font?.lineHeight ?? 22
         let inset=editor.textContainerInset.top+editor.textContainerInset.bottom
         let full=editor.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height
-        return CGSize(width:width,height:ceil(min(max(full,lineHeight+inset),lineHeight*5+inset)))
+        return CGSize(width:width,height:ceil(min(max(full,lineHeight*2+inset),lineHeight*5+inset)))
     }
 }
 struct LibraryView: View {
@@ -711,7 +813,7 @@ struct PrivacyView: View {
                     } header: {
                         Text("AI 问答 · \(pair.displayName)")
                     } footer: {
-                        Text("授权后，电脑可能向所示服务发送问题、相关聊天记录、知识库摘录或图片，包括手机待发送的问答。授权只适用于这台电脑和当前模型服务。撤回后，尚未发出的模型请求将被拦截，已发出的内容无法收回。")
+                        Text("授权后，电脑可能向所示服务发送问题、聊天附件、相关聊天记录、知识库摘录或图片，包括手机待发送的问答。授权只适用于这台电脑和当前模型服务。撤回后，尚未发出的模型请求将被拦截，已发出的内容无法收回。")
                     }
                     if let permission, let approved = permission.summaryApproved, !permission.fingerprint.isEmpty {
                         Section("手机归档自动摘要") {

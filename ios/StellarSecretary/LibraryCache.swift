@@ -1,6 +1,6 @@
 import Foundation
 
-struct Record: Codable, Identifiable {
+struct Record: Codable, Identifiable, Equatable {
     var id: String
     var title: String
     var summary: String
@@ -8,6 +8,20 @@ struct Record: Codable, Identifiable {
         id = value["id"] as? String ?? value["item_id"] as? String ?? ""
         title = value["title"] as? String ?? "资料"
         summary = value["summary"] as? String ?? ""
+    }
+}
+
+struct CaptureReceipt: Codable, Identifiable, Equatable {
+    let record: Record
+    let stage: String
+    let message: String
+    var id: String { record.id }
+
+    init(_ value: [String: Any]) {
+        record = Record(value)
+        if let stage = value["stage"] as? String { self.stage = stage }
+        else { stage = record.summary.isEmpty ? "archived" : "ready" }
+        message = value["message"] as? String ?? ""
     }
 }
 

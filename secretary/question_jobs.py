@@ -89,8 +89,14 @@ class QuestionJobs:
         from .conversation_context import turns
         history(body.get('history'));turns(body.get('context'))
         payload={key:body.get(key) for key in ('question','history','context','force_refresh')}
-        fingerprint=hashlib.sha256(json.dumps([chat_id,message_id,question_id,payload],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         with self.lock:
+            with self.service.lock:
+                chat=next((entry for entry in self.read()['conversations'] if entry['id']==chat_id),{})
+                user=next((entry for entry in chat.get('messages',[]) if entry['id']==question_id and entry['role']=='user'),{})
+                material=user.get('mobileMaterial')
+                if isinstance(material,str) and isinstance(user.get('items'),list) and material in user['items']:
+                    payload['material_id']=material
+            fingerprint=hashlib.sha256(json.dumps([chat_id,message_id,question_id,payload],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
             if self.closed:raise ValueError('程序正在退出，请稍后重试')
             if key in self.jobs:
                 if self.jobs[key]['fingerprint']!=fingerprint:raise ValueError('问答标识已用于其他问题')
@@ -140,6 +146,9 @@ class QuestionJobs:
         service=self.service;event=service.question_progress.event(key)
         for attempt in range(2):
             try:
+                if payload.get('material_id'):
+                    service.question_progress.update(key,'answering')
+                    return service.ask_material(payload['question'],[payload['material_id']],cancel=event)
                 return service.ask_library(payload['question'],payload.get('history'),
                     lambda stage,count:service.question_progress.partial(key,count) if stage=='partial' else service.question_progress.update(key,stage,count),
                     context=payload.get('context'),force_refresh=payload.get('force_refresh') is True,cancel=event)

@@ -143,6 +143,34 @@ class MobileTest(unittest.TestCase):
    status,result=self.request('/ingest',{'request_id':'local-only','content':{'filename':'photo.png','data':base64.b64encode(stream.getvalue()).decode()}},self.credential)
    self.assertEqual(status,200);self.assertTrue(result['chat_synced']);model.assert_not_called()
    self.assertEqual(self.s.archive.get(result['item']['id'])['text'],'Local only')
+
+ def test_recent_capture_receipts_are_device_scoped_and_show_live_summary_state(self):
+  import io
+  from PIL import Image
+  self.approve()
+  image=io.BytesIO();Image.new('RGB',(16,16),'white').save(image,'JPEG')
+  body={'request_id':'status-image','content':{'filename':'Capture.jpeg','data':base64.b64encode(image.getvalue()).decode()}}
+  with patch('secretary.local_ocr.recognize',return_value=''):
+   code,response=self.request('/ingest',body,self.credential)
+  self.assertEqual(code,200)
+  receipt=response['capture'];ident=receipt['id']
+  self.assertEqual(receipt['stage'],'archived')
+  self.assertIn('原件已保存',receipt['message'])
+  self.assertEqual(self.request('/captures')[0],401)
+  self.assertEqual(self.request('/captures',credential=self.credential)[1]['captures'],[receipt])
+  self.s.summary_jobs.enqueue(ident)
+  self.assertEqual(self.request('/captures',credential=self.credential)[1]['captures'][0]['stage'],'processing')
+  self.s.summary_jobs.finish(ident,'error')
+  self.s.archive.update(ident,state='error',error='Model timed out')
+  failed=self.request('/captures',credential=self.credential)[1]['captures'][0]
+  self.assertEqual(failed['stage'],'error');self.assertIn('超时',failed['message'])
+  self.s.archive.update(ident,state='ready',summary='Complete fixture summary',error='')
+  self.assertEqual(self.request('/captures',credential=self.credential)[1]['captures'][0]['stage'],'ready')
+  first=self.credential
+  self.credential=secrets.token_urlsafe(48);self.approve()
+  self.assertEqual(self.request('/captures',credential=self.credential)[1]['captures'],[])
+  self.s.trash_item(ident)
+  self.assertEqual(self.request('/captures',credential=first)[1]['captures'],[])
  def test_phone_auto_summary_requires_independent_grant_and_runs_once(self):
   import io,time
   from PIL import Image
@@ -339,6 +367,63 @@ class MobileTest(unittest.TestCase):
   self.assertNotIn('token',json.dumps(data));self.assertNotIn('fingerprint',json.dumps(data))
   ident=self.m.device(self.credential);self.m.revoke(ident)
   self.assertEqual(self.request('/chats/'+created,credential=self.credential)[0],401)
+
+ def test_first_mobile_message_resolves_current_chat_or_creates_once(self):
+  self.approve()
+  first={'request_id':'first-from-composer','reuse_active':True}
+  code,value=self.request('/chats',first,self.credential)
+  self.assertEqual(code,200);initial=value['chat_id']
+  self.assertEqual(self.request('/chats',first,self.credential)[1]['chat_id'],initial)
+  self.assertEqual(len(self.s.chat_history()['conversations']),1)
+  manual=self.request('/chats',{'request_id':'manual-new-chat'},self.credential)[1]['chat_id']
+  self.assertNotEqual(initial,manual)
+  self.assertEqual(self.request('/chats',{'request_id':'continue-current','reuse_active':True},self.credential)[1]['chat_id'],manual)
+  self.assertEqual(len(self.s.chat_history()['conversations']),2)
+
+ def test_chat_attachment_is_archived_and_passed_with_question_once(self):
+  import time
+  self.approve()
+  chat=self.request('/chats',{'request_id':'attachment-chat'},self.credential)[1]['chat_id']
+  path='/privacy-v2/chats/'+chat+'/messages'
+  body={'request_id':'attachment-question','text':'What is in the file?','attachment':{'name':'fixture.txt','data':base64.b64encode(b'Phone chat attachment contents').decode()}}
+  self.assertEqual(self.request(path,body,self.credential)[0],403)
+  self.assertEqual(len(self.s.archive.list()),0)
+  self.approve_model()
+  fields={'title':'Fixture material','summary':'Test material summary','state':'ready','error':''}
+  with patch('secretary.ai.analyze_material',return_value=(fields,'Fixture answer [1]')) as model:
+   self.assertEqual(self.request(path,body,self.credential)[0],200)
+   deadline=time.monotonic()+5
+   while self.s.question_jobs.active_count() and time.monotonic()<deadline:time.sleep(.01)
+   self.assertTrue(self.request(path,body,self.credential)[1]['accepted'])
+   model.assert_called_once()
+   self.assertEqual(model.call_args.kwargs['question'],body['text'])
+   self.assertIn('Phone chat attachment contents',model.call_args.args[0])
+  messages=self.request('/chats/'+chat,credential=self.credential)[1]['messages']
+  self.assertEqual(messages[0]['files'],['fixture.txt'])
+  self.assertEqual(messages[-1]['text'],'Fixture answer [1]')
+  self.assertEqual(len(self.s.archive.list()),1)
+  item=messages[0]['sources'][0]['item_id']
+  attachment=self.request('/items/'+item,credential=self.credential)[1]['item']['attachments'][0]
+  self.assertEqual(attachment['name'],'fixture.txt')
+
+ def test_chat_attachment_without_text_requests_summary(self):
+  import time
+  self.approve()
+  self.approve_model()
+  chat=self.request('/chats',{'request_id':'file-only-chat'},self.credential)[1]['chat_id']
+  path='/privacy-v2/chats/'+chat+'/messages'
+  body={'request_id':'file-only-question','text':'','attachment':{'name':'fixture.txt','data':base64.b64encode(b'File without caption').decode()}}
+  fields={'title':'Fixture material','summary':'Test material summary','state':'ready','error':''}
+  with patch('secretary.ai.analyze_material',return_value=(fields,'Fixture answer [1]')) as model:
+   self.assertEqual(self.request(path,body,self.credential)[0],200)
+   deadline=time.monotonic()+5
+   while self.s.question_jobs.active_count() and time.monotonic()<deadline:time.sleep(.01)
+   model.assert_called_once()
+   self.assertEqual(model.call_args.kwargs['question'],'请整理这份附件的主要内容。')
+   self.assertIn('File without caption',model.call_args.args[0])
+  messages=self.request('/chats/'+chat,credential=self.credential)[1]['messages']
+  self.assertEqual(messages[0]['files'],['fixture.txt'])
+  self.assertEqual(messages[-1]['text'],'Fixture answer [1]')
 
  def test_model_change_and_revocation_fence_already_admitted_worker(self):
   import threading

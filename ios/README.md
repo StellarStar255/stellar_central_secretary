@@ -26,7 +26,7 @@ The desktop computer stores the library. Phone uploads and appended files are sa
 
 To send questions from the phone, first approve the displayed model service under **连接 → 隐私与 AI**. The desktop may send your question, relevant conversation history, and relevant excerpts or images to that service. The provider’s data handling terms apply. Approval is scoped to the phone, computer and model destination. You can withdraw approval in the same screen. Withdrawal blocks later calls and does not recall data already sent. Update the desktop companion before using mobile writes so these rules can be enforced.
 
-The sample demo works locally with synthetic records and discards its changes when closed.
+The **Archive** tab shows the outbox and up to eight recent upload receipts for the paired phone. It shows when originals are saved, a summary is running or complete, and any processing failure. The phone keeps the last checked receipt titles and statuses locally for offline display. The sample demo works locally with synthetic records and discards its changes when closed.
 
 Before publication, confirm the publisher and privacy contact, publish the policy at a public URL and link to it in the app and App Store Connect.
 
@@ -66,7 +66,7 @@ The phone keeps the last successful list results (titles and summaries) for up t
 
 ## Shared desktop chat
 
-The **聊天** tab opens the desktop's existing conversations. Choose a thread from **会话**, continue it on either device, or create a new one. **问知识库** in Search opens this same shared chat. Retrieval, model requests, retained context and final transcript storage stay on the Mac. Source citations open the existing record details. The phone displays partial answers and can stop an active answer; closing the phone app leaves accepted questions running on the Mac.
+The **聊天** tab opens the desktop's existing conversations. Choose a thread from **会话**, continue it on either device, or create a new one. Use **+** in the composer to attach one screenshot, photo, or file up to 10 MB. The desktop saves the original and answers about the attachment and accompanying message using the chat model authorization. **问知识库** in Search opens the same shared chat. Retrieval, model requests, retained context and final transcript storage stay on the Mac. Source citations open the existing record details. The phone displays partial text answers and can stop an active answer; closing the phone app leaves accepted questions running on the Mac.
 
 Cached transcripts appear immediately, including offline. The phone protects and excludes from backup the latest 100 messages in up to five cached threads, scoped to the paired Mac and certificate. Older messages load on demand. Offline messages for an existing thread are durably queued and retried on reconnect with a stable request ID, so a lost acknowledgement does not run the question twice. New conversations require a connection. Keep the Mac awake and its service running; this does not provide internet remote access.
 

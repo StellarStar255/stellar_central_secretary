@@ -1,6 +1,6 @@
 """Paired mobile access to the existing desktop conversation and question store."""
-import copy,hashlib,json,re,time,uuid
-from . import knowledge_chat
+import base64,binascii,copy,hashlib,json,re,time,uuid
+from . import bundles, knowledge_chat
 
 class ChatBusy(ValueError):pass
 
@@ -51,6 +51,10 @@ class SharedChat:
         service=self.service
         with service.lock:
             saved=service.question_jobs.read();data=copy.deepcopy(saved)
+            if body.get('reuse_active') is True and data['conversations']:
+                active=data.get('activeId')
+                chat=next((chat for chat in data['conversations'] if chat['id']==active),data['conversations'][0])
+                return {'chat_id':chat['id']}
             if not any(c['id']==key for c in data['conversations']):
                 data['conversations'].insert(0,{'id':key,'title':'新对话','messages':[],'updated':int(time.time()*1000),'dialogueActive':True,'inputMode':'library'})
                 data['activeId']=key
@@ -86,7 +90,20 @@ class SharedChat:
         return result
     def send(self,device,chat_id,body):
         request=identifier(body.get('request_id'));text=body.get('text')
-        if not isinstance(text,str) or not 1<=len(text.strip())<=4000:raise ValueError('消息需为 1–4000 个字符')
+        attachment=body.get('attachment')
+        if not isinstance(text,str) or len(text.strip())>4000 or not (text.strip() or attachment):raise ValueError('请输入消息或添加附件，文字最多 4000 字。')
+        file=None;file_digest=''
+        if attachment is not None:
+            if not isinstance(attachment,dict):raise ValueError('附件格式无效')
+            name,data=attachment.get('name'),attachment.get('data')
+            if not isinstance(name,str) or not 1<=len(name.strip())<=300 or '/' in name or '\\' in name or not isinstance(data,str) or len(data)>14*1024**2:
+                raise ValueError('聊天附件名称无效或超过 10 MB。')
+            try:raw=base64.b64decode(data,validate=True)
+            except (ValueError,binascii.Error):raise ValueError('附件编码无效') from None
+            if not 1<=len(raw)<=10*1024**2:raise ValueError('聊天附件须为非空文件，最多 10 MB。')
+            file={'name':name,'data':data}
+            file_digest=digest([name,hashlib.sha256(raw).hexdigest()])
+        question=text if text.strip() else '请整理这份附件的主要内容。'
         key=digest(['message',device,request])[:32];question_id='phone-user-'+key;message_id='phone-answer-'+key
         service=self.service;jobs=service.question_jobs
         # Same ordering as QuestionJobs.start: job lock, then store lock.
@@ -97,19 +114,28 @@ class SharedChat:
                 if not chat:raise ValueError('会话不存在或已删除，请刷新会话列表')
                 previous=next((m for c in data['conversations'] for m in c['messages'] if m['id']==question_id),None)
                 if previous:
-                    if previous.get('text')!=text or not any(m['id']==question_id for m in chat['messages']):raise ValueError('消息标识已用于其他内容')
+                    if previous.get('text')!=question or previous.get('mobileAttachmentDigest','')!=file_digest or not any(m['id']==question_id for m in chat['messages']):raise ValueError('消息标识已用于其他内容')
                     return {'accepted':True,'chat_id':chat_id,'message_id':message_id}
                 refs=service.archive.deletion_refs()
                 if [chat_id,question_id] in refs['deletedMessages'] or [chat_id,message_id] in refs['deletedMessages']:raise ValueError('这条消息已被删除，请勿重复发送')
                 if any(m.get('pending') or m.get('requestState')=='running' for m in chat['messages']):raise ChatBusy('这段对话仍在回答，请等待完成后发送')
                 history,retained=context(chat)
-                if not chat['messages'] and not chat.get('titleCustom'):chat['title']=text[:36]
+                material_id=''
+                if file:
+                    title=text.strip().split('\n',1)[0][:100] or file['name']
+                    data_file,source=bundles.create(text,[file])
+                    try:material_id,created=service.archive.add(title,source,filename='materials.stellar.zip',data=data_file)
+                    finally:bundles.cleanup(data_file)
+                    if created:service.archive.update(material_id,state='saved')
+                if not chat['messages'] and not chat.get('titleCustom'):chat['title']=(text.strip() or (file['name'] if file else question))[:36]
                 chat.update(updated=max(int(time.time()*1000),chat.get('updated',0)+1),dialogueActive=True,inputMode='library')
-                chat['messages'] += [{'id':question_id,'role':'user','text':text,'knowledgeQuestion':True,'mobileRequestId':request},
+                user={'id':question_id,'role':'user','text':question,'knowledgeQuestion':True,'mobileRequestId':request}
+                if file:user.update(files=[file['name']],items=[material_id],mobileMaterial=material_id,mobileAttachmentDigest=file_digest)
+                chat['messages'] += [user,
                     {'id':message_id,'role':'assistant','text':'','pending':True,'requestState':'queued','requestId':key,'questionId':question_id}]
                 service.clean_chat_history(data,service.archive.root/'conversations.json',saved)
             try:
-                jobs.start({'progress_id':key,'chat_id':chat_id,'message_id':message_id,'question_id':question_id,'question':text,'history':history,'context':retained})
+                jobs.start({'progress_id':key,'chat_id':chat_id,'message_id':message_id,'question_id':question_id,'question':question,'history':history,'context':retained})
             except Exception as error:
                 jobs.patch(chat_id,message_id,key,{'text':str(error)[:1600],'pending':False,'requestState':'error','error':True,'retryable':True})
         return {'accepted':True,'chat_id':chat_id,'message_id':message_id}

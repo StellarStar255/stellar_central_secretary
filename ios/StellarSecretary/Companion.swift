@@ -109,8 +109,11 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     @Published private var activeWrites = 0
     @Published var captureEditor = CaptureEditor()
     @Published var chatInput = ""
+    @Published var chatAttachment: ChatAttachment?
+    @Published private(set) var chatAttachmentsAvailable = false
     private var captureEditors: [String:CaptureEditor] = [:]
     private var chatInputs: [String:String] = [:]
+    private var chatAttachments: [String:ChatAttachment] = [:]
     private var credentialStoreAvailable = true
     var canChangeComputer: Bool { credentialStoreAvailable && !pairingInFlight && !flushing && !chatSubmitting && activeWrites == 0 }
     var currentDrafts: [Draft] { drafts.filter { $0.serverID == paired?.info.server_id && $0.fingerprint == paired?.info.fingerprint } }
@@ -156,6 +159,12 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     @Published var answer = ""
     @Published var sources: [Record] = []
     @Published var drafts: [Draft] = []
+    @Published private(set) var captureReceipts: [CaptureReceipt] = []
+    @Published private(set) var sendingDraftID: String?
+    @Published private(set) var captureStatusAvailable = false
+    private var reuseActiveChat = false
+    private var captureRevision = 0
+    private var captureWorkspace = ""
     @Published var busy = false
     private let browser = NetServiceBrowser()
     private var services: [NetService] = []
@@ -224,11 +233,16 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         if let pair=paired {
             captureEditors[pair.id]=captureEditor
             chatInputs[pair.id+":"+selectedChatID]=chatInput
+            chatAttachments[pair.id+":"+selectedChatID]=chatAttachment
         }
     }
     private func activateComputer(_ pair:PairedMac?) {
         saveInputs();deviceGeneration=UUID();paired=pair
         privacySupported = false
+        captureStatusAvailable = false
+        reuseActiveChat = false
+        chatAttachmentsAvailable = false;chatAttachment=nil
+        captureWorkspace = "";captureReceipts = [];captureRevision += 1
         rebuildConnectionTransport()
         candidate=nil;waiting=false;code="";mayRetryConnection=false
         libraryCache=nil;records=[];libraryQuery="";libraryUpdatedAt=nil;libraryMessage=""
@@ -316,7 +330,14 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         }
     }
     private func configure(_ pair: PairedMac, pairing: Bool = false, endpoint: String? = nil) {
-        if !pairing {activateLibraryCache(pair);activateChatCache(pair)}
+        if !pairing {
+            activateLibraryCache(pair);activateChatCache(pair)
+            if captureWorkspace != pair.id {
+                captureWorkspace = pair.id
+                let url = captureReceiptURL(pair)
+                captureReceipts = (try? JSONDecoder().decode([CaptureReceipt].self,from:Data(contentsOf:url))) ?? []
+            }
+        }
         session?.invalidateAndCancel();sessionEndpoint = endpoint ?? pair.info.url
         let configuration = URLSessionConfiguration.ephemeral;configuration.timeoutIntervalForRequest = 15;configuration.timeoutIntervalForResource = pairing ? 20 : 900
         configuration.httpMaximumConnectionsPerHost = 2
@@ -345,7 +366,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                 throw NSError(domain:"Companion",code:426,userInfo:[NSLocalizedDescriptionKey:"请先更新电脑端，再从手机归档或发送消息。"])
             }
         }
-        let route = protectedWrite ? "/privacy-v1" + path : path
+        let route = protectedWrite ? (body?["attachment"] != nil ? "/privacy-v2" : "/privacy-v1") + path : path
         guard let pair = pair ?? paired, let url = URL(string:sessionEndpoint + route), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
         guard pair.id == (candidate ?? paired)?.id else {throw CancellationError()}
         let generation=deviceGeneration
@@ -529,6 +550,9 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             try remember(pair);paired = computers.selected
             privacySupported = value["privacy_version"] as? Int == 1
+            captureStatusAvailable = value["capture_receipts"] as? Bool == true
+            reuseActiveChat = value["reuse_active_chat"] as? Bool == true
+            chatAttachmentsAvailable = value["chat_attachments"] as? Bool == true
             online = true;status = "已连接 · \(pair.displayName)";error = "";discover();await flush();await flushChatMessages()
         } catch {
             guard connectionGeneration==generation,!Task.isCancelled else {return}
@@ -553,18 +577,47 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     }
     func removeDraft(_ id: String) { guard currentDrafts.contains(where:{$0.id==id}) else {return};do { try persist(drafts.filter { $0.id != id }) } catch { self.error = "无法移除待发送内容" } }
     func flush() async {
-        guard online, !flushing, let pair = paired else { return };flushing = true;defer { flushing = false }
+        guard online, !flushing, let pair = paired else { return };flushing = true;defer { flushing = false;sendingDraftID=nil }
         for draft in drafts where draft.serverID == pair.info.server_id && draft.fingerprint == pair.info.fingerprint {
+            sendingDraftID=draft.id
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
             else if let url = URL(string:draft.text.trimmingCharacters(in:.whitespacesAndNewlines)), ["https","http"].contains(url.scheme ?? ""), !draft.text.contains("\n") { content["url"] = url.absoluteString;content["text"] = "" }
             do {
-                _ = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair)
+                let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair)
+                if let value = (response["capture"] ?? response["item"]) as? [String:Any] {
+                    let receipt = CaptureReceipt(value)
+                    if !receipt.id.isEmpty {
+                        captureRevision += 1
+                        saveCaptureReceipts([receipt] + captureReceipts.filter {$0.id != receipt.id}, pair:pair)
+                    }
+                }
                 try persist(drafts.filter { $0.id != draft.id })
                 libraryCache?.invalidate()
                 if let cache=libraryCache {try? cache.save(to:libraryCacheURL)}
             }
             catch { self.error = "待发送内容已保留：" + error.localizedDescription;return }
+        }
+    }
+    private func captureReceiptURL(_ pair: PairedMac) -> URL {
+        cacheURL("capture-receipts",serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
+    }
+    private func saveCaptureReceipts(_ receipts: [CaptureReceipt], pair: PairedMac) {
+        let next = Array(receipts.prefix(8))
+        guard captureReceipts != next else {return}
+        captureReceipts = next
+        if let data = try? JSONEncoder().encode(next) {try? ChatCache.protectedWrite(data,to:captureReceiptURL(pair))}
+    }
+    func refreshCaptureReceipts() async {
+        guard online,captureStatusAvailable,let pair=paired else {return}
+        let revision=captureRevision
+        do {
+            let value=try await request("/captures",using:pair,timeout:8)
+            guard !Task.isCancelled, revision==captureRevision, captureWorkspace==pair.id,
+                  let rows=value["captures"] as? [[String:Any]] else {return}
+            saveCaptureReceipts(rows.map(CaptureReceipt.init).filter {!$0.id.isEmpty},pair:pair)
+        } catch {
+            // Keep the last verified statuses during temporary connection failures.
         }
     }
     private func activateLibraryCache(_ pair: PairedMac) {
@@ -619,9 +672,9 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard online else {error="请先连接电脑";return}
         guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {return}
         let generation=deviceGeneration
-        if selectedChatID.isEmpty {await syncChatList()}
-        guard generation==deviceGeneration else {return}
-        if selectedChatID.isEmpty {await createChat()}
+        // Search can invoke chat before its tab has refreshed the cached
+        // selection. Resolve a conversation removed on the computer first.
+        await syncChatList()
         guard generation==deviceGeneration else {return}
         if await enqueueChat(text),generation==deviceGeneration { selectedTab="chat" }
     }
@@ -634,12 +687,30 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         chatCache=ChatCache.load(cacheURL("chat",serverID:pair.info.server_id,fingerprint:pair.info.fingerprint),serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
         chatThreads=chatCache?.threads ?? [];selectedChatID=chatCache?.selectedID ?? "";chatSnapshot=chatCache?.snapshots[selectedChatID]
         chatInput=chatInputs[pair.id+":"+selectedChatID] ?? ""
+        chatAttachment=chatAttachments[pair.id+":"+selectedChatID]
         chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice=""
     }
     private func saveChatCache() {if var cache=chatCache {cache.selectedID=selectedChatID;try? cache.save(chatCacheURL);chatCache=cache}}
     private func chatPath(_ id:String) -> String {"/chats/"+(id.addingPercentEncoding(withAllowedCharacters:.alphanumerics) ?? "")}
     func selectChat(_ id:String) {
-        if let pair=paired {chatInputs[pair.id+":"+selectedChatID]=chatInput;chatInput=chatInputs[pair.id+":"+id] ?? ""}
+        if let pair=paired {
+            let oldKey=pair.id+":"+selectedChatID
+            let key=pair.id+":"+id
+            let previous=chatInput
+            let previousAttachment=chatAttachment
+            chatInputs[oldKey]=previous
+            chatAttachments[oldKey]=previousAttachment
+            chatInput=chatInputs[key] ?? ""
+            chatAttachment=chatAttachments[key]
+            if selectedChatID.isEmpty, !id.isEmpty, chatInput.isEmpty {
+                chatInput=previous
+                chatInputs.removeValue(forKey:oldKey)
+            }
+            if selectedChatID.isEmpty, !id.isEmpty, chatAttachment==nil {
+                chatAttachment=previousAttachment
+                chatAttachments.removeValue(forKey:oldKey)
+            }
+        }
         selectedChatID=id;chatSnapshot=chatCache?.snapshots[id];chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice="";saveChatCache()
     }
     func syncChatList() async {
@@ -708,21 +779,50 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private func persistChatQueue(_ messages:[PendingChatMessage]) throws {
         try ChatCache.protectedWrite(JSONEncoder().encode(messages),to:chatQueueURL);pendingChatMessages=messages
     }
-    func enqueueChat(_ text:String, workspace:String?=nil, chatID:String?=nil) async -> Bool {
+    func enqueueChat(_ text:String, workspace:String?=nil, chatID:String?=nil, attachment:ChatAttachment?=nil) async -> Bool {
         guard workspace==nil || workspace==workspaceID, chatID==nil || chatID==selectedChatID else {return false}
-        guard let pair=paired,!selectedChatID.isEmpty else {chatNotice="请先选择或新建对话";return false}
-        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
+        guard let pair=paired else {chatNotice="请先连接电脑";return false}
+        guard (!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || attachment != nil),text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
+        if let attachment {
+            let queued=pendingChatMessages.reduce(0) {$0+($1.attachment?.data.count ?? 0)}
+            guard chatAttachmentsAvailable || !online else {chatNotice="请更新电脑端后再发送聊天附件。";return false}
+            guard (1...10*1024*1024).contains(attachment.data.count),queued+attachment.data.count<=30*1024*1024 else {
+                chatNotice="聊天附件最多 10 MB，待发送附件合计最多 30 MB。";return false
+            }
+        }
+        let generation=deviceGeneration
+        let selected=selectedChatID
         if online {
-            let generation = deviceGeneration
-            let selected = selectedChatID
             guard privacySupported else { chatNotice = "请更新电脑端后再发送消息。"; return false }
             do {
                 let permission = try await modelPrivacy()
-                guard generation == deviceGeneration, selected == selectedChatID else { return false }
+                guard generation==deviceGeneration, selected.isEmpty || selected==selectedChatID else {return false}
                 guard permission.approved else { showPrivacy = true; return false }
             } catch { chatNotice = error.localizedDescription; return false }
         }
-        do {try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:selectedChatID,text:text)]);chatNotice="";await flushChatMessages();return true}
+        var destination=selectedChatID
+        if destination.isEmpty {
+            guard online else {chatNotice="连接电脑后才能发送首条消息，输入已保留。";return false}
+            do {
+                // Refresh first for older desktops. The current server also
+                // resolves reuse-or-create atomically with desktop chat writes.
+                if !reuseActiveChat {await syncChatList()}
+                guard generation==deviceGeneration else {return false}
+                destination=selectedChatID
+                if destination.isEmpty {
+                    guard reuseActiveChat else {chatNotice="请更新电脑端后从输入框发起新对话。";return false}
+                    let value=try await request("/chats",body:["request_id":UUID().uuidString,"reuse_active":true],using:pair)
+                    guard let id=value["chat_id"] as? String,!id.isEmpty else {throw URLError(.cannotParseResponse)}
+                    destination=id
+                }
+            } catch {chatNotice=error.localizedDescription;return false}
+        }
+        guard generation==deviceGeneration,pendingChatMessages.count<50 else {return false}
+        do {
+            try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:destination,text:text,attachment:attachment)])
+            if selectedChatID.isEmpty {selectChat(destination)}
+            chatNotice="";await flushChatMessages();return true
+        }
         catch {chatNotice="手机暂存失败，请保留输入内容";return false}
     }
     func retryChatMessage(_ id:String) async {
@@ -741,7 +841,12 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         for pending in currentChatQueue where pending.lastError.isEmpty {
             if chatSnapshot?.id==pending.chatID && chatSnapshot?.running==true {continue}
             do {
-                let value=try await request(chatPath(pending.chatID)+"/messages",body:["request_id":pending.id,"text":pending.text],using:pair)
+                var body:[String:Any]=["request_id":pending.id,"text":pending.text]
+                if let file=pending.attachment {
+                    guard chatAttachmentsAvailable else {chatNotice="更新电脑端后会继续发送待发附件。";continue}
+                    body["attachment"]=["name":file.name,"data":file.data.base64EncodedString()]
+                }
+                let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:pending.attachment == nil ? nil : 120)
                 guard value["accepted"] as? Bool==true else {throw URLError(.cannotParseResponse)}
                 try persistChatQueue(pendingChatMessages.filter {$0.id != pending.id});changed=true
             } catch {

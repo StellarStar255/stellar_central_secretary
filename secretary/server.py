@@ -496,7 +496,10 @@ class Service:
                     if original.stat().st_size>bundles.INLINE_MAX:raise ValueError('图片原件超过 50 MB，无法生成预览')
                     data=original.read_bytes()
                     images=[{'name':item['filename'],'media':'image/jpeg','data':image_formats.preview(data)}]
-                    fields,_=ai.analyze_material(item['text'],item['title'],self.model_backend(item_ids=[item_id]),images,'【图片概览】图片以分析用缩略图读取，原件完整保留。')
+                    backend=self.model_backend(item_ids=[item_id])
+                    if isinstance(backend,dict) and not backend.get('vision') and not item['text'].strip():
+                        raise ValueError('原件已保存。当前模型未启用图片输入，且图片未提取到文字。请启用图片输入或更换支持图片的模型后重试。')
+                    fields,_=ai.analyze_material(item['text'],item['title'],backend,images,'【图片概览】图片以分析用缩略图读取，原件完整保留。')
                 else:
                     selected,scope=service_pdf_material(self.archive,item,item['text'],'')
                     if full_pdf:fields=ai.summary_fields(item,self.model_backend(item_ids=[item_id]),full_pdf=True)
@@ -942,7 +945,7 @@ class Service:
         if not file or not local_media.video_type(file['name']):raise ValueError('请选择视频附件')
         return video_state.identity(self.archive.root,self.archive.root/'files'/(batch_id or item_id),key or '')
 
-    def ask_material(self,question,item_ids):
+    def ask_material(self,question,item_ids,cancel=None):
         if not isinstance(item_ids,list) or len(item_ids)!=1 or not isinstance(item_ids[0],str):raise ValueError('请选择一份本次组合资料')
         item_id=item_ids[0];item=self.archive.get(item_id)
         if not bundles.is_bundle(item['filename']):raise ValueError('这份资料不是组合资料')
@@ -952,8 +955,8 @@ class Service:
             item=self.archive.get(item_id)
             self.busy.add(item_id);self.questions+=1
         try:
-            with self.summary_jobs.session(item_id,len(item["text"]),short=True):
-                self.archive.update(item_id,state='processing',error='')
+            with self.summary_jobs.session(item_id,len(item["text"]),short=True,cancel_event=cancel):
+                if mobile_privacy.active.get() is None:self.archive.update(item_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                 source,scope=service_pdf_material(self.archive,item,source,scope)
                 references=[dict(hit,number=index+1) for index,hit in enumerate([hit for hit in self.archive.retrieve(question,12) if hit['item_id']==item_id and hit.get('origin')])]
