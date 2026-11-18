@@ -33,12 +33,16 @@ struct ModelPrivacy {
     let model: String
     let fingerprint: String
     let approved: Bool
+    let summaryApproved: Bool?
+    let desktopAutoSummary: Bool
 
     init(_ value: [String: Any]) {
         destination = value["destination"] as? String ?? ""
         model = value["model"] as? String ?? ""
         fingerprint = value["fingerprint"] as? String ?? ""
         approved = value["approved"] as? Bool == true
+        summaryApproved = value["summary_approved"] as? Bool
+        desktopAutoSummary = value["desktop_auto_summary"] as? Bool == true
     }
 }
 
@@ -365,9 +369,9 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     func modelPrivacy() async throws -> ModelPrivacy {
         ModelPrivacy(try await request("/model-privacy", timeout: 12))
     }
-    func setModelPrivacy(_ approved: Bool, fingerprint: String, workspace: String) async throws -> ModelPrivacy {
+    func setModelPrivacy(_ approved: Bool, fingerprint: String, workspace: String, summary: Bool = false) async throws -> ModelPrivacy {
         guard workspace == workspaceID else { throw CancellationError() }
-        return ModelPrivacy(try await request("/model-privacy", body: ["approved": approved, "fingerprint": fingerprint], timeout: 12))
+        return ModelPrivacy(try await request("/model-privacy", body: ["approved": approved, "fingerprint": fingerprint, "scope": summary ? "summary" : "chat"], timeout: 12))
     }
     func pair(_ raw: String, requestAccepted: (() -> Void)? = nil) async {
         guard credentialStoreAvailable else {error="无法读取已保存的电脑，请解锁手机后重新打开 App";return}

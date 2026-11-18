@@ -105,7 +105,7 @@ struct CaptureView: View {
                     Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
                     if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
                     Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(model.online ? "保存到知识库":"暂存，连接后发送",systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
-                } footer: { Text("手机归档不自动调用 AI。可在电脑上读取链接或整理资料。附件最多 10 MB。") }
+                } footer: { Text("可在「连接 → 隐私与 AI」授权手机归档自动摘要。附件最多 10 MB。") }
                 if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
@@ -713,10 +713,21 @@ struct PrivacyView: View {
                     } footer: {
                         Text("授权后，电脑可能向所示服务发送问题、相关聊天记录、知识库摘录或图片，包括手机待发送的问答。授权只适用于这台电脑和当前模型服务。撤回后，尚未发出的模型请求将被拦截，已发出的内容无法收回。")
                     }
+                    if let permission, let approved = permission.summaryApproved, !permission.fingerprint.isEmpty {
+                        Section("手机归档自动摘要") {
+                            LabeledContent("模型服务", value: permission.destination)
+                            if !permission.model.isEmpty { LabeledContent("模型", value: permission.model) }
+                            Text("开启后，电脑可把新上传的文字、文件摘录或图片发送给这个服务生成摘要。这项授权与问答分开，可以随时关闭。")
+                            if !permission.desktopAutoSummary { Text("电脑端的自动总结目前已关闭。").foregroundStyle(.secondary) }
+                            Button(approved ? "关闭手机自动摘要" : "同意并开启自动摘要") {
+                                update(!approved, permission, summary:true)
+                            }.disabled(saving)
+                        }
+                    }
                 }
                 Section("数据和权限") {
                     Text("相机用于扫描电脑的配对码，局域网和蓝牙用于发现并连接附近的电脑。手机将你提交的资料和问题发给所选电脑。配对凭据保存在钥匙串，待发送内容和近期缓存保存在手机。")
-                    Text("手机归档只存入电脑知识库。电脑端可以另行整理资料；如果启用了本机语义索引，电脑会使用配置的本机嵌入服务。演示模式使用样例资料，退出时清除演示改动。")
+                    Text("手机归档默认只存入电脑知识库。可单独授权自动摘要；如果启用了本机语义索引，电脑会使用配置的本机嵌入服务。演示模式退出时清除演示改动。")
                     Text("你可以在 iOS 设置管理权限，在电脑端移除此手机的访问权限，或在这里撤回模型授权。")
                 }
             }
@@ -738,15 +749,15 @@ struct PrivacyView: View {
         catch { message = error.localizedDescription }
     }
 
-    private func update(_ approved: Bool, _ reviewed: ModelPrivacy) {
+    private func update(_ approved: Bool, _ reviewed: ModelPrivacy, summary: Bool = false) {
         let workspace = companion.workspaceID
         saving = true
         message = ""
         Task {
             defer { saving = false }
             do {
-                permission = try await companion.setModelPrivacy(approved, fingerprint: reviewed.fingerprint, workspace: workspace)
-                message = approved ? "已授权。返回后可继续发送问答。" : "已撤回授权。"
+                permission = try await companion.setModelPrivacy(approved, fingerprint: reviewed.fingerprint, workspace: workspace, summary:summary)
+                if !summary { message = approved ? "已授权。返回后可继续发送问答。" : "已撤回授权。" }
             } catch is CancellationError {
             } catch {
                 await load()

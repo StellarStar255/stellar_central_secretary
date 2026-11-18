@@ -143,6 +143,51 @@ class MobileTest(unittest.TestCase):
    status,result=self.request('/ingest',{'request_id':'local-only','content':{'filename':'photo.png','data':base64.b64encode(stream.getvalue()).decode()}},self.credential)
    self.assertEqual(status,200);self.assertTrue(result['chat_synced']);model.assert_not_called()
    self.assertEqual(self.s.archive.get(result['item']['id'])['text'],'Local only')
+ def test_phone_auto_summary_requires_independent_grant_and_runs_once(self):
+  import io,time
+  from PIL import Image
+  self.approve();info=self.approve_model();self.s.archive.configure('codex',True)
+  self.assertFalse(info['summary_approved'])
+  consent={'approved':True,'scope':'summary','fingerprint':info['fingerprint']}
+  status,value=self.request('/model-privacy',consent,self.credential)
+  self.assertEqual(status,200);self.assertTrue(value['approved']);self.assertTrue(value['summary_approved'])
+  fixture=io.BytesIO();Image.new('RGB',(32,32),'white').save(fixture,'JPEG')
+  body={'request_id':'summarize-photo','content':{'filename':'Fixture.jpeg','data':base64.b64encode(fixture.getvalue()).decode()}}
+  fields={'title':'Fixture image','summary':'Fixture auto-summary','state':'ready','error':''}
+  with patch('secretary.local_ocr.recognize',return_value=''),patch('secretary.ai.analyze_material',return_value=(fields,'')) as model:
+   status,result=self.request('/privacy-v1/ingest',body,self.credential)
+   self.assertEqual(status,200);ident=result['item']['id']
+   deadline=time.monotonic()+5
+   while ident in self.s.busy and time.monotonic()<deadline:time.sleep(.01)
+   self.assertEqual(self.s.archive.get(ident)['summary'],fields['summary'])
+   self.assertTrue(self.request('/ingest',body,self.credential)[1]['duplicate']);model.assert_called_once()
+   status,value=self.request('/model-privacy',{'scope':'summary','approved':False},self.credential)
+   self.assertEqual(status,200);self.assertTrue(value['approved']);self.assertFalse(value['summary_approved'])
+   self.request('/ingest',{'request_id':'after-revoke','content':{'text':'Unique after revoke fixture'}},self.credential)
+   model.assert_called_once()
+
+ def test_mobile_summary_revalidates_consent_in_worker(self):
+  import threading,time
+  self.approve();self.s.archive.configure('codex',True)
+  info=self.request('/model-privacy',credential=self.credential)[1]
+  self.request('/model-privacy',{'scope':'summary','approved':True,'fingerprint':info['fingerprint']},self.credential)
+  started=threading.Event();resume=threading.Event()
+  original=self.s.process
+  def delayed(*args):
+   started.set()
+   if resume.wait(5):original(*args)
+  with patch.object(self.s,'process',side_effect=delayed),patch('secretary.ai.summary_fields') as model:
+   status,result=self.request('/ingest',{'request_id':'queued-summary','content':{'text':'Mobile queued fixture text'}},self.credential)
+   self.assertEqual(status,200);ident=result['item']['id']
+   try:
+    self.assertTrue(started.wait(3))
+    self.assertEqual(self.s.archive.get(ident)['state'],'saved')
+    self.request('/model-privacy',{'scope':'summary','approved':False},self.credential)
+   finally:resume.set()
+   deadline=time.monotonic()+5
+   while ident in self.s.busy and time.monotonic()<deadline:time.sleep(.01)
+   model.assert_not_called()
+   self.assertFalse(self.s.archive.get(ident)['summary'])
  def test_reextract_legacy_phone_photo_repairs_chat_once(self):
   import io
   from PIL import Image

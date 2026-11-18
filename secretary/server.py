@@ -18,6 +18,7 @@ import urllib.request
 import webbrowser
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .local_http import LocalHTTPServer
 from pathlib import Path
@@ -25,7 +26,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract, TrashedDuplicateError
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import image_formats
+from . import image_formats, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -252,7 +253,6 @@ class Service:
         if backend not in (*ai.CLI_BACKENDS,'api'):raise ValueError('未知模型后端')
         proxy=network.proxy_config(settings['model_proxy'] if proxy is None else proxy)
         config={**model_api.prepare(self.archive.root,api_config or {}),'_proxy':proxy} if backend=='api' else ai.CLIBackend(backend,proxy)
-        from . import mobile_privacy
         mobile_privacy.check(config)
         return company_ai.require(self.archive,config,item_ids)
 
@@ -401,7 +401,7 @@ class Service:
         with self.lock:
             if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后追加')
             if additions.find(self.archive.get(item_id),batch_id) is None:raise KeyError('追加资料不存在')
-            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id);self.summary_futures[item_id]=self.pool.submit(self.process_addition,item_id,batch_id)
+            self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id);self.summary_futures[item_id]=self.pool.submit(copy_context().run,self.process_addition,item_id,batch_id)
         return {'ok':True}
 
     def short_summary(self,item,full_pdf=False):
@@ -461,7 +461,7 @@ class Service:
             self.busy.add(item_id)
             short=self.short_summary(item,full_pdf)
             self.summary_jobs.enqueue(item_id,len(item["text"]),short)
-            self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process, item_id, full_pdf, pdf_new)
+            self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(copy_context().run,self.process,item_id,full_pdf,pdf_new)
     def process(self, item_id, full_pdf=False, pdf_new=False):
         try:item=self.archive.get(item_id)
         except KeyError:
@@ -476,7 +476,10 @@ class Service:
                     if item_id in self.trash_cancellations:return
                     self.summary_jobs.check(item_id)
                     item = self.archive.get(item_id)
-                    self.archive.update(item_id, state='processing', error='')
+                    # Progress lives in summary_jobs. Keep mobile-authorized
+                    # items out of the unrestricted startup recovery queue.
+                    if mobile_privacy.active.get() is None:
+                        self.archive.update(item_id, state='processing', error='')
                 if pdf_new:
                     source,scope,used=pdf_reading.summary_material(self.archive,item,new_only=True)
                     if not source:raise ValueError('没有尚未总结的已读页面')

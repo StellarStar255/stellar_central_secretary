@@ -206,11 +206,14 @@ class Mobile:
             return self.status()
 
     def model_privacy(self, device):
+        enabled=self.service.archive.settings()['auto_ai']
         try:
             info = mobile_privacy.destination(self.service.model_backend())
         except ValueError:
-            return {'destination':'请先在电脑上完成模型配置','model':'','fingerprint':'','approved':False}
-        return {**info, 'approved': self.state['devices'].get(device, {}).get('model_consent') == info['fingerprint']}
+            return {'destination':'请先在电脑上完成模型配置','model':'','fingerprint':'','approved':False,'summary_approved':False,'desktop_auto_summary':enabled}
+        entry=self.state['devices'].get(device,{})
+        return {**info,'approved':entry.get('model_consent') == info['fingerprint'],
+                'summary_approved':entry.get('summary_consent') == info['fingerprint'],'desktop_auto_summary':enabled}
 
     def set_model_privacy(self, device, body):
         with self.lock:
@@ -219,15 +222,18 @@ class Mobile:
                 raise PermissionError('设备已解除配对')
             info = self.model_privacy(device)
             updated = dict(entry)
+            scope=body.get('scope','chat')
+            if scope not in ('chat','summary'):raise ValueError('无效的模型授权')
+            consent,grant,flag=('summary_consent','summary_grant','summary_approved') if scope=='summary' else ('model_consent','consent_grant','approved')
             if body.get('approved') is True:
                 if not info['fingerprint'] or body.get('fingerprint') != info['fingerprint']:
                     raise mobile_privacy.ApprovalRequired()
                 # An in-flight job must not inherit a later grant after revocation.
-                if not info['approved']:
-                    updated.update(model_consent=info['fingerprint'], consent_grant=secrets.token_hex(16))
+                if not info[flag]:
+                    updated.update({consent:info['fingerprint'],grant:secrets.token_hex(16)})
             elif body.get('approved') is False:
-                updated.pop('model_consent', None)
-                updated.pop('consent_grant', None)
+                updated.pop(consent,None)
+                updated.pop(grant,None)
             else:
                 raise ValueError('无效的模型授权')
             self.state['devices'][device] = updated
@@ -236,24 +242,39 @@ class Mobile:
             except OSError:
                 self.state['devices'][device] = entry
                 raise
-            return {**info, 'approved': body['approved']}
+            return {**info,flag:body['approved']}
 
-    def authorize_model(self, device):
+    def authorize_model(self, device, summary=False):
         # Capture the grant at request admission, then recheck it in each model
         # lookup on the worker. Reading the entry does not take the service lock.
         entry = dict(self.state['devices'].get(device, {}))
-        grant = entry.get('consent_grant')
-        fingerprint = entry.get('model_consent')
+        grant_key,consent_key=('summary_grant','summary_consent') if summary else ('consent_grant','model_consent')
+        grant = entry.get(grant_key)
+        fingerprint = entry.get(consent_key)
 
         def authorize(config):
             current = self.state['devices'].get(device, {})
-            if not grant or current.get('consent_grant') != grant or mobile_privacy.destination(config)['fingerprint'] != fingerprint:
+            if not grant or current.get(grant_key) != grant or mobile_privacy.destination(config)['fingerprint'] != fingerprint or (summary and not self.service.archive.settings()['auto_ai']):
                 raise mobile_privacy.ApprovalRequired()
 
         info = self.model_privacy(device)
-        if not info['approved']:
+        if not info['summary_approved' if summary else 'approved']:
             raise mobile_privacy.ApprovalRequired()
         return authorize
+
+    def queue_summary(self,device,item_id,batch_id=None):
+        if not self.service.archive.settings()['auto_ai']:return
+        try:authorize=self.authorize_model(device,summary=True)
+        except mobile_privacy.ApprovalRequired:return
+        token=mobile_privacy.active.set(authorize)
+        try:
+            if batch_id:self.service.retry_addition(item_id,batch_id)
+            else:self.service.queue(item_id)
+        except (ValueError,KeyError):
+            # The archive is already saved. Consent may have changed or the
+            # desktop may be working on the same record.
+            pass
+        finally:mobile_privacy.active.reset(token)
     def public_item(self,item,detail=False):
         result={key:item.get(key,'') for key in ('id','title','kind','state','summary','url','created','updated','tags')}
         if detail:
@@ -297,8 +318,9 @@ class Mobile:
             if previous:
                 if previous['signature']!=signature:raise ValueError('这次附件内容已改变，请重新选择附件')
             else:
-                self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False,'summarize':False})
+                result=self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False,'summarize':False})
                 receipts[receipt]={'signature':signature,'id':item_id};self.save()
+                self.queue_summary(device,item_id,result['batch_id'])
             return {'item':self.public_item(self.service.archive.get(item_id),True),'duplicate':previous is not None}
     def attachment(self,item_id,batch_id,key):
         from . import bundles
@@ -326,8 +348,10 @@ class Mobile:
                 self.state['receipts'][receipt]={'id':result['item']['id'],'signature':signature,'chat_id':target}
                 # Identifiers only; no documents, invitation secrets or credentials.
                 self.save()
+                if result['created'] and not (allowed.get('url') and not allowed.get('text') and not allowed.get('filename')):
+                    self.queue_summary(device,result['item']['id'])
             from .extension_chat import append_receipt
-            text=('手机资料已归档。可在电脑上选择整理。' if result['created'] else '这份手机资料已存在，可直接查看。')
+            text=('手机资料已归档。' if result['created'] else '这份手机资料已存在，可直接查看。')
             result=append_receipt(self.service,result,target,digest(receipt),text,namespace='mobile')
             return {'item':self.public_item(self.service.archive.get(result['item']['id'])),'duplicate':not result['created'],
                     'chat_synced':result.get('chat_synced',False),**({'chat_sync_error':result['chat_sync_error']} if result.get('chat_sync_error') else {})}
