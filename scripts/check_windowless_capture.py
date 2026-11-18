@@ -22,10 +22,22 @@ BODY = '''<!doctype html><meta charset="utf-8"><title>Capture regression</title>
 <div data-message-author-role="assistant">The browser connection must preserve the persistent context settings before reading this synthetic conversation.</div></article>
 </main>'''
 
+VISIBILITY_BODY = '''<!doctype html><meta charset="utf-8"><main>
+<p role="status">Loading conversation until the tab renders.</p>
+<template>'''+BODY.split('<main>', 1)[1].rsplit('</main>', 1)[0]+'''</template>
+<script>
+  function render() {
+    if (document.hidden) return;
+    document.querySelector('main').replaceChildren(document.querySelector('template').content);
+  }
+  document.addEventListener('visibilitychange', render);
+  render();
+</script></main>'''
+
 
 class Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
-        data = BODY.encode()
+        data = (VISIBILITY_BODY if self.path == '/visibility' else BODY).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(data)))
@@ -76,6 +88,30 @@ with tempfile.TemporaryDirectory() as temp:
         assert result['message_count'] == 2 and result['partial']
         assert 'persistent context settings' in result['text']
 
+        with sync_playwright() as pw:
+            browser = reader.connect_browser(pw, session)
+            foreground = browser.contexts[0].new_page()
+            foreground.bring_to_front()
+            hidden_target = f'http://127.0.0.1:{server.server_port}/visibility'
+            baseline = capture_browser.create_task_page(browser, {}, True)
+            baseline.goto(hidden_target)
+            assert baseline.evaluate('document.hidden'), 'Fixture must start in a hidden tab'
+            assert not reader.snapshot(baseline)['messages']
+            baseline.close()
+        with patch.object(reader, 'conversation_url', side_effect=lambda url: url):
+            result = capture_browser.read_managed(
+                hidden_target, profile, lambda *args: None, threading.Event(), 30,
+                threading.Event(), True, False, scope='loaded')
+        assert result['message_count'] == 2
+        with sync_playwright() as pw:
+            browser = reader.connect_browser(pw, session)
+            foreground = next(page for page in browser.contexts[0].pages if page.url == 'about:blank')
+            assert foreground.evaluate('!document.hidden'), 'Capture switched the selected tab'
+            captured = next(page for page in browser.contexts[0].pages if page.url == hidden_target)
+            assert captured.evaluate('document.hidden'), 'Focus emulation leaked after capture'
+            captured.close()
+            foreground.close()
+
         confirmed = threading.Event()
         def notify(state, message):
             if state == 'waiting_login':
@@ -87,7 +123,7 @@ with tempfile.TemporaryDirectory() as temp:
         with sync_playwright() as pw:
             browser = reader.connect_browser(pw, session, timeout=3000)
             assert not browser.contexts[0].pages, 'Only task-owned tabs should be closed'
-        print('PASS: windowless Chrome connected; conversation and webpage extracted; owned tabs cleaned up; empty browser reconnected')
+        print('PASS: windowless Chrome connected; hidden conversation loaded without switching tabs; focus restored; webpage extracted; owned tabs cleaned up')
     finally:
         proc.terminate()
         proc.wait(timeout=15)

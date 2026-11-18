@@ -45,11 +45,18 @@ def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, b
     session = reader.start_or_reuse_browser(marker, profile, cancelled, background=background, proxy=proxy)
     confirmed = login_complete if login_complete is not None else threading.Event()
     page = None
+    rendering = None
     with sync_playwright() as pw:
         browser = reader.connect_browser(pw, session)
         try:
             if cancelled.is_set(): raise reader.CaptureCancelled('已停止读取。')
             page = create_task_page(browser, session, background)
+            if background:
+                # ChatGPT can keep the conversation behind its loading screen
+                # indefinitely when the tab starts hidden. Emulate visibility
+                # on this target without selecting it or activating Chrome.
+                rendering = page.context.new_cdp_session(page)
+                rendering.send('Emulation.setFocusEmulationEnabled', {'enabled': True})
             page.goto(target, wait_until='domcontentloaded', timeout=45000)
             attempts = 0
             def login(task_page):
@@ -70,6 +77,11 @@ def read_managed(url, profile_dir, notify, cancelled, timeout, login_complete, b
             reader.save_session(profile, session)
             return result
         finally:
+            if rendering is not None and not page.is_closed():
+                try:
+                    rendering.detach()
+                except Exception:
+                    pass  # Chrome or the tab may have closed during capture.
             if close_new_tabs:
                 # Only this job's page and its unique startup placeholder are owned.
                 owned = [page] if page is not None else []
