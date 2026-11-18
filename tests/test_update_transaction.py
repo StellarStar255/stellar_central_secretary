@@ -3,6 +3,29 @@ from pathlib import Path
 from secretary.update_transaction import run
 
 class AtomicStatusTest(unittest.TestCase):
+    def test_mac_update_helper_keeps_app_bundle_suffix(self):
+        from unittest.mock import Mock, patch
+        from secretary import paths, update_transaction
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp)
+            app=base/'Stellar Secretary.app'
+            executable=app/'Contents/MacOS/Stellar Secretary'
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            work=base/'library/updates/new'
+            work.mkdir(parents=True)
+            def spawn(command, **kwargs):
+                copied=Path(command[0])
+                self.assertEqual(copied.parents[2].suffix,'.app')
+                self.assertTrue(copied.is_file())
+                (work/'worker-ready').touch()
+                return Mock()
+            with patch.object(paths,'FROZEN',True),patch.object(paths,'DATA_DIR',base/'library'), \
+                 patch.object(sys,'executable',str(executable)),patch.object(sys,'argv',['stellar']), \
+                 patch.object(update_transaction,'spawn',side_effect=spawn):
+                self.assertTrue(update_transaction.prepare(base/'release.dmg',work,'sha','new',kind='mac'))
+            self.assertTrue((work/'proceed').is_file())
+
     def test_windows_reader_lock_retries_and_publishes_complete_json(self):
         from unittest.mock import patch
         from secretary.update_transaction import atomic

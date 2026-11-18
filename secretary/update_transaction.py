@@ -65,7 +65,8 @@ def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,bef
     if data.is_relative_to(root):raise RuntimeError('资料目录位于程序目录中，请先迁移资料后再自动升级。')
     if kind!='deb' and not os.access(root.parent,os.W_OK):raise RuntimeError('程序目录不可写，请手动安装新版。')
     if kind=='deb' and root!=Path('/opt/stellar-secretary'):raise RuntimeError('无法确认系统安装目录。')
-    previous=work/('previous-program-'+uuid.uuid4().hex)
+    # PyInstaller uses the .app suffix to locate Contents/Frameworks on macOS.
+    previous=work/('previous-program-'+uuid.uuid4().hex+('.app' if kind=='mac' else ''))
     shutil.copytree(root,previous,symlinks=True)
     args=[arg for arg in sys.argv[1:] if arg!='--desktop']
     if desktop:args.append('--desktop')
