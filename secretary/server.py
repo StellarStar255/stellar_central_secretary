@@ -334,11 +334,14 @@ class Service:
     def append_material(self,item_id,body):
         if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
-            if self.stopping or item_id in self.busy or item_id in self.captures:raise ValueError('资料正在处理，请稍后追加')
             urls=body.get('links',links.extract(body.get('text',''))) if body.get('read_links',True) else []
-            if body.get('summarize',self.archive.settings()['auto_ai']) is True:self.model_backend(item_ids=[item_id])
-            batch_id=additions.save(self.archive,item_id,body.get('text',''),self.uploads.resolve(body.get('attachments',[])),body.get('expected_updated'),urls)
             summarize=body.get('summarize',self.archive.settings()['auto_ai']) is True
+            # Plain additions only write a new batch. Model and link jobs
+            # share the item's active job slot and still need it to be idle.
+            if self.stopping or item_id in self.trash_cancellations or ((urls or summarize) and (item_id in self.busy or item_id in self.captures)):
+                raise ValueError('资料正在处理，请稍后追加')
+            if summarize:self.model_backend(item_ids=[item_id])
+            batch_id=additions.save(self.archive,item_id,body.get('text',''),self.uploads.resolve(body.get('attachments',[])),body.get('expected_updated'),urls)
             if urls:
                 self.busy.add(item_id);self.summary_jobs.enqueue(item_id);self.summary_jobs.target(item_id,batch_id,'read',summarize);self.summary_futures[item_id]=self.pool.submit(self.process_group_links,item_id,batch_id,summarize)
             elif summarize:

@@ -1,4 +1,5 @@
 import base64,io,json,tempfile,unittest
+import threading
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
@@ -11,6 +12,45 @@ def files():
     return [{'name':'new.png','data':base64.b64encode(stream.getvalue()).decode()}]
 
 class AdditionTests(unittest.TestCase):
+    def test_plain_addition_survives_running_summary(self):
+        from secretary.notes import set_note
+        with tempfile.TemporaryDirectory() as root:
+            service = Service(root)
+            entered = threading.Event()
+            release = threading.Event()
+            item_id, _ = service.archive.add('Photo notes', 'Existing source')
+            def summarize(*args, **kwargs):
+                entered.set()
+                if not release.wait(5):
+                    raise RuntimeError('fixture timed out')
+                return {'summary':'Completed summary','state':'ready','error':''}
+            try:
+                with patch.object(ai,'summary_fields',side_effect=summarize) as model:
+                    service.queue(item_id,force=True)
+                    self.assertTrue(entered.wait(5))
+                    with service.lock:
+                        future = service.summary_futures[item_id]
+                    item = service.archive.get(item_id)
+                    set_note(service.archive,item_id,'A note written during the summary',[],item['note_version'])
+                    result = service.append_material(item_id, {
+                        'text':'','attachments':files(),'expected_updated':service.archive.get(item_id)['updated'],
+                        'summarize':False,'read_links':False,
+                    })
+                    self.assertEqual(result['item']['state'],'processing')
+                    self.assertEqual(result['item']['additions'][0]['attachments'][0]['name'],'new.png')
+                    with self.assertRaisesRegex(ValueError,'资料正在处理'):
+                        service.append_material(item_id, {'text':'Another summary','summarize':True})
+                    release.set()
+                    future.result(timeout=5)
+                    model.assert_called_once()
+                saved = service.item_detail(item_id)
+                self.assertEqual(saved['summary'],'Completed summary')
+                self.assertEqual(saved['note'],'A note written during the summary')
+                self.assertEqual(saved['additions'][0]['id'],result['batch_id'])
+            finally:
+                release.set()
+                service.close()
+
     def test_pasted_generic_image_gets_local_title_and_preserves_original(self):
         with tempfile.TemporaryDirectory() as root:
             service = Service(root)
