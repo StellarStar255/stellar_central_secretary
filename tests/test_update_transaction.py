@@ -126,3 +126,46 @@ class HealthModeTest(unittest.TestCase):
                 with patch('secretary.update_transaction.urllib.request.build_opener',return_value=opener):return healthy(config,'new')
             self.assertFalse(check());value['desktop']['mode']='browser';self.assertTrue(check())
             value['pid']=124;self.assertFalse(check())
+
+    def test_windows_health_requires_interface_to_open(self):
+        import io
+        from unittest.mock import Mock,patch
+        from secretary.update_transaction import healthy
+        with tempfile.TemporaryDirectory() as temp:
+            config={'address':'http://127.0.0.1:1','data':temp,'desktop':True,'kind':'windows','child_pid':123}
+            desktop={'supports_window':True,'window_loaded':True,'window_visible':False,'mode':'desktop'}
+            value={'application':'stellar-central-secretary','version':'new','database_ok':True,'pid':123,'data_dir':temp,'desktop':desktop}
+            opener=Mock()
+            opener.open.return_value.__enter__=lambda *_:io.BytesIO(json.dumps(value).encode())
+            opener.open.return_value.__exit__=lambda *_:None
+            with patch('secretary.update_transaction.urllib.request.build_opener',return_value=opener):
+                self.assertFalse(healthy(config,'new'))
+                desktop['window_visible']=True
+                self.assertTrue(healthy(config,'new'))
+                desktop.update(mode='browser',browser_opens=0)
+                self.assertFalse(healthy(config,'new'))
+                desktop['browser_opens']=1
+                self.assertTrue(healthy(config,'new'))
+
+    @unittest.skipUnless(os.name=='nt','Windows process handle')
+    def test_windows_wait_does_not_terminate_parent(self):
+        import subprocess,threading
+        from secretary.update_transaction import open_windows_parent,wait_windows_parent
+        with subprocess.Popen([sys.executable,'-c','import sys; sys.stdin.buffer.read(); raise SystemExit(17)'],
+                              stdin=subprocess.PIPE) as child:
+            handle=open_windows_parent(child.pid)
+            finished=threading.Event()
+            def wait():
+                wait_windows_parent(handle)
+                finished.set()
+            waiter=threading.Thread(target=wait,daemon=True)
+            waiter.start()
+            try:
+                self.assertFalse(finished.wait(.3))
+                self.assertIsNone(child.poll())
+            finally:
+                child.stdin.close()
+                waiter.join(5)
+                if child.poll() is None:child.kill()
+            self.assertTrue(finished.is_set())
+            self.assertEqual(child.wait(),17)

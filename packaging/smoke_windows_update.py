@@ -91,6 +91,7 @@ def main():
                 return False
             wait(original_exited,180)
             assert proc.returncode==0,'Original application failed to exit'
+            assert 'Desktop shutdown: disposing browser profile' in (data/'app.log').read_text(encoding='utf-8'), 'Upgrade bypassed orderly desktop shutdown'
             status=wait(lambda:request('/api/status'),240)
             wait(lambda:request('/api/status')['desktop'].get('supports_window'))
             result=data/'windows-update.json'
@@ -109,6 +110,7 @@ def main():
             wait(lambda:result.exists() and json.loads(result.read_text(encoding='utf-8-sig')).get('phase')=='complete',180)
             status=wait(native_status)
             assert status['version']==__version__,status.get('version')
+            wait(lambda:request('/api/status')['desktop'].get('window_visible'))
             assert Path(status['data_dir']).resolve()==data.resolve()
             assert Path(status['backup']['folder']).resolve()==backup_dir.resolve()
             assert any(backup_dir.glob('*.zip')),'Upgrade backup did not use the custom backup directory'
@@ -138,9 +140,36 @@ def main():
             finally:
                 if holder.poll() is None:holder.terminate();holder.wait(timeout=10)
 
+            # A direct silent upgrade without /DIR or an update helper should
+            # reuse the registered path and reopen the app itself.
+            manual_address='http://127.0.0.1:8768'
+            assert not listening(manual_address)
+            manual_env={**env,'SECRETARY_DATA_DIR':str(data)}
+            try:
+                manual=subprocess.run([str(setup),'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',
+                                       f'/LOG={logs.resolve()/"manual-relaunch.log"}'],env=manual_env,timeout=180)
+                assert manual.returncode==0,manual.returncode
+                def manual_window():
+                    with opener.open(manual_address+'/api/status',timeout=3) as response:
+                        value=json.load(response)
+                    return value if value['desktop'].get('window_visible') and value['desktop'].get('window_loaded') else None
+                reopened=wait(manual_window)
+                assert Path(reopened['data_dir']).resolve()==data.resolve()
+                assert Path(reopened['backup']['folder']).resolve()==backup_dir.resolve()
+                print('PASS: direct silent upgrade reopens the existing installation and library')
+            finally:
+                try:
+                    with opener.open(manual_address+'/api/status',timeout=3) as response:
+                        current=json.load(response)
+                    assert Path(current['data_dir']).resolve()==data.resolve()
+                    closing=urllib.request.Request(manual_address+'/api/shutdown',data=b'{}',
+                        headers={'Content-Type':'application/json','X-Knowledge-Token':current['token']})
+                    opener.open(closing,timeout=5).close()
+                except OSError:pass
+
             print('PASS: real Windows updater download/checksum, detached helper, clean desktop exit, Inno in-place install, native automatic restart, custom port/Unicode paths and every item column preserved')
         finally:
-            for source in (data/'app.log',data/'update.log',data/'windows-update.json',data/'updates/99.0.0/installer.log',data/'updates/99.0.0/helper.log',data/'updates/99.0.0/transaction.log'):
+            for source in (data/'app.log',data/'update.log',data/'windows-update.json',data/'updates/99.0.0/installer.log',data/'updates/99.0.0/helper.log',data/'updates/99.0.0/transaction.log',data/'updates/99.0.0/relaunch.log'):
                 if source.exists():(logs/source.name).write_bytes(source.read_bytes())
             try:request('/api/shutdown',{'force':True})
             except OSError:pass

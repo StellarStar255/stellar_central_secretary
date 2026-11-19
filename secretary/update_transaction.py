@@ -50,12 +50,35 @@ def healthy(config,version,legacy=False):
         with opener.open(config['address']+endpoint,timeout=2) as response:value=json.loads(response.read(100000))
         same=Path(value.get('data_dir','')).resolve()==Path(config['data']).resolve()
         desktop=value.get('desktop',{})
-        return value.get('application')=='stellar-central-secretary' and value.get('version')==version and same and (legacy or value.get('database_ok') is True and value.get('pid')==config.get('child_pid',value.get('pid'))) and (not config['desktop'] or desktop.get('supports_window') and (desktop.get('window_loaded') or desktop.get('mode')=='browser'))
+        interface_ready=desktop.get('window_loaded') or desktop.get('mode')=='browser'
+        if config.get('kind')=='windows' and not legacy:
+            if desktop.get('mode')=='browser':
+                interface_ready=desktop.get('browser_opens',0)>0
+            else:
+                interface_ready=desktop.get('window_loaded') and desktop.get('window_visible')
+        return value.get('application')=='stellar-central-secretary' and value.get('version')==version and same and (legacy or value.get('database_ok') is True and value.get('pid')==config.get('child_pid',value.get('pid'))) and (not config['desktop'] or desktop.get('supports_window') and interface_ready)
     except (OSError,ValueError,TypeError):return False
 
 def last_result():
     try:return json.loads((paths.DATA_DIR/'update-result.json').read_text(encoding='utf-8'))
     except (OSError,ValueError):return {}
+
+def open_windows_parent(pid):
+    import _winapi
+    try:
+        return _winapi.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    except OSError as error:
+        if getattr(error,'winerror',None)==87:  # The process already exited.
+            return None
+        raise
+
+def wait_windows_parent(handle):
+    import _winapi
+    try:
+        if _winapi.WaitForSingleObject(handle,120000)!=0:  # WAIT_OBJECT_0
+            raise RuntimeError('旧程序尚未退出，已取消安装。')
+    finally:
+        _winapi.CloseHandle(handle)
 
 def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,before_handoff=None):
     executable=Path(sys.executable).resolve();root=executable.parent
@@ -69,6 +92,8 @@ def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,bef
     previous=work/('previous-program-'+uuid.uuid4().hex+('.app' if kind=='mac' else ''))
     shutil.copytree(root,previous,symlinks=True)
     args=[arg for arg in sys.argv[1:] if arg!='--desktop']
+    if kind=='windows' and desktop:
+        args=[arg for arg in args if arg!='--no-browser']
     if desktop:args.append('--desktop')
     data_arg=argparse.ArgumentParser(add_help=False,allow_abbrev=False)
     data_arg.add_argument('--data-dir')
@@ -77,7 +102,8 @@ def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,bef
     parser=argparse.ArgumentParser(add_help=False);parser.add_argument('--port',type=int,default=8768);port=parser.parse_known_args(args)[0].port
     config=dict(root=str(root),backup=str(previous),executable=str(executable),package=str(Path(package).resolve()),
                 sha=sha,version=version,old_version=__version__,data=str(data),work=str(work),kind=kind,
-                parent=os.getpid() if parent_pid is None else parent_pid,args=args,desktop=desktop,address=f'http://127.0.0.1:{port}',timeout=60)
+                parent=os.getpid() if parent_pid is None else parent_pid,args=args,desktop=desktop,
+                address=f'http://127.0.0.1:{port}',timeout=120 if kind=='windows' else 60)
     spec=work/'transaction.json';atomic(spec,config);(work/'proceed').unlink(missing_ok=True)
     (work/'worker-ready').unlink(missing_ok=True)
     command=[str(previous/executable.relative_to(root)),'--update-transaction',str(spec)]
@@ -109,7 +135,12 @@ def run(config):
         value=dict(phase=phase,error=error,version=config['version'],backup=str(backup),updated=time.time())
         atomic(result,value)
         if config['kind']=='windows':atomic(data/'windows-update.json',value)
-    def launch():return spawn([config['executable'],*config['args']],cwd=str(root.parent),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    def launch():
+        command=[config['executable'],*config['args']]
+        if config['kind']=='windows':
+            with (work/'relaunch.log').open('ab') as log:
+                return spawn(command,cwd=str(root.parent),stdout=log,stderr=log)
+        return spawn(command,cwd=str(root.parent),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     def wait_health(version,legacy=False):
         deadline=time.monotonic()+config.get('timeout',60)
         while time.monotonic()<deadline:
@@ -123,18 +154,29 @@ def run(config):
         else:os.killpg(child.pid,15)
         try:child.wait(timeout=15)
         except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
+    parent_handle=None
     try:
+        windows=config['kind']=='windows'
+        if windows and config.get('parent'):
+            # Acquire the handle before acknowledging readiness. Waiting on
+            # the handle cannot terminate the app or follow a reused PID.
+            parent_handle=open_windows_parent(config['parent'])
         (work/'worker-ready').write_text('ready')
         deadline=time.monotonic()+30
         while not (work/'proceed').exists():
             if time.monotonic()>deadline:raise RuntimeError('更新交接未确认，已取消安装。')
             time.sleep(.1)
-        deadline=time.monotonic()+120
-        while config.get('parent',0):
-            try:os.kill(config['parent'],0)
-            except OSError:break
-            if time.monotonic()>deadline:raise RuntimeError('旧程序尚未退出，已取消安装。')
-            time.sleep(.2)
+        if windows:
+            if parent_handle is not None:
+                handle,parent_handle=parent_handle,None
+                wait_windows_parent(handle)
+        else:
+            deadline=time.monotonic()+120
+            while config.get('parent',0):
+                try:os.kill(config['parent'],0)
+                except OSError:break
+                if time.monotonic()>deadline:raise RuntimeError('旧程序尚未退出，已取消安装。')
+                time.sleep(.2)
         parent_exited=True
         report('installing')
         sha=hashlib.sha256()
@@ -177,7 +219,9 @@ def run(config):
             if process.wait():raise RuntimeError('系统安装未完成。')
         else:raise ValueError('未知更新类型')
         child=launch();config['child_pid']=child.pid;report('checking')
-        if not wait_health(config['version']):raise RuntimeError('新版窗口、版本或资料库健康检查未通过。')
+        if not wait_health(config['version']):
+            detail=' 日志：'+str(work/'relaunch.log') if windows else ''
+            raise RuntimeError('新版窗口、版本或资料库健康检查未通过。'+detail)
         report('complete');threading.Thread(target=child.wait,daemon=True).start();return True
     except Exception as error:
         message=str(error)
@@ -203,6 +247,10 @@ def run(config):
                 child=launch();threading.Thread(target=child.wait,daemon=True).start()
             except OSError:pass
         return False
+    finally:
+        if parent_handle is not None:
+            import _winapi
+            _winapi.CloseHandle(parent_handle)
 
 def main():
     spec=Path(sys.argv[-1]);config=json.loads(spec.read_text(encoding='utf-8'));run(config)

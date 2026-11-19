@@ -47,10 +47,23 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Flags: nowait skipifnotsilent; Check: ShouldLaunchSilentUpgrade
 
 ; Library and backup directories are managed by the app and preserved on uninstall.
 
 [Code]
+var
+  ExistingInstallation: Boolean;
+
+function ShouldLaunchSilentUpgrade: Boolean;
+var
+  I: Integer;
+begin
+  Result := ExistingInstallation;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/NORESTARTAPPLICATIONS') = 0 then Result := False;
+end;
+
 function UpdateOpenProcess(Access: LongWord; Inherit: Boolean; Pid: LongWord): LongWord;
   external 'OpenProcess@kernel32.dll stdcall';
 function UpdateCloseHandle(Handle: LongWord): Boolean;
@@ -85,6 +98,7 @@ begin
   Result := '';
   Count := 0;
   MainRunning := False;
+  ExistingInstallation := FileExists(ExpandConstant('{app}\{#AppExe}'));
   Root := AddBackslash(UpdateNormalPath(ExpandConstant('{app}')));
   EngineRoot := Root + '_internal\';
   try

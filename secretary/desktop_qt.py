@@ -232,6 +232,9 @@ def run(address,service=None,server=None,open_browser=True):
                 else:window.hide()
                 url=address+('/?'+urllib.parse.urlencode({'panel':request['panel']}) if request.get('panel') else '')
                 if launch_browser(url):mode['browser_opens']+=1
+                elif not linux:
+                    mode['value']='desktop';mode['panel']=request.get('panel')
+                    window.showNormal();window.raise_();window.activateWindow()
         if mode['panel'] and loaded['value']:
             page.runJavaScript('globalThis.StellarOpenPanel?.('+json.dumps(mode['panel'])+');');mode['panel']=None
         refresh()
