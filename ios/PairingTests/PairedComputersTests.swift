@@ -36,6 +36,24 @@ final class PairedComputersTests: XCTestCase {
         var registry=PairedComputers();registry.remember(old);registry.remember(changed)
         XCTAssertEqual(registry.computers.count,2)
     }
+    func testManualOrderSurvivesReloadAndReconnectWithoutChangingSelection() throws {
+        let work = pair("a"), home = pair("c"), other = pair("d")
+        var registry = PairedComputers()
+        registry.remember(work)
+        registry.remember(home)
+        registry.remember(other, select: false)
+        registry.move(from: IndexSet(integer: 0), to: 3)
+
+        var restored = try PairedComputers.decode(JSONEncoder().encode(registry))
+        XCTAssertEqual(restored.computers.map(\.id), [home.id, other.id, work.id])
+        XCTAssertEqual(restored.selected?.id, home.id)
+        var reconnected = work
+        reconnected.credential = "refreshed"
+        restored.remember(reconnected, select: false)
+        XCTAssertEqual(restored.computers.map(\.id), [home.id, other.id, work.id])
+        XCTAssertEqual(restored.computers.last?.credential, "refreshed")
+        XCTAssertEqual(restored.selected?.id, home.id)
+    }
     func testRememberedInvitationsAreStrippedAndInvalidStorageIsRejected() throws {
         var registry=PairedComputers(),value=pair("a")
         value.info.secret="one-time-invitation";registry.remember(value)

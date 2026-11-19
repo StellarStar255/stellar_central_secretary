@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
+import SwiftUI
 
 struct PairedMac: Codable, Identifiable {
     var info: PairInfo
@@ -38,6 +39,9 @@ struct PairedComputers: Codable {
         computers.removeAll { $0.id == id }
         // Removing the current computer never silently selects another one.
         if selectedID == id { selectedID = nil }
+    }
+    mutating func move(from offsets: IndexSet, to destination: Int) {
+        computers.move(fromOffsets: offsets, toOffset: destination)
     }
 }
 

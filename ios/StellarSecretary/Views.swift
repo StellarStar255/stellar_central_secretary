@@ -738,6 +738,7 @@ struct DeviceView: View {
     @State private var nickname=""
     @State private var showRemove=false
     @State private var showRename=false
+    @State private var computerEditMode: EditMode = .inactive
     var body: some View {
         NavigationStack {
             Form {
@@ -751,26 +752,50 @@ struct DeviceView: View {
                             HStack {Text(pair.displayName).font(.headline);Spacer();if pair.id==model.paired?.id {Label("当前",systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(.green)}}
                             if pair.displayName != pair.info.name {Text(pair.info.name).font(.caption).foregroundStyle(.secondary)}
                             if model.pendingCount(pair)>0 {Text("此电脑有 \(model.pendingCount(pair)) 条待发送内容").font(.caption).foregroundStyle(.secondary)}
-                            HStack {
-                                if pair.id != model.paired?.id {Button("使用这台电脑") {Task {await model.selectComputer(pair.id)}}.accessibilityIdentifier("computer-select-"+pair.info.server_id)}
-                                Button("备注名") {renaming=pair;nickname=pair.nickname ?? "";showRename=true}.accessibilityIdentifier("computer-rename-"+pair.info.server_id)
-                                Spacer()
-                                Button("移除",role:.destructive) {removing=pair;showRemove=true}.accessibilityIdentifier("computer-remove-"+pair.info.server_id)
-                            }.buttonStyle(.borderless).disabled(!model.canChangeComputer)
+                            if !computerEditMode.isEditing {
+                                HStack {
+                                    if pair.id != model.paired?.id {Button("使用这台电脑") {Task {await model.selectComputer(pair.id)}}.accessibilityIdentifier("computer-select-"+pair.info.server_id)}
+                                    Button("备注名") {renaming=pair;nickname=pair.nickname ?? "";showRename=true}.accessibilityIdentifier("computer-rename-"+pair.info.server_id)
+                                    Spacer()
+                                    Button("移除",role:.destructive) {removing=pair;showRemove=true}.accessibilityIdentifier("computer-remove-"+pair.info.server_id)
+                                }.buttonStyle(.borderless).disabled(!model.canChangeComputer)
+                            }
                         }.padding(.vertical,4)
+                    }.onMove(perform: model.moveComputers)
+                    if !computerEditMode.isEditing {
+                        Button {addComputer()} label:{Label("添加电脑",systemImage:"qrcode.viewfinder")}.disabled(!model.canChangeComputer)
                     }
-                    Button {addComputer()} label:{Label("添加电脑",systemImage:"qrcode.viewfinder")}.disabled(!model.canChangeComputer)
-                } header:{Text("我的电脑 · \(model.computers.computers.count)")} footer:{Text("分别扫码授权后即可切换，无需重新绑定。每台电脑最多绑定 10 部手机，手机最多保存 10 台电脑。")}
+                } header:{
+                    HStack {
+                        Text("我的电脑 · \(model.computers.computers.count)")
+                        Spacer()
+                        if model.computers.computers.count > 1 {
+                            Button(computerEditMode.isEditing ? "完成" : "排序") {
+                                withAnimation {computerEditMode = computerEditMode.isEditing ? .inactive : .active}
+                            }.accessibilityIdentifier("computer-order")
+                        }
+                    }
+                } footer:{
+                    if computerEditMode.isEditing {
+                        Text("拖动右侧的手柄调整顺序。")
+                    } else {
+                        Text("分别扫码授权后即可切换，无需重新绑定。每台电脑最多绑定 10 部手机，手机最多保存 10 台电脑。")
+                    }
+                }
                 if !model.canChangeComputer {Section {Text(model.pairingInFlight ? "正在配对，请先完成或取消配对":"正在提交内容，完成后即可切换电脑").font(.footnote).foregroundStyle(.secondary)}}
                 if !model.error.isEmpty {Section {Text(model.error).foregroundStyle(.orange)}}
                 Section { Button("隐私与 AI") { model.showPrivacy = true } }
                 Section {
                     Text("每台电脑的知识库、聊天记录和手机待发送内容分别保存。切换不会同步或合并电脑资料。连接需要电脑开机运行，且网络或附近连接可达。").font(.callout).foregroundStyle(.secondary)
                 }
-                if model.paired != nil {
+                if model.paired != nil && !computerEditMode.isEditing {
                     Section {Button("解除手机上的配对",role:.destructive) {removing=model.paired;showRemove=true}.disabled(!model.canChangeComputer)}
                 }
             }.navigationTitle("连接")
+            .environment(\.editMode, $computerEditMode)
+            .onChange(of: model.computers.computers.count) {_, count in
+                if count < 2 {computerEditMode = .inactive}
+            }
             .alert("电脑备注名",isPresented:$showRename) {
                 TextField("例如：公司电脑、家里电脑",text:$nickname)
                 Button("保存") {if let pair=renaming {model.renameComputer(pair.id,name:nickname)}}

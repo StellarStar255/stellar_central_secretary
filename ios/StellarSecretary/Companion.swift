@@ -272,6 +272,15 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             if paired?.id==id {paired=next.computers[index];status=online ? "已连接 · \(paired!.displayName)":"正在连接 \(paired!.displayName)…"}
         } catch {self.error="无法保存电脑备注"}
     }
+    func moveComputers(from offsets: IndexSet, to destination: Int) {
+        guard credentialStoreAvailable else {return}
+        var next = computers
+        next.move(from: offsets, to: destination)
+        do {
+            try CredentialStore.save(next)
+            computers = next
+        } catch {self.error = "无法保存电脑顺序，请稍后重试"}
+    }
     func removeComputer(_ id:String) {
         guard canChangeComputer else {error="正在提交内容，请完成后再移除电脑";return}
         do {

@@ -302,6 +302,49 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Background shared answer"].waitForExistence(timeout:10))
     }
 
+    @MainActor func testManualComputerOrderSurvivesRelaunch() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        clearSavedComputers(app)
+
+        let first = try fixture("/pair.json")
+        app.open(URL(string: first["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        XCTAssertTrue(app.tabBars.buttons["连接"].waitForExistence(timeout:20))
+        app.tabBars.buttons["连接"].tap()
+        XCTAssertTrue(app.staticTexts["当前电脑 · Fixture Mac"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["computer-order"].exists)
+
+        let second = try fixture("/second/pair.json")
+        app.open(URL(string: second["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/second/approve")
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].waitForExistence(timeout:20))
+        let order = app.buttons["computer-order"]
+        XCTAssertTrue(order.waitForExistence(timeout:5))
+        order.tap()
+        let workRow = app.cells.containing(.staticText, identifier: "Fixture Mac").firstMatch
+        let homeRow = app.cells.containing(.staticText, identifier: "Home Mac").firstMatch
+        XCTAssertTrue(homeRow.waitForExistence(timeout:5))
+        XCTAssertLessThan(workRow.frame.midY, homeRow.frame.midY)
+        let handle = homeRow.descendants(matching:.any).matching(
+            NSPredicate(format:"label CONTAINS[c] 'Reorder'")).firstMatch
+        XCTAssertTrue(handle.exists, homeRow.debugDescription)
+        handle.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).press(
+            forDuration:0.4, thenDragTo:workRow.coordinate(withNormalizedOffset:CGVector(dx:0.9,dy:0.05)))
+        order.tap()
+        XCTAssertLessThan(homeRow.frame.midY, workRow.frame.midY)
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].exists)
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["连接"].tap()
+        XCTAssertTrue(homeRow.waitForExistence(timeout:5))
+        XCTAssertLessThan(homeRow.frame.midY, workRow.frame.midY)
+        XCTAssertTrue(app.staticTexts["当前电脑 · Home Mac"].exists)
+    }
+
     @MainActor func testZZMultipleComputersKeepCachesAndOutboxesSeparate() throws {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch();clearSavedComputers(app)
