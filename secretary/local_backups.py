@@ -3,7 +3,7 @@ import hashlib,json,re,shutil,sqlite3,tempfile,threading,uuid,zipfile
 from contextlib import closing
 from datetime import datetime,timezone
 from pathlib import Path
-import os
+import sys
 from . import paths
 
 class Backups:
@@ -29,15 +29,18 @@ class Backups:
         selected=Path(requested.strip()).expanduser()
         if not selected.is_absolute():raise ValueError('请输入备份目录的完整路径。')
         folder=selected.resolve()
-        if not folder.is_dir() and not folder.parent.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
+        if sys.platform == 'darwin':
+            volumes = Path('/Volumes')
+            if folder.is_relative_to(volumes) and folder != volumes:
+                volume = volumes/folder.relative_to(volumes).parts[0]
+                if not volume.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
         if folder not in (self.default.resolve(),self.folder.resolve()) and folder.name!='Stellar Secretary Backups':folder=(folder/'Stellar Secretary Backups').resolve()
         if paths.inside_program(folder):raise ValueError('备份目录不能位于程序安装目录中。')
         root=self.archive.root.resolve()
         if folder==root or any(folder.is_relative_to(root/name) for name in ('files','uploads','open-files')):raise ValueError('备份目录不能放在原件或工作文件目录内')
         with self.lock:
-            folder.mkdir(parents=True,exist_ok=True)
             probe=folder/('.write-test-'+uuid.uuid4().hex)
-            try:probe.write_bytes(b'');probe.unlink()
+            try:folder.mkdir(parents=True,exist_ok=True);probe.write_bytes(b'');probe.unlink()
             except OSError as error:raise ValueError('备份目录不可写') from error
             known=list(dict.fromkeys([*self.config.get('previous_folders',[]),str(self.folder)]))[-5:]
             value={'revision':self.config.get('revision',0)+1,'folder':str(folder),'max_bytes':limit,'daily_keep':daily,'other_keep':other,'previous_folders':known}

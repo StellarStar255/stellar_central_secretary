@@ -9,7 +9,9 @@ class BackupCapacityTest(unittest.TestCase):
    service=Service(Path(temp)/'data');service.archive.configure('codex',False)
    try:
     ident,_=service.archive.add('Before','retained backup text');old=service.backups.create()
-    service.backups.configure({'folder':str(Path(temp)/'other'),'max_bytes':100*1024**2,'daily_keep':1,'other_keep':1})
+    destination=Path(temp)/'custom snapshots'/'Stellar Secretary Backups'
+    service.backups.configure({'folder':str(destination),'max_bytes':100*1024**2,'daily_keep':1,'other_keep':1})
+    self.assertEqual(service.backups.folder,destination.resolve())
     service.archive.update(ident,title='After');service.backups.create();service.backups.create()
     entries=service.backups.entries();self.assertEqual(len([entry for entry in entries if Path(entry['folder'])==service.backups.folder]),1)
     self.assertTrue(any(entry['id']==old['id'] for entry in entries));service.backups.restore(old['id']);self.assertEqual(service.archive.get(ident)['title'],'Before')
