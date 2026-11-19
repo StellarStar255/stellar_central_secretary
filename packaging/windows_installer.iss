@@ -14,6 +14,7 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher=Stellar Secretary
 AppPublisherURL=https://github.com/StellarStar255/stellar_central_secretary
 DefaultDirName={localappdata}\Programs\Stellar Secretary
+UsePreviousAppDir=yes
 DefaultGroupName={#AppName}
 UsePreviousGroup=no
 PrivilegesRequired=lowest
@@ -47,7 +48,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
-; User data in %LOCALAPPDATA%\Stellar Secretary is preserved on uninstall.
+; Library and backup directories are managed by the app and preserved on uninstall.
 
 [Code]
 function UpdateOpenProcess(Access: LongWord; Inherit: Boolean; Pid: LongWord): LongWord;

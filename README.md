@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.126** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.126.md)
+Version **v0.1.127** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.127.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -151,7 +151,7 @@ Right-click a recent archive, library row or archive card and choose **Delete ar
 Data stays outside the replaceable application bundle:
 
 - macOS: `~/Library/Application Support/Stellar Secretary`
-- Windows: `%LOCALAPPDATA%\Stellar Secretary`
+- Windows: new libraries prefer a writable non-system fixed drive. On a single-drive system the default is `%LOCALAPPDATA%\Stellar Secretary`. Existing libraries and custom folders are retained during upgrades.
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`
 
 Use **Export library backup** for a ZIP containing originals, the database and a JSON list. **Import library backup** merges items and skips duplicates. Archived originals may use item IDs as filenames; downloading through the app restores the original filename.

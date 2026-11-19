@@ -118,7 +118,8 @@ def _import_backup(archive, data,stage):
                 db.execute('BEGIN IMMEDIATE')
                 for item, content, digest,attachments,batches,batch_files in prepared:
                     url = item.get('url', '')
-                    if db.execute("SELECT 1 FROM items WHERE digest=? OR (url=? AND ?!='')", (digest, url, url)).fetchone():
+                    if db.execute("SELECT 1 FROM items WHERE trashed_at=? AND (digest=? OR (url=? AND ?!=''))",
+                                  (item.get('trashed_at',''), digest, url, url)).fetchone():
                         skipped += 1
                         continue
                     item_id = uuid.uuid4().hex

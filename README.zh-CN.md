@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.126** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.126.md)
+版本 **v0.1.127** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.127.md)
 
 HEIC/HEIF 照片支持本地缩略图、应用内查看和视觉总结（需支持图片输入的模型）。原件完整保留，预览和分析使用本地生成的兼容 JPEG；已入库附件无需重新上传，旧摘要可通过“重新总结”更新图片内容。
 
@@ -72,7 +72,7 @@ Linux 的资料保存在 `${XDG_DATA_HOME:-~/.local/share}/stellar-secretary`。
 
 在「模型与设置 → 版本与升级」点击「检查更新」，有正式新版时点击「一键升级并重启」。程序验证 SHA256，macOS 额外验证开发者签名，安装后重启；有读取或摘要任务时请先等待完成。macOS 请先把应用拖到「应用程序」，从 DMG 直接运行时会转为手动安装。
 
-安装版数据目录：macOS 为 `~/Library/Application Support/Stellar Secretary`，Windows 为 `%LOCALAPPDATA%\Stellar Secretary`。升级和卸载保留资料。首次从源码版迁移时，先停止旧服务并备份，将原项目 `data` 目录的全部内容复制到对应安装版目录，再启动应用；不要同时启动两版。对话记录使用本机共享存储，供网页与桌面共用；首次刷新新版网页时会迁移该浏览器的原有历史，本地浏览器记录继续作为后备。
+安装版数据目录：macOS 为 `~/Library/Application Support/Stellar Secretary`，Windows 新建资料库优先使用可写的非系统固定磁盘，只有系统盘可用时使用 `%LOCALAPPDATA%\Stellar Secretary`。默认备份随资料库保存，已有资料库和自定义备份目录在升级时沿用。首次从源码版迁移时，先停止旧服务并备份，将原项目 `data` 目录的全部内容复制到对应安装版目录，再启动应用；不要同时启动两版。对话记录使用本机共享存储，供网页与桌面共用；首次刷新新版网页时会迁移该浏览器的原有历史，本地浏览器记录继续作为后备。
 
 ## 源码启动
 

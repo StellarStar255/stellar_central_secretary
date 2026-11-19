@@ -53,6 +53,9 @@ def main():
         original=hashlib.sha256(asset.read_bytes()).hexdigest()
         asset.write_bytes(asset.read_bytes()+b'\n<!-- old installation probe -->')
         archive=Archive(data);archive.configure('codex',False)
+        from secretary.local_backups import Backups
+        backup_dir=root/'custom snapshots'/'Stellar Secretary Backups'
+        Backups(archive).configure({'folder':str(backup_dir)})
         item_id,_=archive.add('Windows update fixture','Preserve this local reference during update.')
         with archive.db() as db:before=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
@@ -107,6 +110,8 @@ def main():
             status=wait(native_status)
             assert status['version']==__version__,status.get('version')
             assert Path(status['data_dir']).resolve()==data.resolve()
+            assert Path(status['backup']['folder']).resolve()==backup_dir.resolve()
+            assert any(backup_dir.glob('*.zip')),'Upgrade backup did not use the custom backup directory'
             assert hashlib.sha256(asset.read_bytes()).hexdigest()==original,'Installer did not replace existing files'
             with archive.db() as db:after=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
             assert before==after,'Archived item columns changed'
@@ -126,7 +131,7 @@ def main():
                 try:snapshot.unlink()
                 except PermissionError:pass
                 else:raise AssertionError('Expected a real Windows sharing violation')
-                locked=subprocess.run([str(setup),'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/LOGCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',f'/DIR={install}',f'/LOG={logs.resolve()/"locked-resource.log"}'],timeout=180)
+                locked=subprocess.run([str(setup),'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/LOGCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',f'/LOG={logs.resolve()/"locked-resource.log"}'],timeout=180)
                 assert locked.returncode==0,locked.returncode
                 holder.wait(timeout=10);assert snapshot.exists()
                 print('PASS: real Inno installer releases orphan WebEngine v8 snapshot lock, including legacy handoff path')

@@ -15,10 +15,6 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from html.parser import HTMLParser
 
-class TrashedDuplicateError(ValueError):
-    def __init__(self,item):
-        super().__init__('相同资料已在回收站，可恢复原归档。')
-        self.item={key:item[key] for key in ('id','title','updated','trashed_at')}
 from .rich_text import searchable_text
 from . import additions,links,bundles,pdf_reading,origins,attachment_order
 
@@ -139,13 +135,14 @@ class Archive:
         with self.db() as db:
             db.executescript('''PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, title TEXT, kind TEXT, url TEXT,
-            filename TEXT, digest TEXT UNIQUE, text TEXT, summary TEXT DEFAULT '', tags TEXT DEFAULT '[]',
+            filename TEXT, digest TEXT, text TEXT, summary TEXT DEFAULT '', tags TEXT DEFAULT '[]',
             category TEXT DEFAULT '未分类', state TEXT, error TEXT DEFAULT '', created TEXT, updated TEXT);
             CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, item_id TEXT, position INTEGER, text TEXT);
             CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(tokens, chunk_id UNINDEXED, item_id UNINDEXED);
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS deleted_items(id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS deleted_messages(chat_id TEXT, message_id TEXT, PRIMARY KEY(chat_id,message_id));''')
+            self._allow_rearchiving(db)
             chunk_columns={row[1] for row in db.execute('PRAGMA table_info(chunks)')}
             source_migration='origin' not in chunk_columns
             if source_migration:db.execute("ALTER TABLE chunks ADD COLUMN origin TEXT NOT NULL DEFAULT '{}'")
@@ -173,6 +170,23 @@ class Archive:
             from .library import initialize
             initialize(db)
         if recover:self.finish_deletions()
+
+    @staticmethod
+    def _allow_rearchiving(db):
+        schema=db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='items'").fetchone()[0]
+        if 'digest TEXT UNIQUE' in schema:
+            # Retain row IDs used by the library's search index and keep the
+            # digest as the real checksum of the original file in every row.
+            db.execute('BEGIN IMMEDIATE')
+            schema=db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='items'").fetchone()[0]
+            if 'digest TEXT UNIQUE' in schema:
+                definition=schema[schema.index('('):].replace('digest TEXT UNIQUE','digest TEXT',1)
+                db.execute('CREATE TABLE items_rearchive'+definition)
+                columns=','.join('"'+row[1].replace('"','""')+'"' for row in db.execute('PRAGMA table_info(items)'))
+                db.execute('INSERT INTO items_rearchive(rowid,'+columns+') SELECT rowid,'+columns+' FROM items')
+                db.execute('DROP TABLE items')
+                db.execute('ALTER TABLE items_rearchive RENAME TO items')
+        db.execute('CREATE INDEX IF NOT EXISTS items_digest ON items(digest)')
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.root / 'archive.sqlite3', timeout=30); db.row_factory = sqlite3.Row
@@ -260,15 +274,14 @@ class Archive:
                 chunk=content[offset:offset+1200]
                 cursor=db.execute('INSERT INTO chunks(item_id,position,text,origin) VALUES (?,?,?,?)',(item_id,-1,chunk,json.dumps(origin,ensure_ascii=False)))
                 db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
-    def add(self, title='', text='', url='', filename='', data=None, warning='', *, fresh_if_trashed=False):
+    def add(self, title='', text='', url='', filename='', data=None, warning=''):
         if isinstance(data,Path):
             with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
         else:digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
-            old = db.execute("SELECT id,title,text,updated,trashed_at FROM items WHERE (digest=? OR (url=? AND ?!=''))" + (" AND trashed_at=''" if fresh_if_trashed else '') + " ORDER BY (trashed_at!=''),created LIMIT 1", (digest, url, url)).fetchone()
+            old = db.execute("SELECT id,text FROM items WHERE trashed_at='' AND (digest=? OR (url=? AND ?!='')) ORDER BY created LIMIT 1", (digest, url, url)).fetchone()
             if old:
-                if old['trashed_at']:raise TrashedDuplicateError(old)
                 if text.strip() and not old['text'].strip():
                     db.execute("UPDATE items SET text=?,title=?,state='pending',error='',updated=? WHERE id=?", (text, title or filename or url, now, old['id']))
                     if data is not None:
@@ -276,10 +289,6 @@ class Archive:
                         db.execute("UPDATE items SET filename=? WHERE id=?", (filename, old['id']))
                     self._index(db, old['id'], text)
                 return old['id'], False
-            # Keep the trashed row intact, including its unique content digest.
-            # Active recaptures are subsequently deduplicated by their source URL.
-            if fresh_if_trashed and db.execute('SELECT 1 FROM items WHERE digest=?',(digest,)).fetchone():
-                digest=hashlib.sha256((digest+item_id).encode()).hexdigest()
             if data is not None: bundles.copy_data(data,self.root / 'files' / item_id)
             state = 'pending' if text.strip() else 'needs_content'
             db.execute('INSERT INTO items(id,title,kind,url,filename,digest,text,state,error,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?)',

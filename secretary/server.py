@@ -24,7 +24,7 @@ from .local_http import LocalHTTPServer
 from pathlib import Path
 from PIL import Image
 
-from .core import Archive, PageText, extract, TrashedDuplicateError
+from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
 from . import image_formats, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
@@ -845,8 +845,7 @@ class Service:
                     expected=requested.split('\n',2)[-1] if requested else canonical
                     if content(existing,canonical)==expected:
                         return {'item':existing,'created':False,'updated':False,'reused':True}
-        item_id, created = self.archive.add(title, text, url, name, data, warning,
-                                          fresh_if_trashed=bool(url) and (body.get('browser_extension') is True or name.endswith('.knowledge.json')))
+        item_id, created = self.archive.add(title, text, url, name, data, warning)
         if created and not (url or name):
             from .note_dates import resolve
             from datetime import datetime
@@ -1556,7 +1555,6 @@ def handler(service):
                     service.queue(item_id, force=True, full_pdf=body.get('full_pdf') is True); return self.send(200, {'ok':True})
                 self.send(404, {'error':'不存在'})
             except company_ai.ApprovalRequired as exc:self.send(409,{'error':str(exc),'company_model':exc.info})
-            except TrashedDuplicateError as exc:self.send(409,{'error':str(exc),'trashed_duplicate':exc.item})
             except (ValueError, KeyError) as exc: self.send(400, {'error':str(exc)})
             except Exception as exc: self.send(500, {'error':str(exc)})
     return Handler
@@ -1569,6 +1567,9 @@ def main(desktop=False):
     parser.add_argument('--no-browser', action='store_true'); args = parser.parse_args()
     service = Service(args.data_dir)
     server = LocalHTTPServer(('127.0.0.1', args.port), handler(service))
+    if args.port == 8768:
+        try:paths.remember_windows_data_dir(service.archive.root)
+        except OSError as error:print('Could not save Windows data location:',error,file=sys.stderr,flush=True)
     for item in service.archive.list():
         if item['state']=='pending': service.queue(item['id'])
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())

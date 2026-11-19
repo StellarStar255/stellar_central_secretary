@@ -40,19 +40,15 @@ with tempfile.TemporaryDirectory() as root:
     expect(body).not_to_contain_text('我2026年')
     assert len(service.archive.list())==1
     page.locator('#message-input').fill(only_text)
-    with page.expect_response(lambda response:response.url.endswith('/api/ingest')) as conflict:page.locator('#send-button').click()
-    assert conflict.value.status==409 and conflict.value.json()['trashed_duplicate']['id']==saved['id']
-    expect(page.locator('[data-restore-duplicate]')).to_have_count(1)
-    expect(page.locator('#messages .message.assistant').last).not_to_have_class('error')
-    expect(page.locator('#message-input')).to_have_value(only_text)
-    assert service.archive.get(saved['id'],include_trashed=True)['trashed_at']
-    page.screenshot(path='/tmp/stellar-archive-recovery.png');page.reload()
-    expect(page.locator('[data-restore-duplicate]')).to_have_count(1)
-    page.locator('[data-restore-duplicate]').click()
-    expect(page.locator('#messages .message.assistant').last).to_contain_text('已恢复原归档，保留原建档时间。')
+    with page.expect_response(lambda response:response.url.endswith('/api/ingest')) as archived:page.locator('#send-button').click()
+    assert archived.value.status==200 and archived.value.json()['created']
+    fresh=archived.value.json()['item']['id']
+    assert fresh!=saved['id']
+    expect(page.locator('#messages .archive-card').last).to_have_attribute('data-id',fresh)
     expect(page.locator('[data-restore-duplicate]')).to_have_count(0)
-    assert service.archive.get(saved['id'])==saved and len(service.archive.list())==2
-    assert not errors,errors
-    print('PASS: live equivalent reused; trashed duplicate yields a durable restore action and preserves input; explicit restore keeps original ID, date and content; unrelated trash stays deleted')
+    expect(page.locator('#message-input')).to_have_value('')
+    assert service.archive.get(saved['id'],include_trashed=True)['trashed_at']
+    assert len(service.archive.list())==2 and not errors,errors
+    print('PASS: active equivalent reused; rearchiving from trash creates a new archive and leaves the old one recoverable')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

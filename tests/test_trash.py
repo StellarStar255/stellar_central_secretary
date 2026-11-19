@@ -14,7 +14,8 @@ class TrashTest(unittest.TestCase):
   self.assertEqual(self.a.list(),[]);self.assertEqual(self.a.retrieve('Recover'),[])
   with self.assertRaises(KeyError):self.a.get(self.id)
   self.assertEqual((self.a.root/'files'/self.id).read_bytes(),b'original bytes')
-  with self.assertRaises(ValueError):self.a.add('Duplicate','Recover searchable source '*30,filename='record.txt',data=b'original bytes')
+  fresh,created=self.a.add('Duplicate','Recover searchable source '*30,filename='record.txt',data=b'original bytes')
+  self.assertTrue(created);self.assertNotEqual(fresh,self.id)
   self.assertEqual(len(self.a.trash_items()),1);self.a.restore_item(self.id);self.assertEqual(self.a.get(self.id),before);self.assertTrue(self.a.retrieve('Recover'))
  def test_flags_ranking_and_validation(self):
   other,_=self.a.add('Other fixture','Another source');before=self.a.get(self.id)['updated'];self.a.set_flags(self.id,{'favorite':True,'pinned':True})

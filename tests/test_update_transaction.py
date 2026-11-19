@@ -21,10 +21,12 @@ class AtomicStatusTest(unittest.TestCase):
                 (work/'worker-ready').touch()
                 return Mock()
             with patch.object(paths,'FROZEN',True),patch.object(paths,'DATA_DIR',base/'library'), \
-                 patch.object(sys,'executable',str(executable)),patch.object(sys,'argv',['stellar']), \
+                 patch.object(sys,'executable',str(executable)),patch.object(sys,'argv',['stellar','--data-dir=relative','--port','8771']), \
                  patch.object(update_transaction,'spawn',side_effect=spawn):
                 self.assertTrue(update_transaction.prepare(base/'release.dmg',work,'sha','new',kind='mac'))
             self.assertTrue((work/'proceed').is_file())
+            config=json.loads((work/'transaction.json').read_text(encoding='utf-8'))
+            self.assertEqual(config['args'],['--port','8771','--data-dir',str((base/'library').resolve())])
 
     def test_windows_reader_lock_retries_and_publishes_complete_json(self):
         from unittest.mock import patch

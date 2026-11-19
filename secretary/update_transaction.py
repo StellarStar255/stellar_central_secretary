@@ -70,7 +70,10 @@ def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,bef
     shutil.copytree(root,previous,symlinks=True)
     args=[arg for arg in sys.argv[1:] if arg!='--desktop']
     if desktop:args.append('--desktop')
-    if '--data-dir' not in args and not any(arg.startswith('--data-dir=') for arg in args):args+=['--data-dir',str(data)]
+    data_arg=argparse.ArgumentParser(add_help=False,allow_abbrev=False)
+    data_arg.add_argument('--data-dir')
+    _,args=data_arg.parse_known_args(args)
+    args+=['--data-dir',str(data)]
     parser=argparse.ArgumentParser(add_help=False);parser.add_argument('--port',type=int,default=8768);port=parser.parse_known_args(args)[0].port
     config=dict(root=str(root),backup=str(previous),executable=str(executable),package=str(Path(package).resolve()),
                 sha=sha,version=version,old_version=__version__,data=str(data),work=str(work),kind=kind,

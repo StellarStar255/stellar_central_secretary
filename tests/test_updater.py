@@ -117,5 +117,34 @@ class UpdateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.dict('os.environ', {'SECRETARY_DATA_DIR':temp}):
             self.assertEqual(paths.data_dir(), Path(temp).resolve())
 
+    def test_windows_prefers_writable_secondary_drive_for_new_library(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp)
+            legacy=base/'system'/'Stellar Secretary'
+            secondary=base/'secondary'
+            blocked=base/'blocked'
+            blocked.touch()
+            with patch.object(paths,'_windows_metadata',return_value=legacy), \
+                 patch.object(paths,'_windows_fixed_drives',return_value=[blocked,secondary]):
+                self.assertEqual(paths._windows_data_dir(),secondary/'Stellar Secretary Data'/Path.home().name)
+                legacy.mkdir(parents=True)
+                (legacy/'archive.sqlite3').touch()
+                self.assertEqual(paths._windows_data_dir(),legacy)
+            with patch.object(paths,'_windows_metadata',return_value=base/'fresh-system'), \
+                 patch.object(paths,'_windows_fixed_drives',return_value=[blocked]):
+                self.assertEqual(paths._windows_data_dir(),base/'fresh-system')
+
+    def test_windows_remembers_explicit_library_over_legacy_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp)
+            legacy=base/'system'
+            legacy.mkdir()
+            (legacy/'archive.sqlite3').touch()
+            custom=base/'custom library'
+            with patch.object(paths,'_windows_metadata',return_value=legacy), \
+                 patch.object(paths.sys,'platform','win32'),patch.object(paths,'FROZEN',True):
+                paths.remember_windows_data_dir(custom)
+                self.assertEqual(paths._windows_data_dir(),custom.resolve())
+
 
 if __name__ == '__main__': unittest.main()
