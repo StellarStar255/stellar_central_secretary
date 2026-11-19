@@ -26,7 +26,7 @@ from PIL import Image
 
 from .core import Archive, PageText, extract
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
-from . import image_formats, mobile_privacy
+from . import image_formats, library_location, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
 from .chat_cleanup import clean_chats
@@ -98,6 +98,7 @@ class Service:
         self.login_confirmations = {}
         self.busy = set();self.trash_cancellations=set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
+        self.location_lock = threading.Lock()
         from .completion_notifications import CompletionEvents
         self.completion_events=CompletionEvents();self.summary_jobs.on_finished=self.notify_summary_finished
         from .question_progress import QuestionProgress
@@ -1099,7 +1100,7 @@ class Service:
             ids=list(self.captures)
             for stop in self.captures.values():stop.set()
         for item_id in ids:self.cancel_capture(item_id)
-        self.backups.stop.set()
+        self.backups.close()
         self.summary_jobs.close();ai.cancel_all()
         self.question_jobs.close()
         self.quick_pool.shutdown(wait=False,cancel_futures=True)
@@ -1190,7 +1191,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1266,8 +1267,10 @@ def handler(service):
                     q = urllib.parse.parse_qs(parsed.query)
                     return self.send(200, [service.with_progress(item) for item in service.archive.list(**{k:q.get(k,[''])[0] for k in ('q','category','kind')})])
                 if path=='/api/backup':
-                    snapshot=service.backups.create()
-                    return self.stream_file(service.backups.folder/(snapshot['id']+'.zip'),'stellar-knowledge-backup.zip','application/zip')
+                    with service.backups.lock:
+                        snapshot=service.backups.create()
+                        source=service.backups.folder/(snapshot['id']+'.zip')
+                    return self.stream_file(source,'stellar-knowledge-backup.zip','application/zip')
                 preview_match=re.fullmatch(r'/api/items/([a-f0-9]{32})/quick-preview',path)
                 if preview_match:
                     from .rich_text import searchable_text
@@ -1398,7 +1401,19 @@ def handler(service):
                     from .library import dashboard
                     with service.lock:active=set(service.busy)|set(service.captures)
                     result=dashboard(service.archive,body.get('ids',[]),active);result['items']=[service.with_progress(item) for item in result['items']];return self.send(200,result)
-                if path=='/api/backups/configure':return self.send(200,service.backups.configure(body))
+                if path=='/api/library-location':
+                    with service.location_lock:
+                        if updater.status().get('phase') in ('downloading','verifying','installing'):
+                            raise ValueError('请等待升级完成后再更改记忆目录。')
+                        return self.send(200,library_location.schedule(service.archive.root,body.get('folder'),service.backups.folder))
+                if path=='/api/backups/configure':
+                    with service.location_lock:
+                        pending=library_location.status(service.archive.root).get('pending')
+                        if pending and isinstance(body.get('folder'),str):
+                            folder=Path(body['folder']).expanduser().resolve()
+                            if folder.is_relative_to(pending) or Path(pending).is_relative_to(folder):
+                                raise ValueError('请选择独立于现有记忆和备份目录的文件夹。')
+                        return self.send(200,service.backups.configure(body))
                 if path=='/api/backups/verify':return self.send(200,service.backups.verify(body.get('id')))
                 if path=='/api/backups/create':return self.send(200,service.backups.create())
                 if path=='/api/backups/restore':
@@ -1416,10 +1431,13 @@ def handler(service):
                         require_idle()
                         service.backups.create('upgrade')
 
-                    require_idle()
-                    updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
-                                  desktop=bool(service.desktop_status().get('enabled')),
-                                  before_install=backup_before_upgrade, before_handoff=require_idle)
+                    with service.location_lock:
+                        if library_location.status(service.archive.root).get('pending'):
+                            raise ValueError('请先重启程序完成记忆迁移，或取消迁移后再升级。')
+                        require_idle()
+                        updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
+                                      desktop=bool(service.desktop_status().get('enabled')),
+                                      before_install=backup_before_upgrade, before_handoff=require_idle)
                     return self.send(200, updater.status())
                 if path=='/api/shutdown':
                     if body.get('force'):service.close()
@@ -1566,10 +1584,33 @@ def handler(service):
 def main(desktop=False):
     parser = argparse.ArgumentParser(description='Stellar Secretary · 知识秘书')
     parser.add_argument('--port', type=int, default=8768)
-    parser.add_argument('--data-dir', default=str(paths.DATA_DIR))
+    parser.add_argument('--data-dir')
     parser.add_argument('--no-browser', action='store_true'); args = parser.parse_args()
-    service = Service(args.data_dir)
-    server = LocalHTTPServer(('127.0.0.1', args.port), handler(service))
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        server = stack.enter_context(LocalHTTPServer(('127.0.0.1', args.port), BaseHTTPRequestHandler))
+        value = library_location.read()
+        root = library_location.selected(value, args.data_dir or os.environ.get('SECRETARY_DATA_DIR'))
+        if str(root) in (value.get('active'), value.get('source')):
+            if not (root/'archive.sqlite3').is_file():
+                raise library_location.Unavailable(f'记忆目录不可用，请检查硬盘连接：{root}')
+        else:
+            root.mkdir(parents=True, exist_ok=True)
+        stack.enter_context(library_location.lease(root))
+        destination = library_location.migrate(root, value)
+        if destination != root:
+            stack.enter_context(library_location.lease(destination))
+        paths.DATA_DIR = destination
+        if paths.FROZEN:
+            log = open(destination/'app.log','a',encoding='utf-8',buffering=1)
+            sys.stdout = sys.stderr = log
+        service = Service(destination)
+        stack.callback(service.close)
+        server.RequestHandlerClass = handler(service)
+        run_service(service, server, args, desktop)
+
+
+def run_service(service, server, args, desktop):
     if args.port == 8768:
         try:paths.remember_windows_data_dir(service.archive.root)
         except OSError as error:print('Could not save Windows data location:',error,file=sys.stderr,flush=True)
@@ -1593,6 +1634,6 @@ def main(desktop=False):
                 open_browser(address)
             server.serve_forever()
     except KeyboardInterrupt: pass
-    finally: server.server_close(); service.close()
+
 
 if __name__=='__main__': main()

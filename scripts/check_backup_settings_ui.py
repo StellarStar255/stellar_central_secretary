@@ -1,10 +1,12 @@
 import os,sys,tempfile,threading
 from pathlib import Path
+from unittest.mock import patch
 ROOT=Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT))
 from secretary.server import Service,handler
+from secretary import library_location
 from secretary.local_http import LocalHTTPServer
 from playwright.sync_api import sync_playwright,expect
-with tempfile.TemporaryDirectory() as temp:
+with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'preference_file', side_effect=lambda: Path(temp)/'settings'/'location.json'):
  service=Service(Path(temp)/'data');service.archive.configure('codex',False);service.archive.add('Original','Backup fixture')
  server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
@@ -16,9 +18,19 @@ with tempfile.TemporaryDirectory() as temp:
     result=configured.value.json();assert configured.value.ok,result
     page.evaluate('status=>StellarBackups.sync(status)',stale)
     expect(page.locator('#backup-folder')).to_have_value(str((Path(temp)/'Chosen'/'Stellar Secretary Backups').resolve()))
+    destination=(Path(temp)/'New Library').resolve();destination.mkdir()
+    page.locator('#library-folder').fill(str(destination))
+    page.locator('#library-location-save').click()
+    expect(page.locator('#library-location-status')).to_contain_text(str(destination))
+    expect(page.locator('#data-dir')).to_contain_text(str(service.archive.root))
+    assert library_location.read()['target']==str(destination)
+    assert service.backups.folder==(Path(temp)/'Chosen'/'Stellar Secretary Backups').resolve()
+    page.locator('#library-location-cancel').click()
+    expect(page.locator('#library-location-cancel')).to_be_hidden()
+    assert not library_location.read().get('target')
     page.locator('#backup-create').click();expect(page.locator('#backup-entries').get_by_role('button',name='恢复此备份',exact=True)).to_have_count(1,timeout=15000);expect(page.locator('#backup-status')).to_contain_text('0.2 GB');expect(page.locator('#backup-entries')).to_contain_text('数据库与原件已验证');page.locator('[data-backup-verify]').click();expect(page.locator('#toast')).to_contain_text('备份验证通过')
     service.backups.error='Synthetic backup failure';service.backups._save_state(state='error',last_error=service.backups.error,last_attempt='fixture')
     page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
-    print('PASS: real backup directory/capacity settings, snapshot creation, last-success/usage display, persistent failure notice and retained previous backup')
+    print('PASS: independent library and backup folders, pending move and cancel, backup capacity settings, snapshot creation, last-success/usage display, persistent failure notice and retained previous backup')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

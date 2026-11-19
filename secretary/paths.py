@@ -85,6 +85,14 @@ def data_dir():
 DATA_DIR = data_dir()
 
 
+def inside_program(directory):
+    if not FROZEN:
+        return False
+    executable = Path(sys.executable).resolve()
+    program = next((parent for parent in executable.parents if parent.suffix == '.app'), executable.parent)
+    return directory.is_relative_to(program)
+
+
 def configure_tls():
     """Frozen OpenSSL cannot use the build machine's CA path on another Mac."""
     if FROZEN and sys.platform == 'darwin' and 'SSL_CERT_FILE' not in os.environ:

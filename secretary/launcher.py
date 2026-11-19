@@ -8,7 +8,7 @@ import traceback
 import urllib.request
 import json
 import webbrowser
-from . import paths
+from . import library_location, paths
 from .system_integration import open_browser
 
 def desktop_session(platform=None,env=None):
@@ -36,7 +36,7 @@ def main():
                 status = json.load(response)
             if status.get('application') != 'stellar-central-secretary':
                 return False
-            if known.data_dir and Path(known.data_dir).resolve() != Path(status.get('data_dir', '')).resolve():
+            if known.data_dir and library_location.selected(library_location.read(), known.data_dir) != Path(status.get('data_dir', '')).resolve():
                 raise RuntimeError('此端口已有使用其他资料目录的实例，请使用不同端口。')
             if not status.get('desktop', {}).get('supports_window'):
                 return False
@@ -60,12 +60,6 @@ def _main():
     if explicit_desktop: sys.argv.remove('--desktop')
     desktop = desktop_session() and (explicit_desktop or '--no-browser' not in sys.argv)
     probe=argparse.ArgumentParser(add_help=False);probe.add_argument('--port',type=int,default=8768);probe.add_argument('--data-dir');known,_=probe.parse_known_args()
-    if known.data_dir:
-        paths.DATA_DIR=Path(known.data_dir).expanduser().resolve()
-        os.environ['SECRETARY_DATA_DIR']=str(paths.DATA_DIR)
-    paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    log = open(paths.DATA_DIR / 'app.log', 'a', encoding='utf-8', buffering=1)
-    sys.stdout = sys.stderr = log
     # Finder launches with a short PATH; Node-based model CLIs use /usr/bin/env.
     os.environ['PATH'] = os.pathsep.join([str(Path.home()/'.local/bin'),
                                         '/opt/homebrew/bin', '/usr/local/bin', os.environ.get('PATH', '')])
@@ -74,7 +68,7 @@ def _main():
     try:
         with opener.open(address+'/api/status', timeout=2) as response:
             status = json.load(response)
-        if status.get('application') == 'stellar-central-secretary' and (not known.data_dir or Path(known.data_dir).resolve()==Path(status.get('data_dir','')).resolve()):
+        if status.get('application') == 'stellar-central-secretary' and (not known.data_dir or library_location.selected(library_location.read(), known.data_dir)==Path(status.get('data_dir','')).resolve()):
             if desktop and not status.get('desktop', {}).get('enabled'):
                 if sys.platform=='win32' and not status.get('capabilities',{}).get('desktop_bridge'):
                     active=any(status.get('runtime',{}).values()) or status.get('update',{}).get('phase') in ('downloading','verifying','installing')
@@ -111,6 +105,20 @@ def _main():
     try:
         from .server import main as serve
         serve(desktop=desktop)
+    except library_location.Unavailable as error:
+        if desktop:
+            if sys.platform == 'darwin':
+                from AppKit import NSAlert, NSApplication
+                NSApplication.sharedApplication()
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_(str(error))
+                alert.runModal()
+            else:
+                from PySide6.QtWidgets import QApplication, QMessageBox
+                app = QApplication.instance() or QApplication([])
+                QMessageBox.warning(None, 'Stellar Secretary', str(error))
+        else:
+            print(error, file=sys.stderr)
     except Exception:
         traceback.print_exc()
         raise

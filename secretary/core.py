@@ -132,7 +132,8 @@ class Archive:
         self.root = Path(root); self.root.mkdir(parents=True, exist_ok=True)
         (self.root / 'files').mkdir(exist_ok=True)
         self.lock = threading.RLock()
-        with self.db() as db:
+        self._database_uri = (self.root/'archive.sqlite3').resolve().as_uri()
+        with self.db(create=True) as db:
             db.executescript('''PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, title TEXT, kind TEXT, url TEXT,
             filename TEXT, digest TEXT, text TEXT, summary TEXT DEFAULT '', tags TEXT DEFAULT '[]',
@@ -188,8 +189,10 @@ class Archive:
                 db.execute('ALTER TABLE items_rearchive RENAME TO items')
         db.execute('CREATE INDEX IF NOT EXISTS items_digest ON items(digest)')
     @contextmanager
-    def db(self):
-        db = sqlite3.connect(self.root / 'archive.sqlite3', timeout=30); db.row_factory = sqlite3.Row
+    def db(self, create=False):
+        mode = 'rwc' if create else 'rw'
+        db = sqlite3.connect(self._database_uri+'?mode='+mode, timeout=30, uri=True)
+        db.row_factory = sqlite3.Row
         from .library import document,rank_values
         from .local_paths import target
         db.create_function('local_path_target',1,target,deterministic=True)

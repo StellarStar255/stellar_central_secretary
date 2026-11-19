@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import datetime,timezone
 from pathlib import Path
 import os
+from . import paths
 
 class Backups:
     def __init__(self,archive):
@@ -25,8 +26,12 @@ class Backups:
         if type(limit) is not int or not 100*1024**2<=limit<=2000*1024**3 or type(daily) is not int or not 1<=daily<=30 or type(other) is not int or not 1<=other<=10:raise ValueError('备份容量或保留份数无效')
         requested=body.get('folder',str(self.folder))
         if not isinstance(requested,str) or not requested.strip():raise ValueError('请选择备份目录')
-        folder=Path(requested).expanduser().resolve()
-        if folder not in (self.default.resolve(),self.folder.resolve()) and folder.name!='Stellar Secretary Backups':folder=folder/'Stellar Secretary Backups'
+        selected=Path(requested.strip()).expanduser()
+        if not selected.is_absolute():raise ValueError('请输入备份目录的完整路径。')
+        folder=selected.resolve()
+        if not folder.is_dir() and not folder.parent.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
+        if folder not in (self.default.resolve(),self.folder.resolve()) and folder.name!='Stellar Secretary Backups':folder=(folder/'Stellar Secretary Backups').resolve()
+        if paths.inside_program(folder):raise ValueError('备份目录不能位于程序安装目录中。')
         root=self.archive.root.resolve()
         if folder==root or any(folder.is_relative_to(root/name) for name in ('files','uploads','open-files')):raise ValueError('备份目录不能放在原件或工作文件目录内')
         with self.lock:
@@ -72,6 +77,7 @@ class Backups:
             self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
             key=uuid.uuid4().hex;target=self.folder/(key+'.zip');temporary=target.with_suffix('.part')
             try:
+                if not self.folder.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
                 with self.archive.lock,tempfile.TemporaryDirectory(dir=self.folder) as temp:
                     snapshot=Path(temp)/'archive.sqlite3'
                     with closing(sqlite3.connect(snapshot)) as dst,self.archive.db() as src:src.backup(dst)
@@ -104,7 +110,8 @@ class Backups:
                 self._save_state(state='ready',last_success=value['created'],last_error='')
                 self.error='';return value
             except Exception as error:
-                temporary.unlink(missing_ok=True);self.error=str(error);self._save_state(state='error',last_error=self.error);raise
+                if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
+                self.error=str(error);self._save_state(state='error',last_error=self.error);raise
     def verify(self,key,allow_source_mismatch=False):
         from . import backup_verification
         with self.lock:
@@ -125,14 +132,18 @@ class Backups:
             except Exception as error:
                 save({'state':'failed','id':key,'checked_at':datetime.now(timezone.utc).isoformat(),'error':str(error)[:1000]});raise
     def due(self):
-        if not any(value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self.entries()):self.create('daily')
+        if not any(Path(value['folder'])==self.folder and value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self.entries()):self.create('daily')
     def start(self):
         def loop():
             while not self.stop.is_set():
                 try:self.due()
                 except Exception as error:self.error=str(error)
                 self.stop.wait(3600)
-        threading.Thread(target=loop,name='local-backups',daemon=True).start()
+        self.worker=threading.Thread(target=loop,name='local-backups',daemon=True)
+        self.worker.start()
+    def close(self):
+        self.stop.set()
+        if getattr(self,'worker',None):self.worker.join()
     def restore(self,key):
         with self.lock,self.archive.lock:
             entry=next((value for value in self.entries() if value['id']==key),None)
@@ -141,7 +152,7 @@ class Backups:
             source=Path(entry['folder'])/(key+'.zip')
             with source.open('rb') as stream:
                 if hashlib.file_digest(stream,'sha256').hexdigest()!=entry['sha256']:raise ValueError('备份校验失败，未修改当前资料')
-            with tempfile.TemporaryDirectory(dir=self.folder) as temp:
+            with tempfile.TemporaryDirectory(dir=self.archive.root) as temp:
                 stage=Path(temp);incoming=stage/'files';incoming.mkdir()
                 with zipfile.ZipFile(source) as archive:
                     for info in archive.infolist():

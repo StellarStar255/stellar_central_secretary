@@ -7,6 +7,30 @@
   const verificationError=status.last_verification?.state==='failed'?status.last_verification.error:'';const failed=status.state==='error'&&status.last_error||verificationError;$('#settings-open')?.setAttribute('data-backup-warning',String(Boolean(failed)));if($('#backup-error'))$('#backup-error').textContent=status.last_error||verificationError||status.warning||'';
   const warning=failed?(verificationError?status.last_verification.checked_at+verificationError:status.last_attempt+status.last_error):'';if(warning&&warning!==lastWarning){lastWarning=warning;try{if(localStorage.getItem('stellar-backup-notice')===warning)return;localStorage.setItem('stellar-backup-notice',warning)}catch{}toast?.(t(verificationError?'备份检查失败，当前资料未修改：':'备份失败，已有备份保留：')+(verificationError||status.last_error))}
  }
- function bind(options){({api,toast}=options);for(const id of ['backup-folder','backup-limit','backup-daily-keep','backup-other-keep'])$('#'+id)?.addEventListener('input',()=>{dirty.add(id)});$('#backup-configure').onclick=async()=>{const button=$('#backup-configure');button.disabled=true;saving=true;try{const status=await api('/api/backups/configure',{folder:$('#backup-folder').value,max_bytes:Math.round(Number($('#backup-limit').value)*1073741824),daily_keep:Number($('#backup-daily-keep').value),other_keep:Number($('#backup-other-keep').value)});dirty.clear();sync(status);toast(t('备份设置已保存，原目录备份仍可恢复。'))}catch(error){$('#backup-error').textContent=error.message}finally{saving=false;button.disabled=false}}}
- globalThis.StellarBackups={bind,sync};
+ function syncLocation(location){
+  const cancel=$('#library-location-cancel'),line=$('#library-location-status');
+  if(!location||!line)return;
+  cancel.hidden=!location.pending;
+  line.textContent=location.error?t('记忆迁移失败，仍在使用原目录：')+t(location.error):location.pending?t('重启后将迁移记忆至：')+location.pending:'';
+ }
+ async function saveLocation(folder){
+  const save=$('#library-location-save'),cancel=$('#library-location-cancel'),field=$('#library-folder'),line=$('#library-location-status');
+  save.disabled=cancel.disabled=true;
+  try{
+   const location=await api('/api/library-location',{folder});
+   field.value='';syncLocation(location);
+  }catch(error){line.textContent=error.message}
+  finally{save.disabled=cancel.disabled=false}
+ }
+ function bind(options){({api,toast}=options);
+  if($('#library-location-save')){
+   $('#library-location-save').onclick=()=>{
+    const folder=$('#library-folder').value.trim();
+    if(folder)void saveLocation(folder);
+    else $('#library-location-status').textContent=t('请输入记忆目录的完整路径。');
+   };
+   $('#library-location-cancel').onclick=()=>void saveLocation('');
+  }
+  for(const id of ['backup-folder','backup-limit','backup-daily-keep','backup-other-keep'])$('#'+id)?.addEventListener('input',()=>{dirty.add(id)});$('#backup-configure').onclick=async()=>{const button=$('#backup-configure');button.disabled=true;saving=true;try{const status=await api('/api/backups/configure',{folder:$('#backup-folder').value,max_bytes:Math.round(Number($('#backup-limit').value)*1073741824),daily_keep:Number($('#backup-daily-keep').value),other_keep:Number($('#backup-other-keep').value)});dirty.clear();sync(status);toast(t('备份设置已保存，原目录备份仍可恢复。'))}catch(error){$('#backup-error').textContent=error.message}finally{saving=false;button.disabled=false}}}
+ globalThis.StellarBackups={bind,sync,syncLocation};
 })();
