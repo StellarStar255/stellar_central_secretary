@@ -250,6 +250,21 @@ struct ChatView: View {
         let known=Set(messages.map(\.clientID))
         return model.currentChatQueue.filter {($0.chatID==model.selectedChatID || model.selectedChatID.isEmpty) && !known.contains($0.id)}
     }
+    private func queueStatus(_ pending: PendingChatMessage) -> String {
+        if !pending.lastError.isEmpty { return pending.lastError }
+        if model.sendingChatID == pending.id {
+            if pending.attachment == nil { return "正在发送消息…" }
+            if model.chatUploadTransport == "bluetooth" { return "正在通过蓝牙上传附件…" }
+            if model.chatUploadTransport != nil { return "正在上传附件…" }
+            return "正在准备上传附件…"
+        }
+        if !model.online { return "待发送 · 连接后由电脑处理" }
+        if model.chatSnapshot?.id == pending.chatID, model.chatSnapshot?.running == true {
+            return "等待上一条回答完成…"
+        }
+        if model.chatRetryAfter[pending.id] != nil { return "发送中断，将自动重试。" }
+        return "待发送…"
+    }
     private func stage(_ value:String) -> String {
         switch value {
         case "queued":return "等待电脑处理…"
@@ -295,9 +310,11 @@ struct ChatView: View {
                                 VStack(alignment:.leading,spacing:8) {
                                     if !pending.text.isEmpty {Text(pending.text).textSelection(.enabled)}
                                     if let file=pending.attachment {Label(file.name,systemImage:"paperclip")}
-                                    Text(PhoneLanguage.text(pending.lastError.isEmpty ? "待发送 · 连接后由电脑处理":pending.lastError,in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary)
+                                    Text(PhoneLanguage.text(queueStatus(pending),in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary)
                                     HStack {
-                                        if !pending.lastError.isEmpty {Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)}
+                                        if !pending.lastError.isEmpty || model.chatRetryAfter[pending.id] != nil {
+                                            Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)
+                                        }
                                         Button("移除待发消息",role:.destructive) {removing=pending;confirmingRemoval=true}.disabled(model.chatSubmitting)
                                     }
                                 }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(Color.accentColor.opacity(0.08),in:RoundedRectangle(cornerRadius:14)).id(pending.id)

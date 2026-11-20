@@ -50,6 +50,13 @@
 "回答生成中" = "Generating answer";
 "停止回答" = "Stop answering";
 "待发送 · 连接后由电脑处理" = "Queued until connected";
+"正在发送消息…" = "Sending message…";
+"正在通过蓝牙上传附件…" = "Uploading attachment over Bluetooth…";
+"正在上传附件…" = "Uploading attachment…";
+"正在准备上传附件…" = "Preparing to upload attachment…";
+"等待上一条回答完成…" = "Waiting for the previous reply to finish…";
+"发送中断，将自动重试。" = "Sending interrupted. Retrying automatically.";
+"待发送…" = "Queued to send…";
 "移除待发消息" = "Remove queued message";
 "移除聊天附件" = "Remove chat attachment";
 "正在读取附件…" = "Reading attachment…";
