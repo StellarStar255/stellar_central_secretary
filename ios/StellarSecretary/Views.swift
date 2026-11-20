@@ -3,7 +3,7 @@ import PhotosUI
 import AVFoundation
 import QuickLook
 
-private enum PhoneLanguage {
+enum PhoneLanguage {
     static let setting = "phoneInterfaceLanguage"
     static let chinese = "zh-Hans"
     private static let englishBundle = Bundle.main.url(forResource:"en",withExtension:"lproj")
@@ -177,7 +177,7 @@ struct CaptureView: View {
                         if !model.online { Text("离线 · 显示上次确认的状态") }
                     }
                 }
-            }.navigationTitle("随手归档").scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            }.navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
             .task(id:"\(model.workspaceID)-\(model.selectedTab)-\(model.online)-\(model.captureStatusAvailable)-\(scene)") {
                 guard model.selectedTab == "archive", model.online, model.captureStatusAvailable, scene == .active else {return}
                 while !Task.isCancelled {
@@ -383,7 +383,7 @@ struct ChatView: View {
                         if !model.currentChatQueue.isEmpty {
                             Section("手机待发送") {ForEach(model.currentChatQueue) {pending in VStack(alignment:.leading) {Text(pending.text).lineLimit(3);if !pending.lastError.isEmpty {Text(PhoneLanguage.text(pending.lastError,in:interfaceLocale)).font(.caption).foregroundStyle(.orange)}}}}
                         }
-                    }.navigationTitle("电脑上的会话").toolbar {Button("关闭") {choosing=false}}.refreshable {await model.syncChatList()}
+                    }.navigationTitle(PhoneLanguage.text("电脑上的会话",in:interfaceLocale)).toolbar {Button("关闭") {choosing=false}}.refreshable {await model.syncChatList()}
                 }
             }
             .alert("移除待发消息？",isPresented:$confirmingRemoval) {Button("移除",role:.destructive) {if let pending=removing {model.removeQueuedChatMessage(pending.id)}};Button("取消",role:.cancel) {}} message:{Text("这条尚未发送的内容将从手机移除。")}
@@ -501,7 +501,7 @@ struct LibraryView: View {
                 if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.answer.isEmpty { Section("回答") { Text(model.answer).textSelection(.enabled);ForEach(model.sources) { item in NavigationLink(item.title) { DetailView(record:item,workspace:model.workspaceID) } } } }
                 Section("资料") { ForEach(model.records) { item in NavigationLink { DetailView(record:item,workspace:model.workspaceID) } label: { VStack(alignment:.leading,spacing:5) { Text(item.title);if !item.summary.isEmpty { Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) } } } } }
-            }.navigationTitle("知识库")
+            }.navigationTitle(PhoneLanguage.text("知识库",in:interfaceLocale))
             .task(id:model.online) {await model.openLibrary()}
             .refreshable {await model.search(query)}
         }
@@ -682,12 +682,12 @@ struct DetailView: View {
                     if !text.isEmpty {DisclosureGroup("正文与归档说明") {Text(text).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled)}}
                 }
             }.padding().frame(maxWidth:.infinity,alignment:.leading)
-        }.navigationTitle("资料详情").navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle(PhoneLanguage.text("资料详情",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
         .toolbar {Button("重新加载") {Task {await load()}}.disabled(working)}
         .task {await load()}
         .sheet(item:$preview,onDismiss:{clearPreview()}) {value in
             NavigationStack {
-                OriginalPreview(url:value.url).navigationTitle(LocalizedStringKey(value.lightweight ? "图片预览（非原件）":"完整原件")).navigationBarTitleDisplayMode(.inline)
+                OriginalPreview(url:value.url).navigationTitle(PhoneLanguage.text(value.lightweight ? "图片预览（非原件）":"完整原件",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
                     .toolbar {ToolbarItem(placement:.topBarTrailing) {Button("关闭") {preview=nil}}}
             }
         }
@@ -843,7 +843,7 @@ struct DeviceView: View {
                 if model.paired != nil && !computerEditMode.isEditing {
                     Section {Button("解除手机上的配对",role:.destructive) {removing=model.paired;showRemove=true}.disabled(!model.canChangeComputer)}
                 }
-            }.navigationTitle("连接")
+            }.navigationTitle(PhoneLanguage.text("连接",in:interfaceLocale))
             .environment(\.editMode, $computerEditMode)
             .onChange(of: model.computers.computers.count) {_, count in
                 if count < 2 {computerEditMode = .inactive}
@@ -911,7 +911,7 @@ struct PrivacyView: View {
                     Text("你可以在 iOS 设置管理权限，在电脑端移除此手机的访问权限，或在这里撤回模型授权。")
                 }
             }
-            .navigationTitle("隐私与 AI")
+            .navigationTitle(PhoneLanguage.text("隐私与 AI",in:interfaceLocale))
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("关闭") { dismiss() } } }
             .task(id: "\(companion.deviceGeneration)-\(companion.privacySupported)-\(companion.online)") { await load() }
         }

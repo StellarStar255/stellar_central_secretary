@@ -15,6 +15,7 @@ struct ReviewDemoView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var interfaceLocale
     @State private var page = Page.library
     @State private var samples = [
         Sample(title: "Rain garden checklist", text: "Choose native plants, check drainage after rain, and spread mulch to retain moisture."),
@@ -41,7 +42,7 @@ struct ReviewDemoView: View {
                 content
             }
             .padding(.horizontal)
-            .navigationTitle("Stellar Secretary Demo")
+            .navigationTitle(PhoneLanguage.text("知识秘书演示",in:interfaceLocale))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close") { dismiss() } } }
         }

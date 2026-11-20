@@ -26,6 +26,7 @@ final class CompanionUITests: XCTestCase {
     @MainActor func testInterfaceLanguageSurvivesRelaunch() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages","(zh-Hans)","-AppleLocale","zh_CN"]
         app.launch()
         clearSavedComputers(app)
 
@@ -41,13 +42,21 @@ final class CompanionUITests: XCTestCase {
         picker.tap()
         app.buttons["English"].tap()
         XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout:8))
+        XCTAssertTrue(app.navigationBars.staticTexts["Connection"].exists)
         XCTAssertTrue(app.staticTexts["Current computer · Fixture Mac"].exists)
         XCTAssertTrue(tabs.buttons["Save"].exists)
         XCTAssertTrue(tabs.buttons["Chat"].exists)
         XCTAssertTrue(tabs.buttons["Search"].exists)
 
+        tabs.buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Quick Capture"].waitForExistence(timeout:5))
         tabs.buttons["Search"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Library"].waitForExistence(timeout:5))
         XCTAssertTrue(app.textFields["Search the library or ask a question"].waitForExistence(timeout:5))
+        let record = app.buttons.containing(NSPredicate(format:"label CONTAINS 'Reference fixture'")).firstMatch
+        XCTAssertTrue(record.waitForExistence(timeout:8))
+        record.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Record Details"].waitForExistence(timeout:5))
         app.terminate()
         app.launch()
         XCTAssertTrue(tabs.buttons["Connection"].waitForExistence(timeout:15))
@@ -57,6 +66,10 @@ final class CompanionUITests: XCTestCase {
         picker.tap()
         app.buttons["简体中文"].tap()
         XCTAssertTrue(app.navigationBars["连接"].waitForExistence(timeout:8))
+        tabs.buttons["归档"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["随手归档"].waitForExistence(timeout:5))
+        tabs.buttons["检索"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["知识库"].waitForExistence(timeout:5))
     }
     @MainActor func testReviewDemoWithoutPairing() {
         continueAfterFailure = false
