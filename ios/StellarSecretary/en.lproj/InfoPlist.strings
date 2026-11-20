@@ -1,4 +1,4 @@
 "CFBundleDisplayName" = "Stellar Secretary";
 "NSBluetoothAlwaysUsageDescription" = "Find nearby computers and connect to paired libraries.";
-"NSCameraUsageDescription" = "Scan the pairing code shown on your computer.";
+"NSCameraUsageDescription" = "Scan your computer’s pairing code or take a photo to attach to a chat.";
 "NSLocalNetworkUsageDescription" = "Find and connect to paired computers to use your library.";

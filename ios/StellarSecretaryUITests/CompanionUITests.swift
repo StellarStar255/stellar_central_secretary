@@ -48,6 +48,10 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(tabs.buttons["Chat"].exists)
         XCTAssertTrue(tabs.buttons["Search"].exists)
 
+        tabs.buttons["Chat"].tap()
+        app.buttons["chat-add-attachment"].tap()
+        XCTAssertTrue(app.buttons["Take Photo"].waitForExistence(timeout:5))
+        app.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.25)).tap()
         tabs.buttons["Save"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Quick Capture"].waitForExistence(timeout:5))
         tabs.buttons["Search"].tap()
@@ -285,6 +289,15 @@ final class CompanionUITests: XCTestCase {
         let input=app.textViews["chat-input"]
         XCTAssertTrue(input.isEnabled);XCTAssertGreaterThanOrEqual(input.frame.height,55)
         input.tap();input.typeText("First mobile conversation")
+        let keyboard = app.keyboards.firstMatch
+        let dismissKeyboard = app.buttons["chat-dismiss-keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout:5))
+        XCTAssertTrue(dismissKeyboard.waitForExistence(timeout:5))
+        dismissKeyboard.tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout:5))
+        XCTAssertEqual(input.value as? String,"First mobile conversation")
+        input.tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout:5))
         let send=app.buttons["chat-send"];send.tap()
         let allow=app.buttons["同意并允许向此服务发送"]
         XCTAssertTrue(allow.waitForExistence(timeout:10))
@@ -297,11 +310,15 @@ final class CompanionUITests: XCTestCase {
         XCTAssertEqual(try fixture("/chat-count")["count"] as? Int,1)
         input.tap()
         XCTAssertFalse(send.isEnabled)
+        XCTAssertTrue(dismissKeyboard.waitForExistence(timeout:5))
+        dismissKeyboard.tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout:5))
         let addAttachment=app.buttons["chat-add-attachment"]
         XCTAssertTrue(addAttachment.isEnabled)
         addAttachment.tap()
         XCTAssertTrue(app.buttons["截图或照片"].waitForExistence(timeout:5))
         XCTAssertTrue(app.buttons["文件"].exists)
+        XCTAssertTrue(app.buttons["拍照"].exists)
     }
     @MainActor func testSharedDesktopChatAndOfflineRecovery() throws {
         continueAfterFailure=false

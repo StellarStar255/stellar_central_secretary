@@ -219,6 +219,16 @@ private struct CaptureReceiptRow: View {
     }
 }
 struct ChatView: View {
+    private struct CameraTarget: Identifiable {
+        let id = UUID()
+        let workspace: String
+        let chat: String
+
+        @MainActor func matches(_ model: Companion) -> Bool {
+            workspace == model.workspaceID && chat == model.selectedChatID
+        }
+    }
+
     @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model:Companion
     private var input:String {model.chatInput}
@@ -231,6 +241,7 @@ struct ChatView: View {
     @State private var sending=false
     @State private var pickingPhoto=false
     @State private var pickingFile=false
+    @State private var cameraTarget: CameraTarget?
     @State private var loadingAttachment=false
     @State private var pickedPhoto:PhotosPickerItem?
     @State private var attachmentError=""
@@ -311,6 +322,7 @@ struct ChatView: View {
                     if !attachmentError.isEmpty {Text(PhoneLanguage.text(attachmentError,in:interfaceLocale)).font(.footnote).foregroundStyle(.orange)}
                     HStack(alignment:.bottom) {
                     Menu {
+                        Button("拍照",systemImage:"camera") { openCamera() }
                         Button("截图或照片",systemImage:"photo") {pickingPhoto=true}
                         Button("文件",systemImage:"doc") {pickingFile=true}
                     } label: {
@@ -345,6 +357,18 @@ struct ChatView: View {
                     }
                 }.padding()
             }.navigationTitle(model.chatSnapshot?.title ?? PhoneLanguage.text("聊天",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(item:$cameraTarget) { target in
+                ChatCamera { result in
+                    cameraTarget = nil
+                    guard case .captured(let photo) = result, target.matches(model) else { return }
+                    guard let data = photo?.jpegData(compressionQuality: 0.8) else {
+                        attachmentError = "无法读取照片。"
+                        return
+                    }
+                    setAttachment(name:"Photo.jpg",data:data)
+                }
+                .ignoresSafeArea()
+            }
             .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhoto,matching:.images)
             .onChange(of:pickedPhoto) {_,photo in
                 guard let photo else {return}
@@ -397,13 +421,70 @@ struct ChatView: View {
             }
         }
     }
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            attachmentError = "此设备无法使用相机。"
+            return
+        }
+        let target = CameraTarget(workspace:model.workspaceID,chat:model.selectedChatID)
+        attachmentError = ""
+        dismissKeyboard += 1
+        loadingAttachment = true
+        Task {
+            defer { loadingAttachment = false }
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            guard target.matches(model) else { return }
+            if granted {
+                cameraTarget = target
+            } else {
+                attachmentError = "未获相机权限。请在系统设置中允许知识秘书使用相机。"
+            }
+        }
+    }
+
     private func setAttachment(name:String,data:Data) {
         guard (1...10*1024*1024).contains(data.count) else {attachmentError="聊天附件须为非空文件，最多 10 MB。";return}
         attachmentError="";model.chatAttachment=ChatAttachment(name:name,data:data)
     }
 }
 
+private struct ChatCamera: UIViewControllerRepresentable {
+    enum Result {
+        case cancelled
+        case captured(UIImage?)
+    }
+
+    let onFinish: (Result) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (Result) -> Void
+
+        init(onFinish: @escaping (Result) -> Void) { self.onFinish = onFinish }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onFinish(.cancelled)
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            onFinish(.captured(info[.originalImage] as? UIImage))
+        }
+    }
+}
+
 private struct ChatComposer: UIViewRepresentable {
+    @Environment(\.locale) private var interfaceLocale
     @Binding var text: String
     @Binding var composing: Bool
     let dismissKeyboard: Int
@@ -412,8 +493,17 @@ private struct ChatComposer: UIViewRepresentable {
     // UIKit owns the marked range until the keyboard commits its candidate.
     final class Editor: UITextView {
         var onInput: (() -> Void)?
+        lazy var keyboardDone = UIBarButtonItem(
+            title: nil, style: .done, target: self, action: #selector(hideKeyboard)
+        )
         private var changingMark = 0
         var isComposing: Bool { changingMark > 0 || markedTextRange != nil }
+
+        @objc func hideKeyboard() {
+            guard isFirstResponder else { return }
+            if markedTextRange != nil { unmarkText() }
+            resignFirstResponder()
+        }
 
         override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
             changingMark += 1
@@ -458,6 +548,12 @@ private struct ChatComposer: UIViewRepresentable {
         editor.layer.cornerRadius = 8
         editor.accessibilityIdentifier = "chat-input"
         editor.accessibilityLabel = placeholder
+        editor.keyboardDone.accessibilityIdentifier = "chat-dismiss-keyboard"
+        let keyboardToolbar = UIToolbar()
+        keyboardToolbar.tintColor = UIColor(Color.accentColor)
+        keyboardToolbar.items = [UIBarButtonItem(systemItem:.flexibleSpace), editor.keyboardDone]
+        keyboardToolbar.sizeToFit()
+        editor.inputAccessoryView = keyboardToolbar
         editor.delegate = context.coordinator
         editor.onInput = { [weak editor, weak coordinator = context.coordinator] in
             if let editor { coordinator?.publish(editor) }
@@ -469,9 +565,12 @@ private struct ChatComposer: UIViewRepresentable {
         let shouldDismiss = context.coordinator.parent.dismissKeyboard != dismissKeyboard
         context.coordinator.parent = self
         editor.layer.borderColor = UIColor.separator.resolvedColor(with:editor.traitCollection).cgColor
-        guard !editor.isComposing else {return}
-        if editor.text != text {editor.text = text}
-        if shouldDismiss {editor.resignFirstResponder()}
+        editor.keyboardDone.title = PhoneLanguage.text("完成",in:interfaceLocale)
+        if !editor.isComposing, editor.text != text { editor.text = text }
+        if shouldDismiss {
+            // Ending editing can publish a committed IME draft through the delegate.
+            Task { @MainActor [weak editor] in editor?.hideKeyboard() }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView editor: Editor, context: Context) -> CGSize? {

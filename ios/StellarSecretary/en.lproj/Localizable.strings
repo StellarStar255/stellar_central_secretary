@@ -54,6 +54,8 @@
 "移除聊天附件" = "Remove chat attachment";
 "正在读取附件…" = "Reading attachment…";
 "截图或照片" = "Screenshot or photo";
+"拍照" = "Take Photo";
+"此设备无法使用相机。" = "The camera is unavailable on this device.";
 "文件" = "File";
 "添加聊天附件" = "Add chat attachment";
 "输入消息开始聊天…" = "Type a message to start chatting…";

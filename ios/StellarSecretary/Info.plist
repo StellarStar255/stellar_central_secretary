@@ -40,7 +40,7 @@
 		<string>_stellar-wifi._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>扫描 Mac 显示的配对二维码。</string>
+	<string>扫描电脑显示的配对二维码，或拍摄照片作为聊天附件。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>寻找并连接已配对的 Mac，共用知识库。</string>
 	<key>UILaunchScreen</key>
