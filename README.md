@@ -18,9 +18,9 @@ The demo uses fictional documents and a prewritten summary. Waiting is accelerat
 
 The optional **Phone connection** setting enables a separate authenticated HTTPS LAN listener. Install the native app in `ios/`, scan the Mac QR from the app, compare the six digits, and approve on the computer. The companion supports note/link/image/file capture, library search, cited text and questions. Bonjour reconnects to the paired computer while the app is open; pending captures survive offline periods and are retried without duplication. Keep the computer awake on the same reachable LAN. Remote access, cloud sync and background delivery with the app closed are not included.
 
-<img src="docs/demo-iphone.gif" width="340" alt="iPhone demo: search sample records, save a note, ask a question, and open the cited record">
+<img src="docs/demo-iphone.gif" width="340" alt="Paired iPhone client in dark mode: save a note, search the library, ask a question, and open the cited record">
 
-<sub>Recorded in the iPhone simulator. Demo mode answers by looking up the built-in sample records locally.</sub>
+<sub>Recorded in the iPhone simulator with the paired client in dark mode, a separate sample library, and a scripted answer.</sub>
 
 The listener is off by default; paired devices can be revoked on the desktop. Phone attachments are limited to 10 MB. Links are initially bookmarked; complete webpage capture on the computer. See [iPhone build, installation and validation instructions](ios/README.md). This is not an App Store or TestFlight release.
 
