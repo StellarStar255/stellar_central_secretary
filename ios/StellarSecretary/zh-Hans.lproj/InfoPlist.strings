@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "知识秘书";
+"NSBluetoothAlwaysUsageDescription" = "发现附近的 Mac，与 Wi-Fi 配合连接已配对知识库。";
+"NSCameraUsageDescription" = "扫描 Mac 显示的配对二维码。";
+"NSLocalNetworkUsageDescription" = "寻找并连接已配对的 Mac，共用知识库。";

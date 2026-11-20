@@ -2,14 +2,17 @@ import XCTest
 
 final class CompanionUITests: XCTestCase {
     @MainActor func clearSavedComputers(_ app:XCUIApplication) {
-        if app.tabBars.buttons["连接"].exists {app.tabBars.buttons["连接"].tap()}
+        let connectionTab = app.tabBars.buttons["连接"].exists ? app.tabBars.buttons["连接"] : app.tabBars.buttons["Connection"]
+        if connectionTab.exists {connectionTab.tap()}
         // Keychain pairings can survive a simulator uninstall. Remove only the
         // test app's saved computers through its real UI before each scenario.
         for _ in 0..<12 {
             let remove=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'computer-remove-'")).firstMatch
             guard remove.exists else {break}
             let id=remove.identifier
-            app.buttons[id].tap();app.buttons["解除配对"].tap()
+            app.buttons[id].tap()
+            let unpair = app.buttons["解除配对"].exists ? app.buttons["解除配对"] : app.buttons["Unpair"]
+            unpair.tap()
             let removed=expectation(for:NSPredicate(format:"exists == false"),evaluatedWith:app.buttons[id])
             wait(for:[removed],timeout:5)
         }
@@ -20,9 +23,45 @@ final class CompanionUITests: XCTestCase {
             failure = error;if let data { result = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:] };done.fulfill()
         }.resume();wait(for:[done],timeout:15);if let failure { throw failure };return result
     }
+    @MainActor func testInterfaceLanguageSurvivesRelaunch() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        clearSavedComputers(app)
+
+        let code = try fixture("/pair.json")
+        app.open(URL(string:code["url"] as! String)!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        let tabs = app.tabBars
+        XCTAssertTrue(tabs.buttons["连接"].waitForExistence(timeout:20))
+        tabs.buttons["连接"].tap()
+        let picker = app.buttons["phone-language-picker"]
+        if !picker.isHittable {app.swipeUp()}
+        picker.tap()
+        app.buttons["English"].tap()
+        XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout:8))
+        XCTAssertTrue(app.staticTexts["Current computer · Fixture Mac"].exists)
+        XCTAssertTrue(tabs.buttons["Save"].exists)
+        XCTAssertTrue(tabs.buttons["Chat"].exists)
+        XCTAssertTrue(tabs.buttons["Search"].exists)
+
+        tabs.buttons["Search"].tap()
+        XCTAssertTrue(app.textFields["Search the library or ask a question"].waitForExistence(timeout:5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(tabs.buttons["Connection"].waitForExistence(timeout:15))
+        tabs.buttons["Connection"].tap()
+        XCTAssertTrue(app.staticTexts["Current computer · Fixture Mac"].exists)
+        if !picker.isHittable {app.swipeUp()}
+        picker.tap()
+        app.buttons["简体中文"].tap()
+        XCTAssertTrue(app.navigationBars["连接"].waitForExistence(timeout:8))
+    }
     @MainActor func testReviewDemoWithoutPairing() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments += ["-phoneInterfaceLanguage","en"]
         app.launch()
         clearSavedComputers(app)
         let openDemo = app.buttons["open-review-demo"]
@@ -52,7 +91,7 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "check drainage after rain")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(garden.exists)
         app.buttons["Close"].tap()
-        XCTAssertTrue(app.buttons["扫描 Mac 配对码"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Scan pairing code"].waitForExistence(timeout: 5))
         openDemo.tap()
         XCTAssertTrue(garden.waitForExistence(timeout: 5))
         XCTAssertFalse(archived.exists)

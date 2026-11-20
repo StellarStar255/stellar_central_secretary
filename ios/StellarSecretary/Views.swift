@@ -3,12 +3,54 @@ import PhotosUI
 import AVFoundation
 import QuickLook
 
+private enum PhoneLanguage {
+    static let setting = "phoneInterfaceLanguage"
+    static let chinese = "zh-Hans"
+    private static let englishBundle = Bundle.main.url(forResource:"en",withExtension:"lproj")
+        .flatMap { Bundle(url:$0) }
+
+    static func text(_ message: String, in locale: Locale) -> String {
+        guard locale.language.languageCode?.identifier == "en", let bundle = englishBundle else { return message }
+        func translate(_ key: String) -> String { bundle.localizedString(forKey:key,value:key,table:nil) }
+        let translated = translate(message)
+        if translated != message {return translated}
+        let patterns = [
+            ("正在连接 ", "…", "正在连接 %@…"),
+            ("已连接 · ", "", "已连接 · %@"),
+            ("", " 离线 · 内容保留在手机", "%@ 离线 · 内容保留在手机"),
+            ("待发送内容已保留：", "", "待发送内容已保留：%@"),
+        ]
+        for (prefix, suffix, key) in patterns where message.hasPrefix(prefix) && message.hasSuffix(suffix) {
+            let value = String(message.dropFirst(prefix.count).dropLast(suffix.count))
+            return String(format:translate(key),value)
+        }
+        if let suffix = message.range(of:"（错误 ",options:.backwards), message.hasSuffix("）") {
+            let code = String(message[suffix.upperBound..<message.index(before:message.endIndex)])
+            return translate(String(message[..<suffix.lowerBound]))+String(format:translate("（错误 %@）"),code)
+        }
+        return message
+    }
+}
+
+private struct PhoneLanguagePicker: View {
+    @AppStorage(PhoneLanguage.setting) private var language = PhoneLanguage.chinese
+
+    var body: some View {
+        Picker("显示语言",selection:$language) {
+            Text(verbatim:"简体中文").tag(PhoneLanguage.chinese)
+            Text(verbatim:"English").tag("en")
+        }.pickerStyle(.menu).accessibilityIdentifier("phone-language-picker")
+    }
+}
+
 @main struct StellarCompanionApp: App {
     @StateObject private var model = Companion()
     @Environment(\.scenePhase) private var scene
+    @AppStorage(PhoneLanguage.setting) private var language = PhoneLanguage.chinese
     var body: some Scene {
         WindowGroup {
             ContentView().environmentObject(model)
+                .environment(\.locale,Locale(identifier:language))
                 .onOpenURL { url in
                     pairingDiagnostic("url-received")
                     guard url.scheme == "stellar-secretary", url.host == "pair", let value = URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "data"})?.value,
@@ -32,6 +74,7 @@ import QuickLook
 }
 struct ContentView: View {
     @EnvironmentObject var model: Companion
+    @Environment(\.locale) private var interfaceLocale
     @State private var scan = false
     @State private var showDemo = false
     @State private var pairingTask: Task<Void, Never>?
@@ -45,13 +88,14 @@ struct ContentView: View {
                         Image(systemName:"sparkle").font(.system(size:64,weight:.light)).foregroundStyle(.orange)
                         Text("随手存，随时查").font(.largeTitle.bold())
                         Text("与 Mac 上的 Stellar Secretary 配对，\n共用你的知识库。").multilineTextAlignment(.center).foregroundStyle(.secondary)
-                        if model.waiting { Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(model.status);ProgressView() }
+                        if model.waiting { Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(PhoneLanguage.text(model.status,in:interfaceLocale));ProgressView() }
                         else { Button { scan = true } label: { Label("扫描 Mac 配对码",systemImage:"qrcode.viewfinder").frame(maxWidth:.infinity) }.buttonStyle(.borderedProminent).controlSize(.large)
                             Text("电脑端：模型与设置 → 手机连接").font(.footnote).foregroundStyle(.secondary)
                             Button("演示模式 / Demo") { showDemo = true }.accessibilityIdentifier("open-review-demo")
                             Button("隐私与 AI / Privacy") { model.showPrivacy = true }
                         }
-                        if !model.error.isEmpty { Text(model.error).foregroundStyle(.orange).font(.callout) }
+                        PhoneLanguagePicker()
+                        if !model.error.isEmpty { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange).font(.callout) }
                     }.padding(30).navigationTitle("Stellar Secretary")
                 }
             } else {
@@ -79,14 +123,16 @@ struct ContentView: View {
 }
 struct ConnectionBanner: View {
     @EnvironmentObject var model: Companion
+    @Environment(\.locale) private var interfaceLocale
     var body: some View {
         VStack(alignment:.leading,spacing:4) {
-            if let pair=model.paired {Text("当前电脑 · "+pair.displayName).font(.caption).foregroundStyle(.secondary)}
-            Label(model.status,systemImage:model.online ? "checkmark.circle.fill":"wifi.slash").font(.footnote).foregroundStyle(model.online ? .green:.secondary)
+            if let pair=model.paired {Text("当前电脑 · \(pair.displayName)").font(.caption).foregroundStyle(.secondary)}
+            Label(PhoneLanguage.text(model.status,in:interfaceLocale),systemImage:model.online ? "checkmark.circle.fill":"wifi.slash").font(.footnote).foregroundStyle(model.online ? .green:.secondary)
         }.padding(.vertical,4)
     }
 }
 struct CaptureView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
     @Environment(\.scenePhase) private var scene
     private var text: String {model.captureEditor.text}
@@ -105,15 +151,15 @@ struct CaptureView: View {
                     PhotosPicker(selection:$photo,matching:.images) { Label("添加截图或照片",systemImage:"photo") }
                     Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
                     if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
-                    Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(model.online ? "保存到知识库":"暂存，连接后发送",systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
+                    Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(LocalizedStringKey(model.online ? "保存到知识库":"暂存，连接后发送"),systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
                 } footer: { Text("可在「连接 → 隐私与 AI」授权手机归档自动摘要。附件最多 10 MB。") }
-                if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
+                if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
                         ForEach(model.currentDrafts) { draft in
                             VStack(alignment:.leading) {
                                 Text(draft.filename ?? draft.text).lineLimit(2)
-                                Text(model.sendingDraftID == draft.id ? "正在上传" : "待发送").font(.caption).foregroundStyle(.secondary)
+                                Text(LocalizedStringKey(model.sendingDraftID == draft.id ? "正在上传" : "待发送")).font(.caption).foregroundStyle(.secondary)
                             }.accessibilityIdentifier("capture-outbox-"+draft.id)
                             .swipeActions { if model.sendingDraftID != draft.id { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
                         }
@@ -157,6 +203,7 @@ struct CaptureView: View {
 }
 
 private struct CaptureReceiptRow: View {
+    @Environment(\.locale) private var interfaceLocale
     let receipt: CaptureReceipt
     var body: some View {
         VStack(alignment:.leading,spacing:4) {
@@ -167,11 +214,12 @@ private struct CaptureReceiptRow: View {
             case "error": Label("整理未完成", systemImage:"exclamationmark.circle").foregroundStyle(.orange)
             default: Label("已归档", systemImage:"tray.and.arrow.down")
             }
-            if !receipt.message.isEmpty {Text(receipt.message).fixedSize(horizontal:false,vertical:true)}
+            if !receipt.message.isEmpty {Text(PhoneLanguage.text(receipt.message,in:interfaceLocale)).fixedSize(horizontal:false,vertical:true)}
         }.font(.subheadline)
     }
 }
 struct ChatView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model:Companion
     private var input:String {model.chatInput}
     @State private var choosing=false
@@ -207,23 +255,23 @@ struct ChatView: View {
             VStack(spacing:0) {
                 ConnectionBanner().padding(.horizontal).frame(maxWidth:.infinity,alignment:.leading)
                 if !model.online {Text("离线时显示已同步记录，新消息会暂存在手机").font(.caption).foregroundStyle(.secondary).padding(.horizontal)}
-                if !model.chatNotice.isEmpty {Text(model.chatNotice).font(.footnote).foregroundStyle(.orange).padding(.horizontal)}
+                if !model.chatNotice.isEmpty {Text(PhoneLanguage.text(model.chatNotice,in:interfaceLocale)).font(.footnote).foregroundStyle(.orange).padding(.horizontal)}
                 ScrollViewReader {reader in
                     ScrollView {
                         LazyVStack(alignment:.leading,spacing:16) {
                             if model.chatSnapshot?.hasMore==true {Button("加载更早的消息") {Task {await model.syncSelectedChat(older:true)}}.disabled(!model.online)}
                             if messages.isEmpty && queued.isEmpty {
-                                Text(model.selectedChatID.isEmpty ? "发一条消息开始聊天":"继续这段对话，电脑会结合相同的上下文处理").foregroundStyle(.secondary).padding(.vertical,24)
+                                Text(LocalizedStringKey(model.selectedChatID.isEmpty ? "发一条消息开始聊天":"继续这段对话，电脑会结合相同的上下文处理")).foregroundStyle(.secondary).padding(.vertical,24)
                             }
                             ForEach(messages) {message in
                                 HStack(alignment:.top) {
                                     if message.role=="user" {Spacer(minLength:35)}
                                     VStack(alignment:.leading,spacing:8) {
-                                        Text(message.role=="user" ? "我":"电脑").font(.caption).foregroundStyle(.secondary)
+                                        Text(LocalizedStringKey(message.role=="user" ? "我":"电脑")).font(.caption).foregroundStyle(.secondary)
                                         if !message.text.isEmpty {Text(message.text).textSelection(.enabled).foregroundStyle(message.error ? Color.orange:Color.primary)}
                                         ForEach(message.files,id:\.self) {Text($0).font(.caption).foregroundStyle(.secondary)}
                                         if message.pending || message.requestState=="running" {
-                                            Text(stage(model.chatStage)).font(.footnote).foregroundStyle(.secondary)
+                                            Text(LocalizedStringKey(stage(model.chatStage))).font(.footnote).foregroundStyle(.secondary)
                                             if !model.chatPartial.isEmpty {Text(model.chatPartial).textSelection(.enabled);Text("回答生成中").font(.caption).foregroundStyle(.secondary)}
                                             Button("停止回答") {Task {await model.stopChatAnswer(message)}}.disabled(!model.online)
                                         }
@@ -236,7 +284,7 @@ struct ChatView: View {
                                 VStack(alignment:.leading,spacing:8) {
                                     if !pending.text.isEmpty {Text(pending.text).textSelection(.enabled)}
                                     if let file=pending.attachment {Label(file.name,systemImage:"paperclip")}
-                                    Text(pending.lastError.isEmpty ? "待发送 · 连接后由电脑处理":pending.lastError).font(.footnote).foregroundStyle(.secondary)
+                                    Text(PhoneLanguage.text(pending.lastError.isEmpty ? "待发送 · 连接后由电脑处理":pending.lastError,in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary)
                                     HStack {
                                         if !pending.lastError.isEmpty {Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)}
                                         Button("移除待发消息",role:.destructive) {removing=pending;confirmingRemoval=true}.disabled(model.chatSubmitting)
@@ -260,7 +308,7 @@ struct ChatView: View {
                         }.font(.subheadline)
                     }
                     if loadingAttachment {ProgressView("正在读取附件…").font(.caption)}
-                    if !attachmentError.isEmpty {Text(attachmentError).font(.footnote).foregroundStyle(.orange)}
+                    if !attachmentError.isEmpty {Text(PhoneLanguage.text(attachmentError,in:interfaceLocale)).font(.footnote).foregroundStyle(.orange)}
                     HStack(alignment:.bottom) {
                     Menu {
                         Button("截图或照片",systemImage:"photo") {pickingPhoto=true}
@@ -275,7 +323,7 @@ struct ChatView: View {
                         .id(composerRevision)
                         .overlay(alignment:.topLeading) {
                             if input.isEmpty && !composing {
-                                Text(model.selectedChatID.isEmpty ? "输入消息开始聊天…" : "发消息，继续这段对话…")
+                                Text(LocalizedStringKey(model.selectedChatID.isEmpty ? "输入消息开始聊天…" : "发消息，继续这段对话…"))
                                     .foregroundStyle(.secondary).padding(.horizontal,12).padding(.vertical,10)
                                     .allowsHitTesting(false).accessibilityHidden(true)
                             }
@@ -296,7 +344,7 @@ struct ChatView: View {
                         .disabled(composing || sending || loadingAttachment || (input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.chatAttachment==nil) || model.chatSubmitting)
                     }
                 }.padding()
-            }.navigationTitle(model.chatSnapshot?.title ?? "聊天").navigationBarTitleDisplayMode(.inline)
+            }.navigationTitle(model.chatSnapshot?.title ?? PhoneLanguage.text("聊天",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
             .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhoto,matching:.images)
             .onChange(of:pickedPhoto) {_,photo in
                 guard let photo else {return}
@@ -333,7 +381,7 @@ struct ChatView: View {
                     List {
                         ForEach(model.chatThreads) {chat in Button {model.selectChat(chat.id);choosing=false} label:{HStack {Text(chat.title);Spacer();if chat.running {ProgressView()};if chat.id==model.selectedChatID {Image(systemName:"checkmark")}}}}
                         if !model.currentChatQueue.isEmpty {
-                            Section("手机待发送") {ForEach(model.currentChatQueue) {pending in VStack(alignment:.leading) {Text(pending.text).lineLimit(3);if !pending.lastError.isEmpty {Text(pending.lastError).font(.caption).foregroundStyle(.orange)}}}}
+                            Section("手机待发送") {ForEach(model.currentChatQueue) {pending in VStack(alignment:.leading) {Text(pending.text).lineLimit(3);if !pending.lastError.isEmpty {Text(PhoneLanguage.text(pending.lastError,in:interfaceLocale)).font(.caption).foregroundStyle(.orange)}}}}
                         }
                     }.navigationTitle("电脑上的会话").toolbar {Button("关闭") {choosing=false}}.refreshable {await model.syncChatList()}
                 }
@@ -435,6 +483,7 @@ private struct ChatComposer: UIViewRepresentable {
     }
 }
 struct LibraryView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
     private var query: String { model.libraryQuery }
     @FocusState private var searching: Bool
@@ -446,10 +495,10 @@ struct LibraryView: View {
                 }
                 if model.busy { Section { HStack { ProgressView();Text("正在查询 Mac 上的知识库…") } } }
                 if model.libraryRefreshing {
-                    Section { HStack { ProgressView();Text(model.libraryUpdatedAt == nil ? "正在加载资料…":"正在后台更新资料…") }.font(.footnote).foregroundStyle(.secondary) }
+                    Section { HStack { ProgressView();Text(LocalizedStringKey(model.libraryUpdatedAt == nil ? "正在加载资料…":"正在后台更新资料…")) }.font(.footnote).foregroundStyle(.secondary) }
                 }
-                if !model.libraryMessage.isEmpty { Section { Text(model.libraryMessage).font(.footnote).foregroundStyle(.secondary) } }
-                if !model.error.isEmpty { Section { Text(model.error).foregroundStyle(.orange) } }
+                if !model.libraryMessage.isEmpty { Section { Text(PhoneLanguage.text(model.libraryMessage,in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary) } }
+                if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.answer.isEmpty { Section("回答") { Text(model.answer).textSelection(.enabled);ForEach(model.sources) { item in NavigationLink(item.title) { DetailView(record:item,workspace:model.workspaceID) } } } }
                 Section("资料") { ForEach(model.records) { item in NavigationLink { DetailView(record:item,workspace:model.workspaceID) } label: { VStack(alignment:.leading,spacing:5) { Text(item.title);if !item.summary.isEmpty { Text(item.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) } } } } }
             }.navigationTitle("知识库")
@@ -516,7 +565,7 @@ private struct InlineAttachmentImage: View {
         VStack(alignment:.leading,spacing:8) {
             if let image {
                 Image(uiImage:image).resizable().scaledToFit().frame(maxWidth:.infinity,maxHeight:280)
-                    .clipShape(RoundedRectangle(cornerRadius:10)).accessibilityLabel("图片预览 · "+file.name)
+                    .clipShape(RoundedRectangle(cornerRadius:10)).accessibilityLabel("图片预览 · \(file.name)")
             } else if failed {
                 HStack {Text("图片预览暂未加载").font(.footnote).foregroundStyle(.secondary);Button("重试") {retry+=1}}
             } else {
@@ -533,6 +582,7 @@ private struct InlineAttachmentImage: View {
     }
 }
 struct DetailView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
     let record:Record
     let workspace:String
@@ -576,15 +626,15 @@ struct DetailView: View {
                                 if !file.previewPath.isEmpty {
                                     InlineAttachmentImage(file:file,workspace:workspace)
                                 }
-                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · "+file.name,systemImage:"doc")}.disabled(working || !model.online)
-                                if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? " · 图片预览更快，原件保持完整":"")).font(.caption).foregroundStyle(.secondary)}
+                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · \(file.name)",systemImage:"doc")}.disabled(working || !model.online)
+                                if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? PhoneLanguage.text(" · 图片预览更快，原件保持完整",in:interfaceLocale):"")).font(.caption).foregroundStyle(.secondary)}
                             }
                         }
                     }.frame(maxWidth:.infinity,alignment:.leading).padding().background(.quaternary,in:RoundedRectangle(cornerRadius:14))
                 }
                 if fileTask != nil {
                     VStack(alignment:.leading,spacing:8) {
-                        Text(operationLabel).font(.subheadline)
+                        Text(PhoneLanguage.text(operationLabel,in:interfaceLocale)).font(.subheadline)
                         if downloadTotal>0 {
                             ProgressView(value:Double(downloadDone),total:Double(max(downloadTotal,1)))
                             Text(ByteCountFormatter.string(fromByteCount:downloadDone,countStyle:.file)+" / "+ByteCountFormatter.string(fromByteCount:downloadTotal,countStyle:.file)).font(.caption).foregroundStyle(.secondary)
@@ -593,8 +643,8 @@ struct DetailView: View {
                     }
                 }
                 if !loaded {Text(record.title).font(.title2.bold());Text(record.summary).textSelection(.enabled);if working {ProgressView("正在加载资料详情…")}}
-                if !error.isEmpty {Text(error).foregroundStyle(.orange)}
-                if !notice.isEmpty {Text(notice).foregroundStyle(.secondary)}
+                if !error.isEmpty {Text(PhoneLanguage.text(error,in:interfaceLocale)).foregroundStyle(.orange)}
+                if !notice.isEmpty {Text(PhoneLanguage.text(notice,in:interfaceLocale)).foregroundStyle(.secondary)}
                 if loaded {
                     VStack(alignment:.leading,spacing:12) {
                         Text("标题").font(.headline)
@@ -606,7 +656,7 @@ struct DetailView: View {
                                 HStack(spacing:4) {
                                     Text(tag).font(.subheadline).fixedSize(horizontal:false,vertical:true).accessibilityIdentifier("tag-chip-"+tag)
                                     Button {deletingTag=tag;confirmTagDeletion=true} label:{Image(systemName:"xmark.circle.fill").foregroundStyle(.secondary).frame(width:32,height:36)}
-                                        .buttonStyle(.plain).accessibilityLabel("删除标签 "+tag).accessibilityIdentifier("tag-remove-"+tag)
+                                        .buttonStyle(.plain).accessibilityLabel("删除标签 \(tag)").accessibilityIdentifier("tag-remove-"+tag)
                                 }.padding(.leading,12).padding(.trailing,4).padding(.vertical,4).background(Color.accentColor.opacity(0.12),in:RoundedRectangle(cornerRadius:16))
                             }
                             Button {newTag="";addingTag=true} label:{Label("添加标签",systemImage:"plus")}.buttonStyle(.bordered)
@@ -637,7 +687,7 @@ struct DetailView: View {
         .task {await load()}
         .sheet(item:$preview,onDismiss:{clearPreview()}) {value in
             NavigationStack {
-                OriginalPreview(url:value.url).navigationTitle(value.lightweight ? "图片预览（非原件）":"完整原件").navigationBarTitleDisplayMode(.inline)
+                OriginalPreview(url:value.url).navigationTitle(LocalizedStringKey(value.lightweight ? "图片预览（非原件）":"完整原件")).navigationBarTitleDisplayMode(.inline)
                     .toolbar {ToolbarItem(placement:.topBarTrailing) {Button("关闭") {preview=nil}}}
             }
         }
@@ -649,7 +699,7 @@ struct DetailView: View {
         .alert("删除标签？",isPresented:$confirmTagDeletion) {
             Button("删除标签",role:.destructive) {if let tag=deletingTag {Task {await saveTags(tags.filter {$0 != tag},notice:"标签已删除")}}}
             Button("取消",role:.cancel) {deletingTag=nil}
-        } message: {Text("确定删除标签“"+(deletingTag ?? "")+"”？")}
+        } message: {Text("确定删除标签“\(deletingTag ?? "")”？")}
         .onDisappear {fileTask?.cancel();if preview == nil {clearPreview()}}
         .onChange(of:photo) {_,value in Task {
             guard let value else {return}
@@ -731,6 +781,7 @@ struct DetailView: View {
 
 }
 struct DeviceView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
     var addComputer: () -> Void
     @State private var removing:PairedMac?
@@ -745,7 +796,7 @@ struct DeviceView: View {
                 if model.paired != nil {
                     Section("当前电脑") {ConnectionBanner();Button("重新连接") {Task {await model.connect()}}.disabled(model.pairingInFlight)}
                 }
-                if model.pairingInFlight {Section("添加电脑") {if model.waiting {Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(model.status)};ProgressView();Button("取消添加电脑") {model.cancelPairing()}}}
+                if model.pairingInFlight {Section("添加电脑") {if model.waiting {Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(PhoneLanguage.text(model.status,in:interfaceLocale))};ProgressView();Button("取消添加电脑") {model.cancelPairing()}}}
                 Section {
                     ForEach(model.computers.computers) {pair in
                         VStack(alignment:.leading,spacing:8) {
@@ -770,7 +821,7 @@ struct DeviceView: View {
                         Text("我的电脑 · \(model.computers.computers.count)")
                         Spacer()
                         if model.computers.computers.count > 1 {
-                            Button(computerEditMode.isEditing ? "完成" : "排序") {
+                            Button(LocalizedStringKey(computerEditMode.isEditing ? "完成" : "排序")) {
                                 withAnimation {computerEditMode = computerEditMode.isEditing ? .inactive : .active}
                             }.accessibilityIdentifier("computer-order")
                         }
@@ -782,8 +833,9 @@ struct DeviceView: View {
                         Text("分别扫码授权后即可切换，无需重新绑定。每台电脑最多绑定 10 部手机，手机最多保存 10 台电脑。")
                     }
                 }
-                if !model.canChangeComputer {Section {Text(model.pairingInFlight ? "正在配对，请先完成或取消配对":"正在提交内容，完成后即可切换电脑").font(.footnote).foregroundStyle(.secondary)}}
-                if !model.error.isEmpty {Section {Text(model.error).foregroundStyle(.orange)}}
+                if !model.canChangeComputer {Section {Text(LocalizedStringKey(model.pairingInFlight ? "正在配对，请先完成或取消配对":"正在提交内容，完成后即可切换电脑")).font(.footnote).foregroundStyle(.secondary)}}
+                if !model.error.isEmpty {Section {Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange)}}
+                Section("语言") { PhoneLanguagePicker() }
                 Section { Button("隐私与 AI") { model.showPrivacy = true } }
                 Section {
                     Text("每台电脑的知识库、聊天记录和手机待发送内容分别保存。切换不会同步或合并电脑资料。连接需要电脑开机运行，且网络或附近连接可达。").font(.callout).foregroundStyle(.secondary)
@@ -801,13 +853,14 @@ struct DeviceView: View {
                 Button("保存") {if let pair=renaming {model.renameComputer(pair.id,name:nickname)}}
                 Button("取消",role:.cancel) {}
             } message:{Text("只修改这部手机上的显示名称。")}
-            .confirmationDialog("移除 \(removing?.displayName ?? "这台电脑") 的配对？",isPresented:$showRemove,titleVisibility:.visible) {
+            .confirmationDialog("移除 \(removing?.displayName ?? PhoneLanguage.text("这台电脑",in:interfaceLocale)) 的配对？",isPresented:$showRemove,titleVisibility:.visible) {
                 Button("解除配对",role:.destructive) {if let pair=removing {model.removeComputer(pair.id)}}
             } message:{Text("仅移除这台电脑的手机凭据。待发送内容和缓存保留，重新配对原电脑后可继续使用；电脑端可另外撤销此手机的访问权限。")}
         }
     }
 }
 struct PrivacyView: View {
+    @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject private var companion: Companion
     @Environment(\.dismiss) private var dismiss
     @State private var permission: ModelPrivacy?
@@ -834,7 +887,7 @@ struct PrivacyView: View {
                         } else if message.isEmpty {
                             ProgressView()
                         }
-                        if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
+                        if !message.isEmpty { Text(PhoneLanguage.text(message,in:interfaceLocale)).foregroundStyle(.secondary) }
                     } header: {
                         Text("AI 问答 · \(pair.displayName)")
                     } footer: {
@@ -846,7 +899,7 @@ struct PrivacyView: View {
                             if !permission.model.isEmpty { LabeledContent("模型", value: permission.model) }
                             Text("开启后，电脑可把新上传的文字、文件摘录或图片发送给这个服务生成摘要。这项授权与问答分开，可以随时关闭。")
                             if !permission.desktopAutoSummary { Text("电脑端的自动总结目前已关闭。").foregroundStyle(.secondary) }
-                            Button(approved ? "关闭手机自动摘要" : "同意并开启自动摘要") {
+                            Button(LocalizedStringKey(approved ? "关闭手机自动摘要" : "同意并开启自动摘要")) {
                                 update(!approved, permission, summary:true)
                             }.disabled(saving)
                         }
@@ -894,14 +947,17 @@ struct PrivacyView: View {
     }
 }
 struct ScannerView: UIViewControllerRepresentable {
+    @Environment(\.locale) private var interfaceLocale
     var scanned: (String, @escaping (String) -> Void) -> Void
     var cancelled: () -> Void
     func makeUIViewController(context: Context) -> ScannerController {
-        let controller = ScannerController();controller.scanned = scanned;controller.cancelled = cancelled;return controller
+        let controller = ScannerController();controller.interfaceLocale = interfaceLocale;controller.scanned = scanned;controller.cancelled = cancelled;return controller
     }
     func updateUIViewController(_ controller: ScannerController, context: Context) {}
 }
 final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var interfaceLocale = Locale(identifier:PhoneLanguage.chinese)
+    private func localized(_ message: String) -> String {PhoneLanguage.text(message,in:interfaceLocale)}
     var scanned: ((String, @escaping (String) -> Void) -> Void)?
     var cancelled: (() -> Void)?
     private let capture = AVCaptureSession()
@@ -920,13 +976,13 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         super.viewDidLoad();view.backgroundColor = .black;view.accessibilityIdentifier = "pairing-scanner"
         let preview = AVCaptureVideoPreviewLayer(session: capture);preview.videoGravity = .resizeAspectFill
         view.layer.insertSublayer(preview, at: 0);self.preview = preview
-        let cancel = UIButton(type: .system);cancel.setTitle("取消扫码", for: .normal);cancel.tintColor = .white
+        let cancel = UIButton(type: .system);cancel.setTitle(localized("取消扫码"), for: .normal);cancel.tintColor = .white
         cancel.accessibilityIdentifier = "scanner-cancel";cancel.addTarget(self, action: #selector(cancelScan), for: .touchUpInside)
         cancel.translatesAutoresizingMaskIntoConstraints = false;view.addSubview(cancel)
-        hint.text = "将相机对准 Mac 的手机配对二维码";hint.textColor = .white;hint.numberOfLines = 0
+        hint.text = localized("将相机对准 Mac 的手机配对二维码");hint.textColor = .white;hint.numberOfLines = 0
         hint.textAlignment = .center;hint.accessibilityIdentifier = "scanner-status"
-        retry.setTitle("重试扫码", for: .normal);retry.addTarget(self, action: #selector(retryScan), for: .touchUpInside);retry.isHidden = true
-        settings.setTitle("打开系统设置", for: .normal);settings.addTarget(self, action: #selector(openSettings), for: .touchUpInside);settings.isHidden = true
+        retry.setTitle(localized("重试扫码"), for: .normal);retry.addTarget(self, action: #selector(retryScan), for: .touchUpInside);retry.isHidden = true
+        settings.setTitle(localized("打开系统设置"), for: .normal);settings.addTarget(self, action: #selector(openSettings), for: .touchUpInside);settings.isHidden = true
         let stack = UIStackView(arrangedSubviews: [hint,retry,settings]);stack.axis = .vertical;stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         let card = UIView();card.backgroundColor = UIColor.black.withAlphaComponent(0.75);card.layer.cornerRadius = 16
@@ -965,7 +1021,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         }
     }
     private func startCamera() {
-        retry.isHidden = true;hint.text = "将相机对准 Mac 的手机配对二维码"
+        retry.isHidden = true;hint.text = localized("将相机对准 Mac 的手机配对二维码")
         queue.async { [weak self] in
             guard let self else { return }
             if !self.configured {
@@ -983,7 +1039,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
             if !self.capture.isRunning { self.capture.startRunning() }
         }
     }
-    private func showError(_ message: String) { guard visible else { return };hint.text = message;retry.isHidden = false }
+    private func showError(_ message: String) { guard visible else { return };hint.text = localized(message);retry.isHidden = false }
     @objc private func retryScan() { processing = false;prepareCamera() }
     @objc private func cancelScan() { cancelled?() }
     @objc private func openSettings() { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
@@ -991,8 +1047,8 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         guard visible, !processing else { return }
         let values = metadataObjects.compactMap { ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }
         guard !values.isEmpty else { return }
-        guard let value = values.first(where: { (try? PairInfo.pairingCode($0)) != nil }) else { hint.text = PairingCodeError.invalid.localizedDescription;return }
-        processing = true;retry.isHidden = true;hint.text = "已识别配对码，正在检查局域网并连接 Mac…"
+        guard let value = values.first(where: { (try? PairInfo.pairingCode($0)) != nil }) else { hint.text = localized(PairingCodeError.invalid.localizedDescription);return }
+        processing = true;retry.isHidden = true;hint.text = localized("已识别配对码，正在检查局域网并连接 Mac…")
         queue.async { self.capture.stopRunning() }
         scanned?(value, { [weak self] message in
             guard let self, self.visible else { return };self.showError(message)

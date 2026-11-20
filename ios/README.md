@@ -42,6 +42,10 @@ Before publication, confirm the publisher and privacy contact, publish the polic
 
 **App Review notes**　On a fresh install, choose **演示模式 / Demo** from the welcome screen. In **Library**, open “Rain garden checklist.” In **Archive**, save a sample note and find it in the library. In **Chat**, select **Ask** and open the cited record. The sample workspace is cleared when closed. For the live features, use the desktop companion and the pairing and file transfer recording that accompanies the submission.
 
+## Interface language
+
+In the iPhone app, open **Connection → Display Language** (「连接 → 显示语言」) and choose **English** or **简体中文**. The welcome screen also offers this setting before pairing. The choice is saved on this iPhone and applies immediately. Your library content and computer names keep their original wording.
+
 ## Multiple computers and phones
 
 Each desktop can approve up to ten phones independently. The phone's **连接 → 添加电脑** saves up to ten computers without replacing an existing pairing. Approve each computer once, optionally give it a local name such as 公司电脑 or 家里电脑, then use **使用这台电脑** to switch. The current computer appears on capture, chat and library screens. Reopening the app reconnects to the last selected computer; it never silently switches to another reachable computer.

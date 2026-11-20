@@ -34,7 +34,7 @@ struct ReviewDemoView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Picker("Demo section", selection: $page) {
-                    ForEach(Page.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(Page.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.bottom, 4)
@@ -78,7 +78,11 @@ struct ReviewDemoView: View {
                 if !asked.isEmpty {
                     Section("Answer") {
                         Text(asked).font(.headline)
-                        Text(sources.first?.text ?? "No sample record matches that question.")
+                        if let source = sources.first {
+                            Text(source.text)
+                        } else {
+                            Text("No sample record matches that question.")
+                        }
                     }
                     if !sources.isEmpty {
                         Section("Sources") { ForEach(sources) { recordLink($0) } }

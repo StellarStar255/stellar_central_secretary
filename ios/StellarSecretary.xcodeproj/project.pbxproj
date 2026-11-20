@@ -1,5 +1,14 @@
 // !$*UTF8*$!
 { archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+C50000000000000000000001 = {isa = PBXVariantGroup; children = (C50000000000000000000002,C50000000000000000000003); name = Localizable.strings; sourceTree = "<group>";};
+C50000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>";};
+C50000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>";};
+C50000000000000000000004 = {isa = PBXBuildFile; fileRef = C50000000000000000000001;};
+C50000000000000000000005 = {isa = PBXVariantGroup; children = (C50000000000000000000006,C50000000000000000000008); name = InfoPlist.strings; sourceTree = "<group>";};
+C50000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>";};
+C50000000000000000000007 = {isa = PBXBuildFile; fileRef = C50000000000000000000005;};
+C50000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>";};
+
 C30000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedComputers.swift; sourceTree = "<group>";};
 C30000000000000000000002 = {isa = PBXBuildFile; fileRef = C30000000000000000000001;};
 C20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>";};
@@ -19,19 +28,19 @@ F00000000000000000000006 = {isa = PBXBuildFile; fileRef = F000000000000000000000
 C40000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewDemoView.swift; sourceTree = "<group>";};
 C40000000000000000000002 = {isa = PBXBuildFile; fileRef = C40000000000000000000001;};
 
-A00000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600;}; buildConfigurationList = A00000000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = A00000000000000000000003; productRefGroup = A00000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000005,B00000000000000000000001);};
+A00000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600;}; buildConfigurationList = A00000000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,"zh-Hans",Base); mainGroup = A00000000000000000000003; productRefGroup = A00000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000005,B00000000000000000000001);};
 A00000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000006,A00000000000000000000007); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 A00000000000000000000003 = {isa = PBXGroup; children = (A00000000000000000000008,A00000000000000000000004,B00000000000000000000002); sourceTree = "<group>";};
 A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000009,B00000000000000000000003); name = Products; sourceTree = "<group>";};
 A00000000000000000000005 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000010; buildPhases = (A00000000000000000000011,A00000000000000000000012,A00000000000000000000013); buildRules = (); dependencies = (); name = StellarSecretary; productName = StellarSecretary; productReference = A00000000000000000000009; productType = "com.apple.product-type.application";};
 A00000000000000000000006 = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; CLANG_ENABLE_MODULES = YES;}; name = Debug;};
 A00000000000000000000007 = {isa = XCBuildConfiguration; buildSettings = {IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; CLANG_ENABLE_MODULES = YES; SWIFT_COMPILATION_MODE = wholemodule;}; name = Release;};
-A00000000000000000000008 = {isa = PBXGroup; children = (C40000000000000000000001,C30000000000000000000001,C20000000000000000000001,C10000000000000000000001,A00000000000000000000014,A00000000000000000000015,A00000000000000000000016,C00000000000000000000001,D00000000000000000000001,E00000000000000000000001,F00000000000000000000003,F00000000000000000000005); path = StellarSecretary; sourceTree = "<group>";};
+A00000000000000000000008 = {isa = PBXGroup; children = (C50000000000000000000001,C50000000000000000000005,C40000000000000000000001,C30000000000000000000001,C20000000000000000000001,C10000000000000000000001,A00000000000000000000014,A00000000000000000000015,A00000000000000000000016,C00000000000000000000001,D00000000000000000000001,E00000000000000000000001,F00000000000000000000003,F00000000000000000000005); path = StellarSecretary; sourceTree = "<group>";};
 A00000000000000000000009 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StellarSecretary.app; sourceTree = BUILT_PRODUCTS_DIR;};
 A00000000000000000000010 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000017,A00000000000000000000018); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 A00000000000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C40000000000000000000002,C30000000000000000000002,C20000000000000000000002,C10000000000000000000002,A00000000000000000000019,A00000000000000000000020,D00000000000000000000002,E00000000000000000000002,F00000000000000000000004,F00000000000000000000006); runOnlyForDeploymentPostprocessing = 0;};
 A00000000000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-A00000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000002); runOnlyForDeploymentPostprocessing = 0;};
+A00000000000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000002,C50000000000000000000004,C50000000000000000000007); runOnlyForDeploymentPostprocessing = 0;};
 A00000000000000000000014 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Companion.swift; sourceTree = "<group>";};
 A00000000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>";};
 A00000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";};
