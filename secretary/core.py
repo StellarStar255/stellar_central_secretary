@@ -214,14 +214,18 @@ class Archive:
                 'capture_proxy':{'mode':values.get('capture_proxy_mode','system'),'url':values.get('capture_proxy_url','')},
                 'capture_background': values.get('capture_background', 'true') == 'true',
                 'capture_close_tabs': values.get('capture_close_tabs', 'true') == 'true',
-                'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size, 'content_font_scale':content_scale}
-    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None, model_proxy=None, capture_proxy=None):
+                'summary_language':values.get('summary_language','auto'), 'capture_scope': values.get('capture_scope', 'recent'), 'interface_mode':values.get('interface_mode','browser'), 'ui_language':values.get('ui_language','zh'), 'ui_font_size':font_size, 'content_font_scale':content_scale}
+    def configure(self, backend, auto_ai, capture_background=None, capture_close_tabs=None, capture_scope=None, model_proxy=None, capture_proxy=None, summary_language=None):
         if backend not in ('codex', 'claude','gemini','api'): raise ValueError('未知模型后端')
         from . import network
         proxy=network.proxy_config(model_proxy) if model_proxy is not None else None
         browser_proxy=network.capture_proxy_config(capture_proxy) if capture_proxy is not None else None
         with self.db() as db:
             pairs=[('backend', backend), ('auto_ai', str(bool(auto_ai)).lower())]
+            if summary_language is not None:
+                from .summary_language import MODES
+                if summary_language not in MODES:raise ValueError('摘要语言设置无效')
+                pairs.append(('summary_language',summary_language))
             if browser_proxy is not None:pairs.extend([('capture_proxy_mode',browser_proxy['mode']),('capture_proxy_url',browser_proxy['url'])])
             if proxy is not None:pairs.extend([('model_proxy_mode',proxy['mode']),('model_proxy_url',proxy['url'])])
             if capture_scope is not None:

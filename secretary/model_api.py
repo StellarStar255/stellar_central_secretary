@@ -62,14 +62,14 @@ def write(root,value):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
 
-def complete(config,prompt,images,on_text=None):
+def complete(config,prompt,images,on_text=None,summary_language=None):
     # Validate even when invoked as a standalone worker.
     base=normalize(config['base_url']);content=prompt
     if images:
         if not config['vision']:raise ValueError('当前 API 未启用图片输入')
         content=[{'type':'text','text':prompt}]+[{'type':'image_url','image_url':{'url':'data:'+image['media']+';base64,'+image['data']}} for image in images]
-    from .ai import RULES,ModelTimeoutError
-    payload={'model':config['model'],'messages':[{'role':'system','content':RULES},{'role':'user','content':content}],'stream':bool(on_text),config.get('token_parameter','max_tokens'):config['max_tokens']}
+    from .ai import model_rules,ModelTimeoutError
+    payload={'model':config['model'],'messages':[{'role':'system','content':model_rules(summary_language)},{'role':'user','content':content}],'stream':bool(on_text),config.get('token_parameter','max_tokens'):config['max_tokens']}
     if config['json_mode'] and '仅输出 JSON' in prompt:payload['response_format']={'type':'json_object'}
     headers={'Content-Type':'application/json','Accept':'text/event-stream' if on_text else 'application/json','User-Agent':'StellarSecretary'}
     if config['use_key']:headers['Authorization']='Bearer '+config['api_key']
@@ -130,7 +130,7 @@ def main():
             text=text[:16000]
             if text!=previous[0]:print(json.dumps({'partial':text},ensure_ascii=False),flush=True);previous[0]=text
         callback=emit if value.get('streaming') else None
-        answer=complete(value['config'],value['prompt'],value.get('images',[]),on_text=callback)
+        answer=complete(value['config'],value['prompt'],value.get('images',[]),on_text=callback,summary_language=value.get('summary_language'))
         print(json.dumps({'answer':answer},ensure_ascii=False),flush=True)
     except Exception as error:
         from .ai import ModelTimeoutError

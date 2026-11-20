@@ -2,7 +2,7 @@
 import argparse
 import json
 from pathlib import Path
-from . import ai, network, model_api
+from . import ai, network, model_api, summary_language
 from .core import Archive
 
 
@@ -16,7 +16,8 @@ def retry(archive, item_id):
         item = archive.get(item_id)
         settings=archive.settings();proxy=settings['model_proxy'];name=settings['backend']
         backend={**model_api.prepare(archive.root,{}),'_proxy':proxy} if name=='api' else ai.CLIBackend(name,proxy)
-        archive.update(item_id, **ai.summary_fields(item, backend))
+        with summary_language.preferences(settings):
+            archive.update(item_id, **ai.summary_fields(item, backend))
     except BaseException as exc:
         archive.update(item_id, state='error', error=str(exc)[:1600] or '摘要任务已中断，可重新运行。')
         raise

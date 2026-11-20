@@ -25,6 +25,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import Archive, PageText, extract
+from . import summary_language
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
 from . import image_formats, library_location, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
@@ -297,7 +298,7 @@ class Service:
         value=model_api.prepare(self.archive.root,body.get('model_api',{})) if body.get('backend')=='api' else None
         try:
             if value is not None:model_api.write(self.archive.root,value)
-            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'),body.get('capture_proxy'))
+            self.archive.configure(body['backend'],body['auto_ai'],body.get('capture_background'),body.get('capture_close_tabs'),body.get('capture_scope'),body.get('model_proxy'),body.get('capture_proxy'),summary_language=body.get('summary_language'))
             if 'completion_notifications' in body:
                 with self.archive.db() as db:db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('completion_notifications',str(body['completion_notifications']).lower()))
         except BaseException:
@@ -429,7 +430,7 @@ class Service:
             return
         if batch and any(value['state']=='pending' for value in batch.get('links',[])):return self.process_group_links(item_id,batch_id,True)
         try:
-            with self.summary_jobs.session(item_id,len(batch.get("text", "")) if batch else 0):
+            with self.summary_jobs.session(item_id,len(batch.get("text", "")) if batch else 0), summary_language.preferences(self.archive.settings()):
                 if self.stopping:return
                 with self.lock:
                     if item_id in self.trash_cancellations:return
@@ -474,7 +475,7 @@ class Service:
         if any(value['state']=='pending' for value in item['group_links']):return self.process_group_links(item_id,None,True)
         try:
             item=self.archive.get(item_id)
-            with self.summary_jobs.session(item_id,len(item["text"]),self.short_summary(item,full_pdf)):
+            with self.summary_jobs.session(item_id,len(item["text"]),self.short_summary(item,full_pdf)), summary_language.preferences(self.archive.settings()):
                 if self.stopping:return
                 with self.lock:
                     if item_id in self.trash_cancellations:return
@@ -488,7 +489,7 @@ class Service:
                     source,scope,used=pdf_reading.summary_material(self.archive,item,new_only=True)
                     if not source:raise ValueError('没有尚未总结的已读页面')
                     fields,_=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),[],scope)
-                    combined=(item.get('base_summary') or '')+'\n\n【PDF 新增页补充摘要】\n'+fields['summary']
+                    combined=(item.get('base_summary') or '')+'\n\n'+summary_language.scope_text('【PDF 新增页补充摘要】',summary_language.resolve(source))+'\n'+fields['summary']
                     if len(combined)>60000:raise ValueError('摘要已达到容量上限，请另建档案总结新增页')
                     fields={'summary':combined,'state':'ready','error':'','pdf_reads':pdf_reading.mark_summary(item,used,True)}
                 elif bundles.is_bundle(item['filename']):
@@ -958,7 +959,7 @@ class Service:
             item=self.archive.get(item_id)
             self.busy.add(item_id);self.questions+=1
         try:
-            with self.summary_jobs.session(item_id,len(item["text"]),short=True,cancel_event=cancel):
+            with self.summary_jobs.session(item_id,len(item["text"]),short=True,cancel_event=cancel), summary_language.preferences(self.archive.settings()):
                 if mobile_privacy.active.get() is None:self.archive.update(item_id,state='processing',error='')
                 source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
                 source,scope=service_pdf_material(self.archive,item,source,scope)
