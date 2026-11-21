@@ -8,6 +8,9 @@ def clean_chats(chats,deleted_items,deleted_messages):
     for original in chats:
         chat=copy.deepcopy(original);messages=chat.get('messages',[]);drop=set()
         for index,message in enumerate(messages):
+            evidence=message.get('answerEvidence')
+            if isinstance(evidence,dict) and isinstance(evidence.get('pdf_pages'),list):
+                evidence['pdf_pages']=[page for page in evidence['pdf_pages'] if isinstance(page,dict) and page.get('item_id') not in deleted_items]
             items=message.get('items',[]);sources=message.get('sources',[])
             refs=[key for key in items if isinstance(key,str)] if isinstance(items,list) else []
             if isinstance(sources,list):refs.extend(source.get('item_id') for source in sources if isinstance(source,dict) and isinstance(source.get('item_id'),str))

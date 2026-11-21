@@ -23,9 +23,16 @@ with tempfile.TemporaryDirectory() as root:
    page.locator('[data-suggestion="ask"]').click();expect(page.locator('#input-mode')).to_have_value('library')
    page.locator('#message-input').fill('介绍一下离线部署方案');page.locator('#send-button').click()
    expect(page.locator('.source')).to_have_count(1);expect(page.locator('.message.assistant .message-body')).to_have_text('Ollama 需要 16 GB 内存。[1]')
+   evidence=page.locator('.answer-evidence').last
+   evidence.locator('summary').click()
+   expect(evidence).to_have_attribute('open','')
+   expect(evidence.locator('blockquote')).to_contain_text('Ollama RAM requirement: 16 GB')
    page.reload();expect(page.locator('#input-mode')).to_have_value('library')
+   expect(page.locator('.answer-evidence')).to_have_count(1)
    page.locator('#message-input').fill('它需要多少内存');page.locator('#send-button').click()
    expect(page.locator('.source')).to_have_count(2)
+   page.locator('.answer-evidence').last.locator('summary').click()
+   expect(page.locator('.answer-evidence').last).to_contain_text('参考的对话轮次 · 1')
    assert calls[-1]['history'][0]['question']=='介绍一下离线部署方案'
    assert calls[-1]['history'][0]['source_ids']==[item]
    assert len(service.archive.export())==1

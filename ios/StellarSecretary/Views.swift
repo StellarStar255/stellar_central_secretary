@@ -205,8 +205,19 @@ struct CaptureView: View {
                         ForEach(model.currentDrafts) { draft in
                             VStack(alignment:.leading) {
                                 Text(draft.attachmentBatch?.map(\.name).joined(separator:", ") ?? draft.filename ?? draft.text).lineLimit(2)
-                                Text(LocalizedStringKey(model.sendingDraftID == draft.id ? "正在上传" : "待发送")).font(.caption).foregroundStyle(.secondary)
-                            }.accessibilityIdentifier("capture-outbox-"+draft.id)
+                                    .accessibilityIdentifier("capture-outbox-"+draft.id)
+                                if let progress=model.uploadProgress[draft.id] {
+                                    AttachmentUploadProgress(progress:progress)
+                                } else {
+                                    let status = draft.lastError ?? (model.sendingDraftID==draft.id ? "正在上传" : model.captureRetryAfter[draft.id] != nil ? "发送中断，将自动重试。" : "待发送")
+                                    Text(PhoneLanguage.text(status,in:interfaceLocale)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if draft.lastError != nil || model.captureRetryAfter[draft.id] != nil {
+                                    Button("重新发送") { Task { await model.retryDraft(draft.id) } }
+                                        .buttonStyle(.borderless).disabled(!model.online || model.sendingDraftID != nil)
+                                        .accessibilityIdentifier("capture-retry-"+draft.id)
+                                }
+                            }
                             .swipeActions { if model.sendingDraftID != draft.id { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
                         }
                         Button("重新发送") { Task { await model.connect() } }
@@ -255,6 +266,57 @@ struct CaptureView: View {
                 catch { model.error = "无法读取文件" }
             }
         }
+    }
+}
+
+private struct AttachmentUploadProgress: View {
+    let progress: UploadProgress
+    var body: some View {
+        VStack(alignment:.leading,spacing:4) {
+            ProgressView(value:Double(progress.received),total:Double(progress.total))
+            if progress.received==progress.total {
+                Text("电脑已收齐，正在处理…")
+            } else {
+                let received=ByteCountFormatter.string(fromByteCount:progress.received,countStyle:.file)
+                let total=ByteCountFormatter.string(fromByteCount:progress.total,countStyle:.file)
+                Text(verbatim:received+" / "+total)
+            }
+        }.font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+private struct AnswerEvidenceView: View {
+    let evidence: AnswerEvidence
+    var body: some View {
+        DisclosureGroup("本次使用的资料") {
+            VStack(alignment:.leading,spacing:8) {
+                switch evidence.kind {
+                case "local": Text("本地回复，未检索知识库。")
+                case "general": Text("通用对话，未检索知识库。")
+                case "archive": Text("直接读取已归档资料。")
+                case "no_match": Text("没有找到相关正文。")
+                case "catalog": Text("检索了资料目录。")
+                case "material": Text("依据本次提交的资料。")
+                default: EmptyView()
+                }
+                if evidence.passage_count>0 { Text("提供的资料片段 · \(evidence.passage_count)") }
+                if evidence.history_turns>0 { Text("参考的对话轮次 · \(evidence.history_turns)") }
+                if !evidence.conditions.isEmpty {
+                    Text("本次采用的对话条件").bold()
+                    ForEach(Array(evidence.conditions.enumerated()),id:\.offset) { _,value in Text(value) }
+                }
+                if !evidence.pdf_pages.isEmpty {
+                    Text("本次提供的 PDF 页码").bold()
+                    ForEach(Array(evidence.pdf_pages.enumerated()),id:\.offset) { _,pdf in Text(pdf.name+" · "+pdf.pages) }
+                }
+                if !evidence.excerpts.isEmpty {
+                    Text("回答引用的片段").bold()
+                    ForEach(Array(evidence.excerpts.enumerated()),id:\.offset) { _,excerpt in
+                        Text(excerpt.title).bold();Text(excerpt.text).textSelection(.enabled)
+                    }
+                }
+            }.frame(maxWidth:.infinity,alignment:.leading).padding(.top,6)
+        }.font(.footnote)
     }
 }
 
@@ -359,6 +421,7 @@ struct ChatView: View {
                                             Button("停止回答") {Task {await model.stopChatAnswer(message)}}.disabled(!model.online)
                                         }
                                         ForEach(Array(message.sources.enumerated()),id:\.offset) {_,source in NavigationLink {DetailView(record:source,workspace:model.workspaceID)} label:{Label(source.title,systemImage:"doc.text").font(.footnote)}}
+                                        if let evidence=message.evidence, !message.pending { AnswerEvidenceView(evidence:evidence) }
                                     }.padding(12).background(message.role=="user" ? Color.accentColor.opacity(0.12):Color.secondary.opacity(0.08),in:RoundedRectangle(cornerRadius:14)).id(message.id)
                                     if message.role != "user" {Spacer(minLength:20)}
                                 }
@@ -368,6 +431,7 @@ struct ChatView: View {
                                     if !pending.text.isEmpty {Text(pending.text).textSelection(.enabled)}
                                     ForEach(Array(pending.files.enumerated()),id:\.offset) {_,file in Label(file.name,systemImage:"paperclip")}
                                     Text(PhoneLanguage.text(queueStatus(pending),in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary)
+                                    if let progress=model.uploadProgress[pending.id] { AttachmentUploadProgress(progress:progress) }
                                     HStack {
                                         if !pending.lastError.isEmpty || model.chatRetryAfter[pending.id] != nil {
                                             Button("重新发送") {Task {await model.retryChatMessage(pending.id)}}.disabled(!model.online || model.chatSubmitting)

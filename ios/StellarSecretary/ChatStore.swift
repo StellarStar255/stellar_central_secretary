@@ -1,5 +1,21 @@
 import Foundation
 
+struct UploadProgress: Decodable {
+    let received: Int64
+    let total: Int64
+}
+
+struct AnswerEvidence: Codable {
+    struct PDFPages: Codable { let name:String;let pages:String }
+    struct Excerpt: Codable { let title:String;let text:String }
+    let kind:String
+    let passage_count:Int
+    let history_turns:Int
+    let conditions:[String]
+    let pdf_pages:[PDFPages]
+    let excerpts:[Excerpt]
+}
+
 struct ChatThread: Codable, Identifiable {
     var id:String;var title:String;var updated:Double;var running:Bool
     init(_ value:[String:Any]) {id=value["id"] as? String ?? "";title=value["title"] as? String ?? "新对话";updated=(value["updated"] as? NSNumber)?.doubleValue ?? 0;running=value["running"] as? Bool ?? false}
@@ -7,11 +23,15 @@ struct ChatThread: Codable, Identifiable {
 struct ChatMessage: Codable, Identifiable {
     var id:String;var role:String;var text:String;var pending:Bool;var error:Bool
     var requestID:String;var requestState:String;var clientID:String;var sources:[Record];var files:[String]
+    var evidence: AnswerEvidence?
     init(_ value:[String:Any]) {
         id=value["id"] as? String ?? "";role=value["role"] as? String ?? "assistant";text=value["text"] as? String ?? ""
         pending=value["pending"] as? Bool ?? false;error=value["error"] as? Bool ?? false
         requestID=value["requestId"] as? String ?? "";requestState=value["requestState"] as? String ?? "";clientID=value["mobileRequestId"] as? String ?? ""
         sources=(value["sources"] as? [[String:Any]] ?? []).map(Record.init);files=value["files"] as? [String] ?? []
+        if let object=value["answerEvidence"] as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:object) {
+            evidence=try? JSONDecoder().decode(AnswerEvidence.self,from:data)
+        }
     }
 }
 struct ChatSnapshot: Codable {

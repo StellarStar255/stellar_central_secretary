@@ -154,11 +154,15 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert.equal(archive.length,beforeLibraryArchive+1);elements.get('#archive-only').checked=false;
  console.log('PASS: library mode, declarative follow-ups, bounded question/answer context, source references, URLs without ingestion, new-chat isolation, archive-only override');
  elements.get('#new-chat').onclick();elements.get('#input-mode').value='auto';
- askReply={timings:{total_seconds:12.34,queue_seconds:0,planning_seconds:0,retrieval_seconds:0.01,image_seconds:0.1,answer_seconds:12.2,fast_followup:true},answer:'**已核对课程表**，仅覆盖旧周，不能推断今天。[2]',sources:[{number:1,item_id:'a0',title:'罗马皇位继承'},{number:2,item_id:'a1',title:'2026年第9周课程表'},{number:3,item_id:'a2',title:'消费贷款'}]};
+ askReply={timings:{total_seconds:12.34,queue_seconds:0,planning_seconds:0,retrieval_seconds:0.01,image_seconds:0.1,answer_seconds:12.2,fast_followup:true},answer:'**已核对课程表**，仅覆盖旧周，不能推断今天。[2]',sources:[{number:1,item_id:'a0',title:'罗马皇位继承'},{number:2,item_id:'a1',title:'2026年第9周课程表',text:'周四上午 <课表原文>'},{number:3,item_id:'a2',title:'消费贷款'}],answer_evidence:{kind:'library',passage_count:3,history_turns:1,conditions:['只按这份课表判断'],pdf_pages:[{item_id:'a1',name:'schedule.pdf',pages:'1–2, 5'}]}};
  const beforeScheduleArchive=archive.length;
  input.value='我老婆今天下午有课吗？';await form.onsubmit({preventDefault(){}});
  assert.equal(calls.filter(c=>c.path==='/api/ask').at(-1).body.library_chat,true,'Auto questions must use the same context-aware library pipeline');
  assert(elements.get('#messages').innerHTML.includes('<strong>已核对课程表</strong>'));
+ assert(elements.get('#messages').innerHTML.includes('<summary>本次使用的资料</summary>'));
+ assert(elements.get('#messages').innerHTML.includes('只按这份课表判断'));
+ assert(elements.get('#messages').innerHTML.includes('schedule.pdf · 1–2, 5'));
+ assert(elements.get('#messages').innerHTML.includes('周四上午 &lt;课表原文&gt;'));
  assert(elements.get('#messages').innerHTML.includes('本次用时')&&elements.get('#messages').innerHTML.includes('12.3'));
  assert(elements.get('#messages').innerHTML.includes('省去检索规划请求'));
  assert(!elements.get('#messages').innerHTML.includes('罗马皇位继承'));

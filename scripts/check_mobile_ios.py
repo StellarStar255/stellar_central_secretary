@@ -14,6 +14,16 @@ if __name__=='__main__':
   connections={'tls':0,'status':0,'items':0,'files':0};connection_changed=threading.Condition()
   list_gate=threading.Event();list_gate.set()
   file_gate=threading.Event();file_gate.set()
+  ingest_gate=threading.Event();ingest_gate.set()
+  ingest_failure=threading.Event()
+  original_ingest=mobile.ingest
+  def controlled_ingest(device,body):
+   ingest_gate.wait(timeout=20)
+   if ingest_failure.is_set():
+    ingest_failure.clear()
+    raise ValueError('Fixture upload rejected once')
+   return original_ingest(device,body)
+  mobile.ingest=controlled_ingest
   original_handler=mobile.handler
   def counted_handler():
    base=original_handler()
@@ -57,7 +67,9 @@ if __name__=='__main__':
      background_started.set();background_release.wait(timeout=15)
     answer={'Mobile shared question':'Shared phone reply','Offline shared follow-up':'Offline shared answer','Background shared question':'Background shared answer'}[question]
     return {'answer':answer,'sources':[]}
-   return {'answer':'Synthetic fixture answer [1]','sources':[{'number':1,'item_id':item,'title':'Reference fixture'}]}
+   return {'answer':'Synthetic fixture answer [1]',
+           'sources':[{'number':1,'item_id':item,'title':'Reference fixture','text':'Reference fixture body'}],
+           'answer_evidence':{'kind':'library','passage_count':1,'history_turns':0,'conditions':[],'pdf_pages':[]}}
 
   class Handler(BaseHTTPRequestHandler):
    def log_message(self,*args):pass
@@ -102,6 +114,8 @@ if __name__=='__main__':
       connection_changed.wait_for(lambda:connections['status']>previous,timeout=8);value=dict(connections)
     elif self.path=='/hold-files':file_gate.clear();value={'ok':True}
     elif self.path=='/release-files':file_gate.set();value={'ok':True}
+    elif self.path=='/hold-ingest':ingest_gate.clear();ingest_failure.set();value={'ok':True}
+    elif self.path=='/release-ingest':ingest_gate.set();value={'ok':True}
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
     elif self.path=='/release-items':list_gate.set();value={'ok':True}
     elif self.path=='/prepare-multiple-photos':

@@ -9,7 +9,7 @@ from contextvars import copy_context
 from . import ai
 from .question_progress import QuestionProgress
 
-FIELDS=('text','sources','catalog','timings','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestApproval','requestVersion')
+FIELDS=('text','sources','catalog','timings','answerEvidence','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestApproval','requestVersion')
 
 def preserve(incoming,previous):
     """Client snapshots must not roll back server-owned answers or active jobs."""
@@ -56,7 +56,7 @@ class QuestionJobs:
                 if user is None or user.get('text')!=question:raise ValueError('问题与对话记录不一致，请刷新后重试')
                 if message.get('requestState')=='running':raise ValueError('这条问答仍在进行，请先停止或等待完成')
                 message['questionId']=question_id
-                if not message.get('sources'):message.update(text='',sources=[],catalog=None,timings=None)
+                if not message.get('sources'):message.update(text='',sources=[],catalog=None,timings=None,answerEvidence=None)
             elif message.get('requestId')!=request_id:return None
             message.update(copy.deepcopy(values),requestId=request_id)
             message.pop('questionProgress',None)
@@ -126,7 +126,7 @@ class QuestionJobs:
             for item in ids:service.archive.get(item)
             if ids and not result.get('catalog'):service.model_backend(item_ids=ids)
             self.patch(job['chat_id'],job['message_id'],key,{'text':result['answer'],'sources':result.get('sources',[]),
-                'catalog':result.get('catalog'),'timings':result.get('timings'),'retrievalNotice':result.get('retrieval_notice',''),
+                'catalog':result.get('catalog'),'timings':result.get('timings'),'answerEvidence':result.get('answer_evidence'),'retrievalNotice':result.get('retrieval_notice',''),
                 'localReply':result.get('local_reply',False),'pending':False,'error':False,'retryable':False,'requestState':'done','requestApproval':None})
             service.question_progress.update(key,'done')
         except Exception as error:
@@ -135,7 +135,7 @@ class QuestionJobs:
             kept=bool(previous.get('sources'))
             values={'pending':False,'requestState':state,'retryable':not kept,'error':not kept and not cancelled}
             if kept:values['retrievalNotice']='重新核对未完成，保留上次回答。 '+text
-            else:values.update(text=text,sources=[])
+            else:values.update(text=text,sources=[],answerEvidence=None)
             try:self.patch(job['chat_id'],job['message_id'],key,values)
             finally:service.question_progress.update(key,state)
         finally:

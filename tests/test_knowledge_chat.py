@@ -31,12 +31,16 @@ class KnowledgeChatTest(unittest.TestCase):
         self.assertEqual(planning['history'][0]['answer'],history[0]['answer'])
         answering=json.loads(model.call_args_list[1].args[0].split('\n',1)[1])
         self.assertIn('16 GB',answering['passages'][0]['text'])
+        self.assertEqual(result['answer_evidence']['passage_count'],len(answering['passages']))
+        self.assertEqual(result['answer_evidence']['history_turns'],len(answering['history']))
         self.assertEqual(answering['question'],'它的内存要求呢？')
         self.assertEqual(self.service.runtime()['answering'],0)
 
     def test_empty_library_does_not_call_model(self):
         with patch('secretary.ai.run') as model:
-            self.assertEqual(self.service.ask_library('如何部署？')['sources'],[])
+            result=self.service.ask_library('如何部署？')
+            self.assertEqual(result['sources'],[])
+            self.assertEqual(result['answer_evidence']['kind'],'no_match')
             model.assert_not_called()
 
     def test_no_evidence_does_not_generate_an_answer(self):

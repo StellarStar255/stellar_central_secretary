@@ -1386,5 +1386,17 @@
   "新目录中的记忆数据库未通过核验。": "The database in the new folder failed verification.",
   "请等待升级完成后再更改记忆目录。": "Wait for the update to finish before changing the storage folder.",
   "请先重启程序完成记忆迁移，或取消迁移后再升级。": "Restart to finish moving the library, or cancel the move before updating.",
-  "备份目录不能位于程序安装目录中。": "The backup folder cannot be inside the application installation folder."
+  "备份目录不能位于程序安装目录中。": "The backup folder cannot be inside the application installation folder.",
+  "本次使用的资料": "Evidence for this answer",
+  "本地回复，未检索知识库。": "Local reply. The library was not searched.",
+  "通用对话，未检索知识库。": "General conversation. The library was not searched.",
+  "直接读取已归档资料。": "Read directly from the archive.",
+  "没有找到相关正文。": "No relevant source text was found.",
+  "检索了资料目录。": "Searched the record catalog.",
+  "依据本次提交的资料。": "Based on the material submitted with this message.",
+  "提供的资料片段": "Source excerpts provided",
+  "参考的对话轮次": "Conversation turns provided",
+  "本次采用的对话条件": "Conversation conditions provided",
+  "本次提供的 PDF 页码": "PDF pages represented in the source excerpts",
+  "回答引用的片段": "Excerpts cited in the answer"
 }

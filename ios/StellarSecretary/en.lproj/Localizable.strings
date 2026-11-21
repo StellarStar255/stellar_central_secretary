@@ -57,6 +57,7 @@
 "正在发送消息…" = "Sending message…";
 "正在通过蓝牙上传附件…" = "Uploading attachment over Bluetooth…";
 "正在上传附件…" = "Uploading attachment…";
+"电脑已收齐，正在处理…" = "Computer received the upload and is processing it…";
 "正在准备上传附件…" = "Preparing to upload attachment…";
 "等待上一条回答完成…" = "Waiting for the previous reply to finish…";
 "发送中断，将自动重试。" = "Sending interrupted. Retrying automatically.";
@@ -272,3 +273,17 @@
 "手机无法连通 Mac 的配对端口。即使 Wi-Fi 名称相同，访客网络、设备隔离或 VPN 也可能阻断互访。（TCP 超时）" = "The computer’s pairing port did not respond. Guest networks, device isolation, or a VPN can block access even on the same Wi-Fi network.";
 "待发送内容已保留：%@" = "Queued items are retained: %@";
 "知识秘书演示" = "Stellar Secretary Demo";
+"本次使用的资料" = "Evidence for this answer";
+"本地回复，未检索知识库。" = "Local reply. The library was not searched.";
+"通用对话，未检索知识库。" = "General conversation. The library was not searched.";
+"直接读取已归档资料。" = "Read directly from the archive.";
+"没有找到相关正文。" = "No relevant source text was found.";
+"检索了资料目录。" = "Searched the record catalog.";
+"依据本次提交的资料。" = "Based on the material submitted with this message.";
+"提供的资料片段" = "Source excerpts provided";
+"参考的对话轮次" = "Conversation turns provided";
+"本次采用的对话条件" = "Conversation conditions provided";
+"本次提供的 PDF 页码" = "PDF pages represented in the source excerpts";
+"回答引用的片段" = "Excerpts cited in the answer";
+"提供的资料片段 · %lld" = "Source excerpts provided · %lld";
+"参考的对话轮次 · %lld" = "Conversation turns provided · %lld";

@@ -28,10 +28,11 @@ def identifier(value):
     if not isinstance(value,str) or not 1<=len(value)<=100:raise ValueError('会话标识无效')
     return value
 
-def sources(message):
+def sources(message,require_citation=False):
     values=message.get('sources') or []
     numbers={int(a or b) for a,b in re.findall(r'\[(\d{1,3})\]|【(\d{1,3})】',message.get('text',''))}
-    return [source for source in values if isinstance(source,dict) and (not numbers or source.get('number') in numbers)]
+    return [source for source in values if isinstance(source,dict) and
+            (source.get('number') in numbers or (not numbers and not require_citation))]
 
 def context(chat,end=None):
     """Match desktop knowledgeHistory/rememberedContext, including edited conditions."""
@@ -80,6 +81,12 @@ class SharedChat:
     def public_message(self,message):
         result={key:message[key] for key in ('id','role','text','pending','error','requestState','requestId','mobileRequestId','questionId','retryable','archiveOnly','files') if key in message}
         result['sources']=[{key:source[key] for key in ('item_id','title','number') if key in source} for source in sources(message)]
+        evidence=message.get('answerEvidence')
+        if isinstance(evidence,dict):
+            cited=[source for source in sources(message,require_citation=True) if isinstance(source.get('text'),str) and source['text']]
+            if evidence.get('kind')=='material' and not evidence.get('passage_count'):cited=[]
+            result['answerEvidence']={**evidence,'excerpts':[{'title':source.get('title',''),'text':source['text'][:400]}
+                                                             for source in cited[:8]]}
         for item_id in message.get('items',[])[:20]:
             if any(s.get('item_id')==item_id for s in result['sources']):continue
             try:item=self.service.archive.get(item_id)

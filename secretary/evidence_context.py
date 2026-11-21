@@ -5,6 +5,26 @@ from .core import terms
 
 COLUMNS='c.*,i.title,i.url,i.filename,i.updated AS revision'
 
+def answer_evidence(kind,passages=(),turns=(),retained=(),pdf_passages=()):
+    from .conversation_context import CONDITION_PREFIX
+    from .pdf_reading import page_ranges
+    pdfs={}
+    for passage in (*passages,*pdf_passages):
+        origin=passage.get('origin') or {}
+        number=origin.get('page')
+        name=origin.get('name') or passage.get('filename','')
+        if not isinstance(number,int) or number<1 or not name.lower().endswith('.pdf'):continue
+        identity=(passage['item_id'],origin.get('batch_id') or '',origin.get('attachment_id') or '',name)
+        pdfs.setdefault(identity,set()).add(number)
+    conditions=[]
+    for turn in turns:
+        if turn not in retained:continue
+        value=turn['question'].removeprefix(CONDITION_PREFIX)
+        conditions.append(value[:400]+('…' if len(value)>400 else ''))
+    return {'kind':kind,'passage_count':len(passages),'history_turns':len(turns)-len(conditions),
+            'conditions':conditions,'pdf_pages':[{'item_id':item,'name':name,'pages':page_ranges(numbers)}
+                                              for (item,_,_,name),numbers in pdfs.items()]}
+
 def expand(archive,question,queries,passages,progress=None,cancel=None):
     if not passages:return passages,0,[]
     result=list(passages);seen={str(p['id']) for p in passages};chars=sum(len(p['text']) for p in passages);notice=[]

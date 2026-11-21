@@ -13,16 +13,22 @@
   try{const encoded=JSON.stringify({deletedItemIds:[...items].sort(),deletedMessages:[...messages].sort().map(JSON.parse)});if(localStorage.getItem(key)!==encoded)localStorage.setItem(key,encoded)}catch{}
  }
  function clean(chats){return chats.flatMap(original=>{
-  const list=original.messages||[],drop=new Set();
+  let evidenceChanged=false;
+  const list=(original.messages||[]).map(message=>{
+   const pages=message.answerEvidence?.pdf_pages;
+   if(!Array.isArray(pages)||!pages.some(page=>items.has(page?.item_id)))return message;
+   evidenceChanged=true;
+   return {...message,answerEvidence:{...message.answerEvidence,pdf_pages:pages.filter(page=>!items.has(page?.item_id))}};
+  }),drop=new Set();
   list.forEach((message,index)=>{
    const refs=[...(Array.isArray(message.items)?message.items:[]),...(Array.isArray(message.sources)?message.sources:[]).map(source=>source?.item_id),...(Array.isArray(message.images)?message.images:[]).map(image=>image?.item_id)];
    if(messages.has(JSON.stringify([original.id,message.id]))||refs.some(id=>items.has(id))){drop.add(index);if(message.role==='assistant'&&!message.externalArchive&&index&&list[index-1].role==='user')drop.add(index-1)}
   });
-  if(!drop.size&&!affected.has(original.id))return [original];
+  if(!drop.size&&!affected.has(original.id))return [evidenceChanged?{...original,messages:list}:original];
   const kept=list.filter((_,index)=>!drop.has(index));if(!kept.length)return [];
   const user=kept.find(message=>message.role==='user')||{};
   const title=original.titleCustom?original.title:String(user.text||user.files?.[0]||'Conversation').slice(0,36);
-  if(!drop.size&&title===original.title)return [original];
+  if(!drop.size&&title===original.title)return [evidenceChanged?{...original,messages:list}:original];
   const ids=new Set(kept.map(m=>m.id));const edits=Object.fromEntries(Object.entries(original.contextEdits||{}).filter(([id])=>ids.has(id)));let reset=original.contextReset;if(reset&&!ids.has(reset)){const boundary=list.findIndex(m=>m.id===reset);reset=list.slice(0,boundary+1).reverse().find(m=>ids.has(m.id))?.id||''}return [{...original,messages:kept,title,contextEdits:edits,contextIgnored:(original.contextIgnored||[]).filter(id=>ids.has(id)),contextReset:reset}];
  })}
  try{accept(JSON.parse(localStorage.getItem(key)||'{}'))}catch{}

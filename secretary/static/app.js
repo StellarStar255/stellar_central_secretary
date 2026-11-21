@@ -117,7 +117,7 @@ function writeLocalChats(){if(globalThis.StellarArchiveActions)conversations=Ste
 function saveChats(){writeLocalChats();if(sharedChatsReady){const snapshot=JSON.parse(JSON.stringify({conversations,activeId},(key,value)=>key==='questionProgress'?undefined:value));sharedChatSaves=sharedChatSaves.then(async()=>{const saved=await api('/api/conversations',snapshot);mergeQuestionMessages(saved);writeLocalChats()}).catch(e=>toast(t('对话同步未完成：')+e.message))}}
 function mergeChats(remote){globalThis.StellarArchiveActions?.accept(remote);if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);const merged=new Map((remote.conversations||[]).map(c=>[c.id,c]));for(const chat of conversations){if(!merged.has(chat.id)||(chat.updated||0)>=(merged.get(chat.id).updated||0))merged.set(chat.id,chat)}conversations=[...merged.values()].sort((a,b)=>(b.updated||0)-(a.updated||0));mergeQuestionMessages(remote);writeLocalChats()}
 function mergeQuestionMessages(remote){
- const fields=['text','sources','catalog','timings','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestVersion','requestApproval'];
+ const fields=['text','sources','catalog','timings','answerEvidence','retrievalNotice','localReply','pending','error','retryable','requestId','requestState','questionId','requestVersion','requestApproval'];
  for(const saved of remote.conversations||[]){
   const local=conversations.find(c=>c.id===saved.id);if(!local)continue;
   if(saved.titleCustom&&(saved.titleVersion||0)>=(local.titleVersion||0)){for(const field of ['title','titleCustom','titleVersion'])local[field]=saved[field]}
@@ -333,13 +333,30 @@ function updateSummaryProgress(){
 }
 function externalArchiveCard(id){const item=allItems.find(i=>i.id===id);return ui`<div class="source-list"><button class="source" data-id="${id}"><strong>${esc(item?.title||t('查看归档资料'))}</strong><small>${esc(item?itemState(item):'')} · ${esc(t('查看资料'))}</small></button></div>`}
 function archiveCard(id){const item=allItems.find(i=>i.id===id);if(!item)return ui`<button class="archive-card" data-id="${id}">查看归档资料</button>`;return ui`<button class="archive-card" data-id="${id}"><div class="archive-top"><span class="file-icon">${item.kind==='link'?'↗':item.kind==='file'?'▧':'✎'}</span><div><strong>${esc(item.title)}</strong><small>${esc(displayCategory(item.category))} · 查看资料与原件 ↗</small></div><span class="archive-status">${item.tags?.includes('部分对话')?t('部分对话 · '):''}${itemState(item)||''}</span></div>${item.summary?`<p class="archive-summary">${esc(item.summary)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${id}"></div>`:''}</button>${captureControls(item)}`}
+function answerEvidence(message){
+ const evidence=message.answerEvidence;
+ if(!evidence||message.pending||message.role!=='assistant')return '';
+ const kinds={local:'本地回复，未检索知识库。',general:'通用对话，未检索知识库。',archive:'直接读取已归档资料。',no_match:'没有找到相关正文。',catalog:'检索了资料目录。',material:'依据本次提交的资料。'};
+ const conditions=Array.isArray(evidence.conditions)?evidence.conditions:[];
+ const pages=Array.isArray(evidence.pdf_pages)?evidence.pdf_pages:[];
+ const excerpts=evidence.kind==='material'&&!evidence.passage_count?[]:answerSources(message,true).filter(source=>typeof source?.text==='string'&&source.text);
+ const list=(title,rows)=>rows.length?`<section><strong>${esc(t(title))}</strong><ul>${rows.map(row=>`<li>${row}</li>`).join('')}</ul></section>`:'';
+ return `<details class="answer-evidence"><summary>${esc(t('本次使用的资料'))}</summary>
+  ${kinds[evidence.kind]?`<p>${esc(t(kinds[evidence.kind]))}</p>`:''}
+  ${evidence.passage_count>0?`<p>${esc(t('提供的资料片段'))} · ${Number(evidence.passage_count)}</p>`:''}
+  ${evidence.history_turns>0?`<p>${esc(t('参考的对话轮次'))} · ${Number(evidence.history_turns)}</p>`:''}
+  ${list('本次采用的对话条件',conditions.map(esc))}
+  ${list('本次提供的 PDF 页码',pages.filter(page=>page?.name&&page?.pages).map(page=>esc(page.name+' · '+page.pages)))}
+  ${list('回答引用的片段',excerpts.map(source=>`<strong>${esc('['+source.number+'] '+source.title)}</strong><blockquote>${esc(source.text.slice(0,600))}${source.text.length>600?'…':''}</blockquote>`))}
+ </details>`;
+}
 function renderChat(scroll=true){
  if(globalThis.StellarArchiveActions)conversations=StellarArchiveActions.clean(conversations);
  const chat=historyLoaded?currentChat():null;const messages=chat?.messages||[];
  updateInputMode();renderConversationBasis(chat);
  const container=$('#chat-scroll');const atBottom=container.scrollHeight-container.scrollTop-container.clientHeight<120;
  $('#workspace').classList.toggle('empty',messages.length===0);
- const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.trashedDuplicate?`<div class="archive-recovery"><button class="secondary" data-restore-duplicate="${esc(m.id)}" ${m.restoringDuplicate?'disabled':''}>${esc(t('恢复原归档'))}</button></div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(m.externalArchive?externalArchiveCard:archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button>${m.questionId&&(m.sources?.length||m.retryable)?`<button data-recheck="${esc(m.id)}">${esc(t(m.retryable?'重试回答':'重新核对'))}</button>`:''}</div>`:''}${catalogPager(m)}${answerTiming(m)}</article>`);
+ const markup=messages.map(m=>`<article class="message ${m.role} ${m.pending?'pending':''} ${m.error?'error':''}" data-message="${esc(m.id)}">${m.role==='assistant'?'<div class="assistant-label"><span>✳</span>Secretary</div>':''}${m.files?.length?`<div class="user-files">${m.files.map(f=>`<span>▧ ${esc(f)}</span>`).join('')}</div>`:''}${m.images?.length&&globalThis.StellarBundles?StellarBundles.chatImages(m.images):''}${m.text?`<div class="message-body ${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?'answer-prose':''}">${m.role==='assistant'&&!m.pending&&!m.error&&m.sources?.length?readerMarkdown(m.text):esc(m.text)}</div>`:''}${m.trashedDuplicate?`<div class="archive-recovery"><button class="secondary" data-restore-duplicate="${esc(m.id)}" ${m.restoringDuplicate?'disabled':''}>${esc(t('恢复原归档'))}</button></div>`:''}${questionProgress(m)}${m.retrievalNotice?`<p class="muted">${esc(t(m.retrievalNotice))}</p>`:''}${(m.items||[]).map(m.externalArchive?externalArchiveCard:archiveCard).join('')}${answerSources(m).length?`<div class="source-list">${answerSources(m).map(sourceCard).join('')}</div>`:''}${m.role==='assistant'&&!m.pending?ui`<div class="message-tools"><button data-copy="${esc(m.id)}">复制回答</button>${m.questionId&&(m.sources?.length||m.retryable)?`<button data-recheck="${esc(m.id)}">${esc(t(m.retryable?'重试回答':'重新核对'))}</button>`:''}</div>`:''}${catalogPager(m)}${answerEvidence(m)}${answerTiming(m)}</article>`);
  const list=$('#messages'),nextMarkup=new Map(messages.map((message,index)=>[message.id,markup[index]]));
  let changed=false;
  for(const node of [...list.children]){
@@ -349,10 +366,12 @@ function renderChat(scroll=true){
  messages.forEach((message,index)=>{
   const node=existing.get(message.id),position=list.children[index];
   if(!node||messageMarkup.get(message.id)!==markup[index]){
+   const evidenceOpen=node?.querySelector('.answer-evidence')?.open;
    if(node)node.remove();
    const target=list.children[index];
    if(target)target.insertAdjacentHTML('beforebegin',markup[index]);
    else list.insertAdjacentHTML('beforeend',markup[index]);
+   if(evidenceOpen){const evidence=list.children[index]?.querySelector('.answer-evidence');if(evidence)evidence.open=true}
    changed=true;
   }else if(node!==position){
    list.insertBefore(node,position||null);changed=true;
@@ -660,7 +679,7 @@ function watchQuestionProgress(chat,message,progressId){
  render();if(!latestStatus?.capabilities?.reconnectable_questions)pollTimer=setTimeout(poll,250);tickTimer=setInterval(render,1000);
  return ()=>{stopped=true;clearTimeout(pollTimer);clearInterval(tickTimer);delete message.questionProgress};
 }
-function jobResponse(message){return {answer:message.text,sources:message.sources||[],catalog:message.catalog,timings:message.timings,retrieval_notice:message.retrievalNotice||'',local_reply:message.localReply}}
+function jobResponse(message){return {answer:message.text,sources:message.sources||[],catalog:message.catalog,timings:message.timings,answer_evidence:message.answerEvidence,retrieval_notice:message.retrievalNotice||'',local_reply:message.localReply}}
 async function receiveQuestionJob(chat,message,request){
  while(true){
   try{
@@ -729,16 +748,16 @@ function bindRechecks(boundChat){
   const chat=conversations.find(c=>c.id===boundChat.id);if(!chat)return;
   if(sending)return;
   const message=chat.messages.find(m=>m.id===button.dataset.recheck),question=chat.messages.find(m=>m.id===message?.questionId);if(!question)return;
-  const previous={text:message.text,sources:message.sources,catalog:message.catalog,timings:message.timings,error:message.error,retryable:message.retryable};
+  const previous={text:message.text,sources:message.sources,catalog:message.catalog,timings:message.timings,answerEvidence:message.answerEvidence,error:message.error,retryable:message.retryable};
   sending=true;updateSend();updateMessage(chat,message,{pending:true,error:false,retrievalNotice:''});
-  try{const data=await askWithProgress(chat,message,{question:question.text,history:knowledgeHistory(chat,question),context:rememberedContext(chat),force_refresh:true});if($('#message-input').value===question.text){$('#message-input').value='';resizeInput()}updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog||null,timings:data.timings,retrievalNotice:data.retrieval_notice||'',pending:false,error:false,retryable:false})}
+  try{const data=await askWithProgress(chat,message,{question:question.text,history:knowledgeHistory(chat,question),context:rememberedContext(chat),force_refresh:true});if($('#message-input').value===question.text){$('#message-input').value='';resizeInput()}updateMessage(chat,message,{text:data.answer,sources:data.sources,catalog:data.catalog||null,timings:data.timings,answerEvidence:data.answer_evidence,retrievalNotice:data.retrieval_notice||'',pending:false,error:false,retryable:false})}
   catch(error){updateMessage(chat,message,{...previous,pending:false,retrievalNotice:t('重新核对未完成，保留上次回答。')+' '+error.message})}
   finally{sending=false;updateSend()}
  });
 }
-function answerSources(message){
+function answerSources(message,requireCitation=false){
  const sources=message.sources||[],numbers=[...String(message.text||'').matchAll(/\[(\d{1,3})\]|【(\d{1,3})】/g)].map(match=>Number(match[1]||match[2]));
- return numbers.length?sources.filter(source=>numbers.includes(source.number)):sources;
+ return numbers.length||requireCitation?sources.filter(source=>numbers.includes(source.number)):sources;
 }
 function hasKnowledgeContext(){
  const chat=currentChat();
@@ -815,7 +834,7 @@ $('#composer-form').onsubmit=async event=>{
    chat.dialogueActive=true;
    updateMessage(chat,userMessage,{knowledgeQuestion:true});
    const data=await askWithProgress(chat,response,{question:text,history:knowledgeHistory(chat,userMessage),context:rememberedContext(chat,userMessage)});
-   updateMessage(chat,response,{text:data.answer,sources:data.sources,retrievalNotice:data.retrieval_notice||'',localReply:data.local_reply===true,catalog:data.catalog||null,timings:data.timings||null,pending:false,error:false});return;
+   updateMessage(chat,response,{text:data.answer,sources:data.sources,retrievalNotice:data.retrieval_notice||'',answerEvidence:data.answer_evidence,localReply:data.local_reply===true,catalog:data.catalog||null,timings:data.timings||null,pending:false,error:false});return;
   }
   const groupLinks=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
   const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
@@ -828,7 +847,7 @@ $('#composer-form').onsubmit=async event=>{
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
-   if(asking){if(groupLinks.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources}
+   if(asking){if(groupLinks.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
    updateMessage(chat,response,{text:answer,pending:false,error:false});return;
   }
   for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file),archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){if(!text&&files.length===1)throw e;errors.push(file.name+'：'+e.message)}}
@@ -841,7 +860,7 @@ $('#composer-form').onsubmit=async event=>{
   const shouldAsk=!archiveOnly&&mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
   let answer=results.map(archiveReply).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
-  if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources}
+  if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
   if(errors.length)answer+=(answer?'\n\n':'')+t('以下资料未能保存：\n')+errors.join('\n');
   updateMessage(chat,response,{text:answer||t('已处理。'),pending:false,error:errors.length>0&&!results.length});
  }catch(e){globalThis.StellarUploads?.abandon(files);if((files.length||text)&&!results.length&&activeId===chat.id&&!$('#message-input').value&&!attachedFiles.length){attachedFiles=files;$('#message-input').value=text;renderAttachments();resizeInput()}updateMessage(chat,response,{text:e.trashedDuplicate?t('相同资料已在回收站。可恢复原归档，原建档时间和内容会保留；本次输入尚未另存。'):(results.length?t('已保存 ')+results.length+t(' 份资料。\n\n'):'')+(e.cancelled?'':t('本次处理未完成：'))+e.message,trashedDuplicate:e.trashedDuplicate||null,pending:false,error:!e.cancelled&&!e.trashedDuplicate,retryable:!e.trashedDuplicate&&(mode==='library'||mode==='ask'&&!files.length)})}
@@ -911,6 +930,7 @@ async function detail(id,recordView=false,background=false){
 }
 async function applyUILanguage(language){
  const changed=StellarI18n.language!==language;StellarI18n.setLanguage(language);$('#ui-language').value=language;$('#tutorial-open').href='/tutorial?lang='+language;
+ if(changed&&!$('#settings-save').disabled)$('#settings-save').textContent=t('保存设置');
  updateInputMode();if($('#settings-dialog').open)void globalThis.StellarSemantic?.refresh();
  $('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');
  if(changed){renderAttachments();if(sending)$('#composer-status').textContent=t('正在处理…');if(latestStatus){$('#backend-status').textContent=latestStatus.settings.backend==='api'?t(latestStatus.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(latestStatus.backends).map(([key,value])=>key+': '+t(value?'已找到 CLI（登录状态需调用验证）':'未找到')).join(' · ');$('#data-dir').textContent=t('本机资料目录：')+latestStatus.data_dir}if(lastUpdateState)renderUpdate(lastUpdateState);renderModelReadiness(latestStatus);globalThis.StellarLibraryPreview?.refresh();if($('#tasks-dialog').open)void globalThis.StellarTasks?.refresh();renderSidebar();renderChat(false);updateModelLabel();if($('#library-dialog').open)await renderLibrary();if($('#detail-dialog').open&&!$('#detail-edit')&&(!$('#title-editor')||$('#title-editor').hidden)&&(!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(selectedId)&&!globalThis.StellarAttachmentOrder?.isBusy(selectedId))await detail(selectedId);}

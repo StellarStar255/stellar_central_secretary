@@ -40,6 +40,7 @@ class Mobile:
         from .shared_chat import SharedChat
         self.chats=SharedChat(service)
         self.peer_bridge=None
+        self.upload_progress={};self.upload_lock=threading.Lock()
         self.lock=threading.RLock();self.server=None;self.discovery=None;self.info=None;self.pending={};self.invite=None;self.error='';self.operations=threading.BoundedSemaphore(2);self.monitor_stop=threading.Event();self.published_ips=[]
         self.state=json.loads(self.path.read_text()) if self.path.exists() else {'server_id':uuid.uuid4().hex,'devices':{},'receipts':{},'enabled':False}
         if self.state.get('enabled'):
@@ -422,6 +423,7 @@ class Mobile:
             def do_GET(self):self.route(False)
             def do_POST(self):self.route(True)
             def route(self,post):
+                upload_key=None
                 try:
                     if manager.server is None:
                         self.close_connection=True
@@ -431,14 +433,33 @@ class Mobile:
                     parsed=urlsplit(self.path);body={}
                     if post and re.fullmatch(r'/privacy-v1/(?:ingest|chats/[^/]{1,100}/messages|items/[a-f0-9]{32}/attachments)|/privacy-v2/chats/[^/]{1,100}/messages',parsed.path):
                         parsed=parsed._replace(path='/' + parsed.path.split('/',2)[2])
+                    credential=self.headers.get('Authorization','').removeprefix('Bearer ')
                     if post:
                         length=int(self.headers.get('Content-Length','0'))
                         if not 0<length<=MAX_BODY:return self.send(413,{'error':'单次发送不能超过 16 MB'})
-                        raw=self.rfile.read(length)
+                        upload_id=self.headers.get('X-Stellar-Upload')
+                        if upload_id is not None:
+                            if not re.fullmatch(r'[a-f0-9]{32}',upload_id) or not re.fullmatch(r'/ingest|/chats/[^/]{1,100}/messages',parsed.path):
+                                return self.send(400,{'error':'上传标识无效'})
+                            device=manager.device(credential)
+                            if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
+                            key=(device,upload_id)
+                            with manager.upload_lock:
+                                active=key in manager.upload_progress
+                                if not active:manager.upload_progress[key]=(0,length)
+                            if active:return self.send(409,{'error':'本次上传正在进行'})
+                            upload_key=key
+                            raw=bytearray()
+                            while len(raw)<length:
+                                chunk=self.rfile.read1(min(64*1024,length-len(raw)))
+                                if not chunk:break
+                                raw.extend(chunk)
+                                with manager.upload_lock:manager.upload_progress[key]=(len(raw),length)
+                        else:
+                            raw=self.rfile.read(length)
                         if len(raw)!=length:raise ValueError('上传中断')
                         body=json.loads(raw)
                         if not isinstance(body,dict):raise ValueError('请求格式无效')
-                    credential=self.headers.get('Authorization','').removeprefix('Bearer ')
                     if post and parsed.path=='/pair':return self.send(200,manager.pair(body))
                     device=manager.device(credential)
                     if parsed.path=='/pair/status' and not post:
@@ -446,7 +467,11 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True,'multi_attachments':True})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True,'multi_attachments':True,'upload_progress':True})
+                    progress_match=re.fullmatch(r'/upload-progress/([a-f0-9]{32})',parsed.path)
+                    if not post and progress_match:
+                        with manager.upload_lock:progress=manager.upload_progress.get((device,progress_match[1]))
+                        return self.send(200,{'received':progress[0],'total':progress[1]} if progress else {})
                     if not post and parsed.path=='/captures':return self.send(200,{'captures':manager.recent_captures(device)})
                     if parsed.path=='/model-privacy':
                         return self.send(200,manager.set_model_privacy(device,body) if post else manager.model_privacy(device))
@@ -515,4 +540,7 @@ class Mobile:
                 except PermissionError as exc:self.send(403,{'error':str(exc)})
                 except (ValueError,KeyError,TypeError) as exc:self.send(400,{'error':str(exc)})
                 except Exception:self.send(500,{'error':'手机请求未完成，请在电脑端检查任务状态'})
+                finally:
+                    if upload_key is not None:
+                        with manager.upload_lock:manager.upload_progress.pop(upload_key,None)
         return Handler

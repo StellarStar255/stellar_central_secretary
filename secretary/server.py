@@ -961,14 +961,24 @@ class Service:
         try:
             with self.summary_jobs.session(item_id,len(item["text"]),short=True,cancel_event=cancel), summary_language.preferences(self.archive.settings()):
                 if mobile_privacy.active.get() is None:self.archive.update(item_id,state='processing',error='')
-                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'])
+                pdf_pages=[]
+                source,images,scope=bundles.model_material((self.archive.root/'files'/item_id),item['text'],item['group_links'],pdf_pages=pdf_pages)
                 source,scope=service_pdf_material(self.archive,item,source,scope)
+                for token,pages in item['_pdf_used'].items():
+                    batch,attachment=token.split(':')
+                    name=item['pdf_reads'][token]['name']
+                    pdf_pages.extend({'name':name,'batch_id':batch if batch!='original' else '',
+                                      'attachment_id':attachment if attachment!='original' else '',
+                                      'page':int(page)} for page in pages)
                 references=[dict(hit,number=index+1) for index,hit in enumerate([hit for hit in self.archive.retrieve(question,12) if hit['item_id']==item_id and hit.get('origin')])]
                 fields,answer=ai.analyze_material(source,item['title'],self.model_backend(item_ids=[item_id]),images,scope,question=question,**({'source_references':references} if references else {}))
                 with self.lock:
                     self.summary_jobs.check(item_id)
                     self.archive.update(item_id,**fields);self.summary_jobs.commit(item_id)
-            return {'answer':answer,'sources':references or [{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],'item':self.item_detail(item_id)}
+            from .evidence_context import answer_evidence
+            return {'answer':answer,'sources':references or [{'number':1,'item_id':item_id,'title':fields['title'],'text':fields['summary']}],
+                    'answer_evidence':answer_evidence('material',references,
+                        pdf_passages=[{'item_id':item_id,'origin':origin} for origin in pdf_pages]),'item':self.item_detail(item_id)}
         except Exception as error:
             self.summary_failed(item_id,error);raise
         finally:
@@ -976,6 +986,7 @@ class Service:
 
     def ask_library(self,question,history=None,progress=None,context=None,force_refresh=False,cancel=None):
         from . import knowledge_chat
+        from .evidence_context import answer_evidence
         def stage(name,count=None):
             if cancel is not None and cancel.is_set():raise ai.ModelCancelledError('问答已停止。')
             if progress:progress(name,count)
@@ -988,10 +999,11 @@ class Service:
             stage('planning')
             timings['model_calls']+=1
             return knowledge_chat.plan(question,turns,backend)
-        def result(answer,passages,notice):
+        def result(answer,passages,notice,kind,model_turns=()):
             if cancel is not None and cancel.is_set():raise ai.ModelCancelledError('问答已停止。')
             timings['total_seconds']=round(time.monotonic()-started,3)
-            return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice)),'timings':timings}
+            return {'answer':answer,'sources':knowledge_chat.citations(answer,passages),'retrieval_notice':' '.join(dict.fromkeys(notice)),
+                    'timings':timings,'answer_evidence':answer_evidence(kind,passages,model_turns,retained)}
         if not question.strip():raise ValueError('请输入问题')
         turns=knowledge_chat.history(history)
         from .conversation_context import turns as context_turns
@@ -1002,7 +1014,7 @@ class Service:
         reply=knowledge_chat.social_reply(question)
         if reply:
             timings['local_reply']=True
-            response=result(reply,[],[]);response['local_reply']=True
+            response=result(reply,[],[],'local');response['local_reply']=True
             return response
         # Exact standalone text asks only to confirm the saved record. Old topic
         # conditions do not transform this into a conflict or timetable analysis.
@@ -1011,10 +1023,10 @@ class Service:
             with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
             if archived:
                 timings['archive_match']=True
-                return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'])
+                return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'],'archive')
         with self.archive.db() as db:
             available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
-        if not available:return {'answer':'知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。','sources':[]}
+        if not available:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],[],'no_match')
         # Review historical sources before sending previous answers to a model.
         history_ids=[item for turn in turns for item in turn['source_ids']]
         backend=self.model_backend(item_ids=history_ids)
@@ -1039,12 +1051,12 @@ class Service:
                     from .catalog import page
                     stage('retrieving')
                     response=measured('retrieval_seconds',lambda:page(self.archive,[q for q in queries if q!=question][:3] or [question[:200]]))
-                    timings['total_seconds']=round(time.monotonic()-started,3);response['timings']=timings
+                    timings['total_seconds']=round(time.monotonic()-started,3);response['timings']=timings;response['answer_evidence']=answer_evidence('catalog')
                     return response
                 if getattr(queries,'chat_answer',None):
                     timings['answer_seconds']=timings.pop('planning_seconds',0)
                     timings['general_chat']=True
-                    return result(queries.chat_answer,[],['通用对话回复，未检索知识库。'])
+                    return result(queries.chat_answer,[],['通用对话回复，未检索知识库。'],'general',turns)
                 notice=[]
                 stage('retrieving')
                 passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
@@ -1053,7 +1065,7 @@ class Service:
                     queries=measured('planning_seconds',lambda:planning(turns,backend))
                     stage('retrieving')
                     passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
-                if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice)
+                if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice,'no_match')
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
                 from .evidence_context import expand
                 passages,expanded,expansion_notice=measured('expansion_seconds',lambda:expand(self.archive,question,queries,passages,stage,cancel))
@@ -1069,7 +1081,7 @@ class Service:
                 stage('answering',len({p['item_id'] for p in passages}))
                 with ai.text_progress(lambda text:stage('partial',text)):
                     answer=measured('answer_seconds',lambda:knowledge_chat.answer(question,answer_turns,passages,backend,images,visual_status))
-            response=result(answer,passages,notice)
+            response=result(answer,passages,notice,'library',answer_turns)
             # Do not cache a response if any indexed record changed during generation.
             if original_signature is not None and original_signature==source_files(self.archive,[p['item_id'] for p in passages]) and cache_key==answer_key(self.archive,question,turns,backend,self.semantic.generation):
                 self.answer_cache.put(cache_key,self.archive,response,passages,original_signature)
@@ -1091,7 +1103,8 @@ class Service:
         finally:
             with self.lock: self.questions -= 1
         from .knowledge_chat import citations
-        return {'answer':answer, 'sources':citations(answer,passages)}
+        from .evidence_context import answer_evidence
+        return {'answer':answer, 'sources':citations(answer,passages),'answer_evidence':answer_evidence('library',passages)}
     def close(self):
         self.mobile.stop()
         self.semantic.close()

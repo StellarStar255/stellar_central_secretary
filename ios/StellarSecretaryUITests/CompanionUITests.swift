@@ -337,7 +337,15 @@ final class CompanionUITests: XCTestCase {
         ).tap()
         let ready = expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:capture)
         wait(for:[ready],timeout:8)
+        _ = try fixture("/hold-ingest")
         capture.tap()
+        XCTAssertTrue(app.staticTexts["电脑已收齐，正在处理…"].waitForExistence(timeout:10))
+        _ = try fixture("/release-ingest")
+        XCTAssertTrue(app.staticTexts["Fixture upload rejected once"].waitForExistence(timeout:10))
+        let retry=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-retry-'")).firstMatch
+        XCTAssertTrue(retry.waitForExistence(timeout:5),app.debugDescription)
+        XCTAssertTrue(retry.isEnabled)
+        retry.tap()
         let receipt = app.buttons.matching(NSPredicate(
             format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS %@",name
         )).firstMatch
@@ -408,6 +416,11 @@ final class CompanionUITests: XCTestCase {
         send.tap()
         XCTAssertTrue(app.staticTexts["Synthetic fixture answer [1]"].waitForExistence(timeout:20))
         XCTAssertEqual(try fixture("/chat-count")["count"] as? Int,1)
+        let evidence=app.buttons["本次使用的资料"]
+        XCTAssertTrue(evidence.waitForExistence(timeout:5),app.debugDescription)
+        evidence.tap()
+        XCTAssertTrue(app.staticTexts["Reference fixture body"].waitForExistence(timeout:5))
+        evidence.tap()
         input.tap()
         XCTAssertFalse(send.isEnabled)
         XCTAssertTrue(dismissKeyboard.waitForExistence(timeout:5))

@@ -80,10 +80,42 @@ def wait_windows_parent(handle):
     finally:
         _winapi.CloseHandle(handle)
 
+def rename_windows_update_path(source,target):
+    """Retry transient file sharing violations, including directory handles."""
+    for attempt in range(25):
+        try:
+            source.rename(target)
+            return
+        except OSError as error:
+            if getattr(error,'winerror',None) not in (5,32,33) or attempt==24:
+                raise
+            time.sleep(.5)
+
+def restore_windows_program(root,backup):
+    """Keep a runnable copy available even when the installation path is locked."""
+    from .windows_update_files import release
+    restored=root.with_name(root.name+'.restore-'+uuid.uuid4().hex)
+    shutil.copytree(backup,restored,symlinks=True)
+    displaced=root.with_name(root.name+'.failed-'+uuid.uuid4().hex)
+    try:
+        release(root,grace=2,timeout=3)
+        if root.exists():
+            rename_windows_update_path(root,displaced)
+        rename_windows_update_path(restored,root)
+        return root,''
+    except (OSError,RuntimeError) as error:
+        if not root.exists() and displaced.exists():
+            try:rename_windows_update_path(displaced,root)
+            except OSError:pass
+        (restored/'.stellar-recovery').touch()
+        return restored,str(error)
+
 def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,before_handoff=None):
     executable=Path(sys.executable).resolve();root=executable.parent
     kind=kind or ('mac' if sys.platform=='darwin' else 'windows' if sys.platform=='win32' else 'portable')
     if kind=='mac':root=next(p for p in executable.parents if p.suffix=='.app')
+    if kind=='windows' and (root/'.stellar-recovery').exists():
+        raise RuntimeError('当前从恢复副本运行，请先关闭程序并修复原安装，再继续自动更新。')
     data=paths.DATA_DIR.resolve();work=Path(work).resolve()
     if data.is_relative_to(root):raise RuntimeError('资料目录位于程序目录中，请先迁移资料后再自动升级。')
     if kind!='deb' and not os.access(root.parent,os.W_OK):raise RuntimeError('程序目录不可写，请手动安装新版。')
@@ -135,11 +167,12 @@ def run(config):
         value=dict(phase=phase,error=error,version=config['version'],backup=str(backup),updated=time.time())
         atomic(result,value)
         if config['kind']=='windows':atomic(data/'windows-update.json',value)
-    def launch():
-        command=[config['executable'],*config['args']]
+    def launch(program=root):
+        executable=program/Path(config['executable']).relative_to(root)
+        command=[str(executable),*config['args']]
         if config['kind']=='windows':
             with (work/'relaunch.log').open('ab') as log:
-                return spawn(command,cwd=str(root.parent),stdout=log,stderr=log)
+                return spawn(command,cwd=str(program.parent),stdout=log,stderr=log)
         return spawn(command,cwd=str(root.parent),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     def wait_health(version,legacy=False):
         deadline=time.monotonic()+config.get('timeout',60)
@@ -228,17 +261,25 @@ def run(config):
         if changed:
             try:
                 stop_child()
+                recovered=root
+                lock_error=''
                 if privileged_backup:
                     script='set -eu\ntest -d "$1"\nmv /opt/stellar-secretary "$2"\nmv "$1" /opt/stellar-secretary\n'
                     process=spawn(['pkexec','/bin/sh','-c',script,'stellar-rollback',privileged_backup,'/opt/.stellar-secretary.failed-'+uuid.uuid4().hex],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                     if process.wait(timeout=120):raise RuntimeError('恢复旧版需要系统安装授权。')
+                elif config['kind']=='windows':
+                    recovered,lock_error=restore_windows_program(root,backup)
                 else:
                     restored=root.with_name(root.name+'.restore-'+uuid.uuid4().hex)
                     shutil.copytree(old_root or backup,restored,symlinks=True)
                     if root.exists():root.rename(root.with_name(root.name+'.failed-'+uuid.uuid4().hex))
                     restored.rename(root)
-                child=launch()
+                child=launch(recovered)
                 if not wait_health(config['old_version'],legacy=True):raise RuntimeError('旧版程序已恢复，但启动健康检查失败。')
+                if recovered!=root:
+                    report('error',message+' 原安装目录仍不可替换，已从恢复副本启动旧版，资料保留。恢复程序：'+str(recovered)+'；原因：'+lock_error)
+                    threading.Thread(target=child.wait,daemon=True).start()
+                    return False
                 report('rolled_back',message+' 已恢复旧版程序，资料保留。');threading.Thread(target=child.wait,daemon=True).start();return False
             except Exception as recovery:message+=' 恢复未完成：'+str(recovery)+'；程序备份：'+str(old_root or backup)
         report('error',message)

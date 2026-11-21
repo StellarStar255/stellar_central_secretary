@@ -28,6 +28,7 @@ struct Draft: Codable, Identifiable {
     var data: String?
     var created = ISO8601DateFormatter().string(from: Date())
     var attachmentBatch: [ChatAttachment]? = nil
+    var lastError: String? = nil
 }
 struct ModelPrivacy {
     let destination: String
@@ -150,6 +151,9 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     @Published private(set) var sendingChatID: String?
     @Published private(set) var chatUploadTransport: String?
     @Published private(set) var chatRetryAfter: [String:Date] = [:]
+    @Published private(set) var captureRetryAfter: [String:Date] = [:]
+    @Published private(set) var uploadProgress: [String:UploadProgress] = [:]
+    private var uploadProgressAvailable = false
     @Published var chatStage=""
     @Published var chatPartial=""
     private var partialMessageID=""
@@ -376,7 +380,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         } + discoveredURLs).prefix(16))
         Task { await connect() }
     }
-    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil, endpoint: String? = nil) async throws -> [String:Any] {
+    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil, endpoint: String? = nil, uploadKey:String? = nil) async throws -> [String:Any] {
         let protectedWrite = body != nil && (path == "/ingest" || path.hasSuffix("/attachments") || path.hasSuffix("/messages"))
         if protectedWrite {
             guard privacySupported else {
@@ -395,6 +399,17 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         var request = URLRequest(url:url);if path == "/status" { request.timeoutInterval = 12 };if path == "/pair" { request.timeoutInterval = 15 };request.setValue("Bearer " + pair.credential,forHTTPHeaderField:"Authorization")
         if let body { request.httpMethod = "POST";request.httpBody = try JSONSerialization.data(withJSONObject:body);request.setValue("application/json",forHTTPHeaderField:"Content-Type");if path == "/ask" { request.timeoutInterval = 300 } }
         if let timeout { request.timeoutInterval = timeout }
+        var progressTask: Task<Void,Never>?
+        if let uploadKey, uploadProgressAvailable {
+            let attempt=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
+            request.setValue(attempt,forHTTPHeaderField:"X-Stellar-Upload")
+            let address=endpoint ?? sessionEndpoint
+            progressTask=Task { await pollUpload(address:address,pair:pair,attempt:attempt,key:uploadKey) }
+        }
+        defer {
+            progressTask?.cancel()
+            if let uploadKey { uploadProgress[uploadKey]=nil }
+        }
         let data:Data,response:URLResponse
         do {(data,response)=try await (alternateSession ?? session).data(for:request)}
         catch {if generation != deviceGeneration {throw CancellationError()};throw error}
@@ -406,6 +421,22 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             throw NSError(domain:domain,code:status,userInfo:[NSLocalizedDescriptionKey:result["error"] as? String ?? "连接未完成，请重试"])
         }
         return result
+    }
+    private func pollUpload(address:String,pair:PairedMac,attempt:String,key:String) async {
+        guard let url=URL(string:address+"/upload-progress/"+attempt) else { return }
+        let session=pinnedSession(pair)
+        defer { session.invalidateAndCancel() }
+        var request=URLRequest(url:url,timeoutInterval:4)
+        request.setValue("Bearer "+pair.credential,forHTTPHeaderField:"Authorization")
+        while !Task.isCancelled {
+            if let (data,response)=try? await session.data(for:request),
+               (response as? HTTPURLResponse)?.statusCode==200,
+               let value=try? JSONDecoder().decode(UploadProgress.self,from:data),
+               !Task.isCancelled, value.total>0, (0...value.total).contains(value.received) {
+                uploadProgress[key]=value
+            }
+            try? await Task.sleep(for:.seconds(1.5))
+        }
     }
     func modelPrivacy() async throws -> ModelPrivacy {
         ModelPrivacy(try await request("/model-privacy", timeout: 12))
@@ -577,6 +608,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             reuseActiveChat = value["reuse_active_chat"] as? Bool == true
             chatAttachmentsAvailable = value["chat_attachments"] as? Bool == true
             multiAttachmentsAvailable = value["multi_attachments"] as? Bool == true
+            uploadProgressAvailable = value["upload_progress"] as? Bool == true
             online = true;status = "已连接 · \(pair.displayName)";error = "";discover();await flush();await flushChatMessages()
         } catch {
             guard connectionGeneration==generation,!Task.isCancelled else {return}
@@ -606,8 +638,21 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         }
         catch { self.error = "手机空间不足，内容尚未保存，请保留原内容";return false }
     }
-    func removeDraft(_ id: String) { guard currentDrafts.contains(where:{$0.id==id}) else {return};do { try persist(drafts.filter { $0.id != id }) } catch { self.error = "无法移除待发送内容" } }
-    func flush() async {
+    func removeDraft(_ id: String) {
+        guard id != sendingDraftID,currentDrafts.contains(where:{$0.id==id}) else {return}
+        do { try persist(drafts.filter { $0.id != id });captureRetryAfter[id]=nil }
+        catch { self.error = "无法移除待发送内容" }
+    }
+    func retryDraft(_ id:String) async {
+        guard online,!flushing,currentDrafts.contains(where:{$0.id==id}),
+              let index=drafts.firstIndex(where:{$0.id==id}) else { return }
+        var next=drafts
+        next[index].lastError=nil
+        do { try persist(next) } catch { self.error="无法保存待发消息";return }
+        captureRetryAfter[id]=nil
+        await flush(only:id)
+    }
+    func flush(only id:String?=nil) async {
         guard online, !flushing, let pair = paired else { return }
         guard !currentDrafts.isEmpty else { return }
         flushing = true
@@ -615,7 +660,11 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             flushing = false;sendingDraftID=nil
             if paired?.transport == "bluetooth", !chatSubmitting { wifiRelay?.suspendDiscovery() }
         }
-        while let draft = currentDrafts.first(where: { multiAttachmentsAvailable || $0.attachmentBatch == nil }) {
+        while let draft = currentDrafts.first(where: {
+            (id==nil || id==$0.id)
+                && (multiAttachmentsAvailable || $0.attachmentBatch == nil)
+                && $0.lastError==nil && (captureRetryAfter[$0.id] ?? .distantPast)<=Date()
+        }) {
             sendingDraftID=draft.id
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let files = draft.attachmentBatch { content["attachments"] = files.map(\.payload) }
@@ -624,7 +673,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             do {
                 let size = draft.attachmentBatch.map { $0.reduce(0) { $0 + $1.data.count } } ?? draft.data.map { $0.utf8.count * 3 / 4 }
                 let upload = try await attachmentUpload(using:pair,size:size)
-                let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
+                let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair,timeout:upload.timeout,endpoint:upload.endpoint,uploadKey:size==nil ? nil : draft.id)
                 if let value = (response["capture"] ?? response["item"]) as? [String:Any] {
                     let receipt = CaptureReceipt(value)
                     if !receipt.id.isEmpty {
@@ -633,12 +682,24 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                     }
                 }
                 try persist(drafts.filter { $0.id != draft.id })
+                captureRetryAfter[draft.id]=nil
                 libraryCache?.invalidate()
                 if let cache=libraryCache {try? cache.save(to:libraryCacheURL)}
             }
-            catch { self.error = "待发送内容已保留：" + error.localizedDescription;return }
+            catch {
+                if Task.isCancelled { return }
+                captureRetryAfter[draft.id]=Date().addingTimeInterval(10)
+                let failure=error as NSError
+                if failure.domain=="Companion", (400..<500).contains(failure.code),
+                   let index=drafts.firstIndex(where:{$0.id==draft.id}) {
+                    var next=drafts;next[index].lastError=error.localizedDescription
+                    try? persist(next)
+                }
+                if id != nil || failure.domain==NSURLErrorDomain { return }
+            }
+            if id != nil { break }
         }
-        if !currentDrafts.isEmpty { error = "请更新电脑端以发送多个附件。" }
+        if !multiAttachmentsAvailable,currentDrafts.contains(where:{$0.attachmentBatch != nil}) { error = "请更新电脑端以发送多个附件。" }
         else if error == "请更新电脑端以发送多个附件。" { error = "" }
     }
     private func captureReceiptURL(_ pair: PairedMac) -> URL {
@@ -872,11 +933,11 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         catch {chatNotice="手机暂存失败，请保留输入内容";return false}
     }
     func retryChatMessage(_ id:String) async {
-        guard currentChatQueue.contains(where:{$0.id==id}) else {return}
+        guard online,!chatSubmitting,currentChatQueue.contains(where:{$0.id==id}) else {return}
         chatRetryAfter[id] = nil
         var messages=pendingChatMessages
         if let index=messages.firstIndex(where:{$0.id==id}) {messages[index].lastError="";do {try persistChatQueue(messages)} catch {chatNotice="无法保存待发消息";return}}
-        await flushChatMessages()
+        await flushChatMessages(only:id)
     }
     func removeQueuedChatMessage(_ id:String) {
         guard !chatSubmitting,currentChatQueue.contains(where:{$0.id==id}) else {return}
@@ -919,10 +980,10 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         return (endpoint,timeout,transport)
     }
 
-    func flushChatMessages() async {
+    func flushChatMessages(only id:String?=nil) async {
         guard online,!chatSubmitting,let pair=paired else {return}
         let ready = currentChatQueue.filter {
-            $0.lastError.isEmpty && (chatRetryAfter[$0.id] ?? .distantPast) <= Date()
+            (id==nil || id==$0.id) && $0.lastError.isEmpty && (chatRetryAfter[$0.id] ?? .distantPast) <= Date()
         }
         guard !ready.isEmpty else { return }
         chatSubmitting=true
@@ -954,7 +1015,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                     if files.count==1 { body["attachment"]=file.payload }
                     else { body["attachments"]=files.map(\.payload) }
                 }
-                let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
+                let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:upload.timeout,endpoint:upload.endpoint,uploadKey:files.isEmpty ? nil : pending.id)
                 guard value["accepted"] as? Bool==true else {throw URLError(.cannotParseResponse)}
                 try persistChatQueue(pendingChatMessages.filter {$0.id != pending.id});changed=true
                 chatRetryAfter[pending.id] = nil

@@ -71,6 +71,36 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(self.request('/items?q=arrangement',credential=self.credential)[1]['items'][0]['id'],ident)
   self.assertEqual(self.request('/items/'+ident,credential=self.credential)[1]['item']['text'],body['content']['text'])
   self.s.trash_item(ident);self.assertEqual(self.request('/items/'+ident,credential=self.credential)[0],400)
+
+ def test_upload_progress_counts_received_tls_bytes_and_is_phone_scoped(self):
+  from http.client import HTTPSConnection
+  import time
+  self.approve();phone=self.credential
+  self.credential=secrets.token_urlsafe(48);self.approve()
+  self.assertTrue(self.request('/status',credential=phone)[1]['upload_progress'])
+  context=ssl.create_default_context(cafile=str(self.m.root/'certificate.pem'));context.check_hostname=False
+  conn=HTTPSConnection('127.0.0.1',self.m.server.server_port,context=context,timeout=5)
+  upload='e'*32;progress='/upload-progress/'+upload
+  payload=json.dumps({'request_id':'progress','content':{'filename':'progress.txt',
+                       'data':base64.b64encode(b'Progress fixture\n'*6000).decode()}}).encode()
+  try:
+   conn.putrequest('POST','/privacy-v1/ingest')
+   conn.putheader('Authorization','Bearer '+phone);conn.putheader('X-Stellar-Upload',upload)
+   conn.putheader('Content-Length',str(len(payload)));conn.endheaders()
+   cut=32768;conn.send(payload[:cut])
+   deadline=time.monotonic()+3
+   while time.monotonic()<deadline:
+    state=self.request(progress,credential=phone)[1]
+    if state.get('received')==cut:break
+    time.sleep(.02)
+   self.assertEqual(state,{'received':cut,'total':len(payload)})
+   self.assertEqual(self.request(progress,credential=self.credential),(200,{}))
+   self.assertEqual(self.request(progress)[0],401)
+   conn.send(payload[cut:])
+   result=conn.getresponse();self.assertEqual(result.status,200);result.read()
+   self.assertEqual(len(self.s.archive.list()),1)
+   self.assertEqual(self.request(progress,credential=phone),(200,{}))
+  finally:conn.close()
  def test_device_nickname_persists_without_changing_identity_or_model_consent(self):
   ident=self.approve()['id'];info=self.approve_model()
   before=dict(self.m.state['devices'][ident])

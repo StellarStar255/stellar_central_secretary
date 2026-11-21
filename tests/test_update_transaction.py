@@ -2,6 +2,83 @@ import hashlib,json,os,shutil,signal,socket,sys,tarfile,tempfile,unittest
 from pathlib import Path
 from secretary.update_transaction import run
 
+class WindowsRollbackTest(unittest.TestCase):
+    def exercise(self,persistent):
+        from unittest.mock import Mock,patch
+        from secretary import update_transaction as transaction
+        with tempfile.TemporaryDirectory() as folder:
+            base=Path(folder);root=base/'D'/'Stellar Secretary';root.mkdir(parents=True)
+            data=base/'D'/'知识库';data.mkdir()
+            work=data/'updates';work.mkdir()
+            backup=work/'previous-program';backup.mkdir()
+            executable=root/'Stellar Secretary.exe';executable.write_bytes(b'new')
+            (backup/executable.name).write_bytes(b'old')
+            (data/'archive.sqlite3').write_bytes(b'library must stay intact')
+            package=work/'setup.exe';package.write_bytes(b'installer')
+            (work/'proceed').touch()
+            launches=[];attempts=0
+            rename=Path.rename
+            def locked_rename(source,destination):
+                nonlocal attempts
+                if source==root:
+                    attempts+=1
+                    if persistent or attempts<3:
+                        error=PermissionError('fixture sharing violation');error.winerror=32
+                        raise error
+                return rename(source,destination)
+            def spawn(command,**kwargs):
+                if command[0]==str(package):return Mock(wait=Mock(return_value=5))
+                launches.append(command)
+                return Mock(pid=12)
+            config=dict(root=str(root),backup=str(backup),executable=str(executable),package=str(package),
+                        sha=hashlib.sha256(package.read_bytes()).hexdigest(),version='new',old_version='old',
+                        data=str(data),work=str(work),kind='windows',parent=0,args=['--data-dir',str(data)])
+            with patch('secretary.windows_update_files.release'),patch.object(Path,'rename',locked_rename), \
+                 patch.object(transaction,'spawn',side_effect=spawn),patch.object(transaction,'healthy',return_value=True), \
+                 patch.object(transaction.time,'sleep'):
+                self.assertFalse(run(config))
+            launched=Path(launches[0][0])
+            self.assertEqual(launched.read_bytes(),b'old')
+            self.assertEqual(launches[0][1:],config['args'])
+            self.assertEqual((data/'archive.sqlite3').read_bytes(),b'library must stay intact')
+            result=json.loads((data/'update-result.json').read_text())
+            self.assertEqual(result['phase'],'error' if persistent else 'rolled_back')
+            self.assertTrue((backup/executable.name).exists())
+            if persistent:
+                self.assertEqual(attempts,25)
+                self.assertIn(str(launched.parent),result['error'])
+                self.assertTrue((launched.parent/'.stellar-recovery').exists())
+            else:
+                self.assertEqual(attempts,3)
+                self.assertEqual(launched,executable)
+
+    def test_transient_directory_lock_restores_original_installation(self):self.exercise(False)
+    def test_persistent_directory_lock_launches_recovery_copy(self):self.exercise(True)
+
+    @unittest.skipUnless(os.name=='nt','Requires Windows directory sharing modes')
+    def test_native_directory_lock_keeps_a_runnable_recovery_copy(self):
+        import ctypes
+        from unittest.mock import patch
+        from secretary.update_transaction import restore_windows_program
+        from secretary.windows_update_files import kernel
+        with tempfile.TemporaryDirectory() as folder:
+            base=Path(folder);root=base/'Stellar Secretary';backup=base/'previous-program'
+            root.mkdir();backup.mkdir()
+            executable='Stellar Secretary.exe'
+            (root/executable).write_bytes(b'failed version')
+            (backup/executable).write_bytes(b'previous version')
+            api=kernel()
+            handle=api.CreateFileW(str(root),0x80000000,3,None,3,0x02000000,None)
+            self.assertNotEqual(handle,ctypes.c_void_p(-1).value)
+            try:
+                with patch('secretary.update_transaction.time.sleep'):
+                    recovered,reason=restore_windows_program(root,backup)
+                self.assertNotEqual(recovered,root)
+                self.assertTrue(reason)
+                self.assertEqual((recovered/executable).read_bytes(),b'previous version')
+                self.assertEqual((root/executable).read_bytes(),b'failed version')
+            finally:api.CloseHandle(handle)
+
 class AtomicStatusTest(unittest.TestCase):
     def test_mac_update_helper_keeps_app_bundle_suffix(self):
         from unittest.mock import Mock, patch

@@ -203,7 +203,7 @@ def member(data,key):
         if file is None:raise KeyError('组合附件不存在')
         return file,Member(data,file)
 
-def model_material(data,current_text,link_values=None):
+def model_material(data,current_text,link_values=None,*,pdf_pages=None):
     archive,value=load(data);images=[];parts=[];limited=False;pdf_scopes=[]
     allowance=max(1000,100000//max(1,len(value['files'])))
     with archive:
@@ -214,6 +214,9 @@ def model_material(data,current_text,link_values=None):
                 later=re.search(r'^\[第 (?:[6-9]|[1-9][0-9]+) 页\]$',source,re.M)
                 if later:source=source[:later.start()];limited=True
             if len(source)>allowance:source=source[:allowance];limited=True
+            if pdf_pages is not None and file['name'].lower().endswith('.pdf'):
+                for page,body in re.findall(r'^\[第 (\d+) 页\]\n(.*?)(?=^\[第 \d+ 页\]|\Z)',source,re.M|re.S):
+                    if body.strip():pdf_pages.append({'name':file['name'],'attachment_id':file['id'],'page':int(page)})
             parts.append(file['name']+'\n'+source+('\n'+file['warning'] if file['warning'] else ''))
             if (file['media'].startswith('image/') or image_formats.is_heif(file['name'])) and file['size']<=INLINE_MAX:
                 if len(images)>=8:raise ValueError('每份组合资料最多分析 8 张图片')

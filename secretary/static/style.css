@@ -53,11 +53,13 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 #model-api-settings>input,#model-api-settings>select,#model-proxy-mode,#model-proxy-url{width:100%;box-sizing:border-box}#api-max-tokens{max-width:180px}
 
 .archive-only-control{display:flex;align-items:center;gap:5px;font-size:.785714rem;color:var(--muted);white-space:nowrap}.composer-tools{flex-wrap:wrap}.summary-progress{font-size:.785714rem;color:var(--muted);line-height:1.7;margin-top:8px}.summary-progress small{display:block;font-size:inherit}
+.answer-evidence{margin:10px 0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:.857143rem;overflow-wrap:anywhere}.answer-evidence summary{cursor:pointer;width:fit-content}.answer-evidence p,.answer-evidence section{margin:8px 0}.answer-evidence ul{margin:4px 0;padding-inline-start:20px}.answer-evidence blockquote{margin:4px 0 6px;padding-inline-start:8px;border-inline-start:2px solid var(--line);white-space:pre-wrap}
 
-/* Scroll inside a clipped, isolated surface rather than the native top-layer dialog. */
-#settings-dialog{padding:0;overflow:hidden}
-#settings-dialog[open]{display:flex;flex-direction:column}
-.settings-scroll{flex:1;min-height:0;padding:26px;overflow-y:auto;overscroll-behavior:contain;contain:paint;isolation:isolate;transform:translateZ(0)}
+/* Give the scroll area a definite viewport instead of relying on dialog intrinsic sizing. */
+#settings-dialog{height:88vh;padding:0;overflow:hidden}
+#settings-dialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+#settings-dialog>.dialog-head{margin:0;padding:16px 26px;border-bottom:1px solid var(--line)}
+.settings-scroll{min-width:0;min-height:0;padding:20px 26px;overflow-y:auto;overscroll-behavior:contain;contain:paint;isolation:isolate;transform:translateZ(0)}
 .settings-actions{flex:none;display:flex;justify-content:flex-end;align-items:center;border-top:1px solid var(--line);padding:12px 26px;background:var(--bg)}
 
 /* Compact library rows keep provenance visible and diagnostics optional. */
