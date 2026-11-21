@@ -47,15 +47,60 @@ def supported():
     return paths.FROZEN and (MAC or WINDOWS or sys.platform.startswith('linux') and platform.machine() in ('x86_64','AMD64'))
 
 
+def _windows_recovery_copy():
+    if WINDOWS and paths.FROZEN:
+        root = Path(sys.executable).resolve().parent
+        if (root / '.stellar-recovery').is_file():
+            return root
+    return None
+
+
+def _windows_update_log(result):
+    updates = (paths.DATA_DIR / 'updates').resolve()
+    version = result.get('version')
+    saved_log = result.get('installer_log')
+    if isinstance(saved_log, str) and saved_log:
+        candidate = Path(saved_log)
+    elif isinstance(version, str) and re.fullmatch(r'\d+\.\d+\.\d+', version):
+        candidate = updates / version / 'installer.log'
+    else:
+        return None
+    try:
+        log = candidate.resolve(strict=True)
+        if log.is_relative_to(updates) and log.name == 'installer.log' and log.is_file():
+            return log
+    except (OSError, RuntimeError, ValueError):
+        pass
+    return None
+
+
+def open_windows_update_log():
+    from .windows_update import last_result
+    log = _windows_update_log(last_result()) if WINDOWS else None
+    if log is None:
+        raise ValueError('找不到更新日志。')
+    try:
+        os.startfile(str(log))
+    except OSError as error:
+        raise ValueError('无法打开更新日志。') from error
+    return {'ok': True}
+
+
 def status():
     with _lock:
         value = {**_state, "supported": supported()}
-    if WINDOWS and value['phase'] in ('idle','error') and not value['error']:
+    if WINDOWS:
         from .windows_update import last_result
         result = last_result()
-        if result.get('phase') == 'error':
+        copy = _windows_recovery_copy()
+        if copy is not None or result.get('phase') == 'rolled_back':
+            original = re.fullmatch(r'(.+)\.restore-[a-f0-9]{32}', copy.name) if copy else None
+            value['recovery'] = {'kind': 'copy' if copy else 'rolled_back',
+                                 'original_install_dir': str(copy.with_name(original[1])) if original else '',
+                                 'has_log': _windows_update_log(result) is not None}
+        elif value['phase'] in ('idle','error') and not value['error'] and result.get('phase') == 'error':
             value['error'] = '上次 Windows 更新未完成：'+str(result.get('error',''))
-    if value['phase'] in ('idle','error') and not value['error']:
+    if value['phase'] in ('idle','error') and not value['error'] and not value.get('recovery'):
         from .update_transaction import last_result
         result=last_result()
         if result.get('phase') in ('error','rolled_back'):value['error']=str(result.get('error',''))
@@ -207,6 +252,8 @@ def _windows_install(setup, work, expected_sha, desktop=False, before_handoff=No
 def start(on_ready_to_quit, desktop=False, before_install=None, before_handoff=None):
     """Download + verify + hand over to the installer helper, in the background.
     Calls on_ready_to_quit() once the helper is waiting for us to exit."""
+    if _windows_recovery_copy() is not None:
+        raise ValueError('当前正在运行恢复副本，请先修复原安装。')
     if not supported():
         raise RuntimeError("只有安装版支持自动更新；源码运行请用 git pull")
     st = status()

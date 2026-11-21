@@ -70,6 +70,46 @@ class UpdateTest(unittest.TestCase):
         self.assertFalse(updater._can_replace_in_place(None))
         self.assertFalse(updater._can_replace_in_place(Path('/Volumes/Installer/Test.app')))
 
+    def test_windows_recovery_copy_reports_original_directory_and_opens_only_update_log(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            data = root / 'library'
+            log = data / 'updates' / '99.0.0' / 'installer.log'
+            log.parent.mkdir(parents=True)
+            log.touch()
+            copy = root / ('Stellar Secretary.restore-' + 'a' * 32)
+            copy.mkdir()
+            (copy / '.stellar-recovery').touch()
+            state = data / 'windows-update.json'
+            state.write_text(json.dumps({'phase': 'error', 'error': 'WinError 32', 'version': '99.0.0'}))
+            updater._set(phase='idle', error=None)
+            with patch.object(updater, 'WINDOWS', True), patch.object(paths, 'DATA_DIR', data), \
+                 patch.object(paths, 'FROZEN', True), patch.object(updater.sys, 'executable', str(copy/'Stellar Secretary.exe')), \
+                 patch.object(updater.os, 'startfile', create=True) as open_file:
+                result = updater.status()
+                self.assertIsNone(result['error'])
+                self.assertEqual(result['recovery'], {'kind': 'copy', 'has_log': True,
+                                                      'original_install_dir': str(root/'Stellar Secretary')})
+                with self.assertRaisesRegex(ValueError, '修复原安装'):
+                    updater.start(Mock())
+                self.assertEqual(updater.open_windows_update_log(), {'ok': True})
+                open_file.assert_called_once_with(str(log))
+                outside_log = root / 'installer.log'
+                outside_log.touch()
+                state.write_text(json.dumps({'phase': 'error', 'installer_log': str(outside_log)}))
+                self.assertFalse(updater.status()['recovery']['has_log'])
+                with self.assertRaisesRegex(ValueError, '找不到更新日志'):
+                    updater.open_windows_update_log()
+                open_file.assert_called_once()
+
+    def test_windows_previous_installation_rollback_keeps_regular_update_available(self):
+        with patch.object(updater, 'WINDOWS', True), patch.object(updater, '_windows_recovery_copy', return_value=None), \
+             patch('secretary.windows_update.last_result', return_value={'phase': 'rolled_back'}):
+            updater._set(phase='idle', error=None)
+            result = updater.status()
+            self.assertEqual(result['recovery']['kind'], 'rolled_back')
+            self.assertIsNone(result['error'])
+
     def test_install_endpoint_releases_service_lock_and_defers_backup(self):
         from secretary.server import Service, handler
         with tempfile.TemporaryDirectory() as root:

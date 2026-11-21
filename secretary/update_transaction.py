@@ -165,6 +165,8 @@ def run(config):
     result=data/'update-result.json';child=None;changed=False;old_root=None;privileged_backup=None;parent_exited=False
     def report(phase,error=''):
         value=dict(phase=phase,error=error,version=config['version'],backup=str(backup),updated=time.time())
+        if config['kind']=='windows' and (work/'installer.log').is_file():
+            value['installer_log']=str(work/'installer.log')
         atomic(result,value)
         if config['kind']=='windows':atomic(data/'windows-update.json',value)
     def launch(program=root):

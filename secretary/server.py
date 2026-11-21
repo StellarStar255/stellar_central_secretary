@@ -1436,6 +1436,7 @@ def handler(service):
                         if service.busy or service.captures or service.questions:raise ValueError('请等待当前任务结束后恢复备份')
                         return self.send(200,service.backups.restore(body.get('id')))
                 if path=='/api/update/check': return self.send(200, updater.check())
+                if path=='/api/update/open-log': return self.send(200, updater.open_windows_update_log())
                 if path=='/api/update/install':
                     def require_idle():
                         if any(service.runtime().values()):

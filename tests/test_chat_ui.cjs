@@ -75,6 +75,16 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  vm.runInContext('StellarModelProxy.saved({mode:"auto"},{mode:"system"})',context);
  vm.runInContext('renderUpdate({current:"0.1.52",latest:"0.1.54",available:true,supported:false,phase:"idle"})',context);
  assert.equal(elements.get('#update-download').hidden,false);assert(elements.get('#update-status').textContent.includes('下载安装包'));
+ vm.runInContext('renderUpdate({current:"0.1.52",latest:"0.1.54",available:true,supported:true,phase:"idle",recovery:{kind:"copy",original_install_dir:"D:/Stellar Secretary",has_log:true}})',context);
+ assert.equal(elements.get('#update-recovery').hidden,false);
+ assert(elements.get('#update-recovery-summary').textContent.includes('已从恢复副本启动旧版'));
+ assert(elements.get('#update-repair-location').textContent.includes('D:/Stellar Secretary'));
+ assert.equal(elements.get('#update-install').hidden,true);assert.equal(elements.get('#update-open-log').hidden,false);
+ await elements.get('#update-open-log').onclick();
+ assert(calls.some(c=>c.path==='/api/update/open-log'));
+ vm.runInContext('renderUpdate({current:"0.1.52",latest:"0.1.54",available:true,supported:true,phase:"idle",recovery:{kind:"rolled_back",has_log:false}})',context);
+ assert.equal(elements.get('#update-install').hidden,false);assert.equal(elements.get('#update-repair').hidden,true);
+ assert.equal(elements.get('#update-open-log').hidden,true);
 
 
  const input=elements.get('#message-input'),form=elements.get('#composer-form');

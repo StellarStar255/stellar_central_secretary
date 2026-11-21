@@ -173,7 +173,11 @@ def main():
             # Use a deterministic exit-code fixture alongside the real Inno tests above.
             # The sharing violation and the frozen worker and recovery window are native.
             failure_source=root/'InstallerFailure.cs'
-            failure_source.write_text('class InstallerFailure {static int Main(){return 5;}}')
+            failure_source.write_text(
+                'using System.IO; class InstallerFailure {static int Main(string[] args) {'
+                'foreach (string arg in args) if (arg.StartsWith("/LOG=")) File.WriteAllText(arg.Substring(5), "Fixture failure");'
+                'return 5;}}'
+            )
             failure_setup=root/'InstallerFailure.exe'
             subprocess.run([str(compiler),'/nologo','/out:'+str(failure_setup),str(failure_source)],check=True,capture_output=True)
             failure_sha=hashlib.sha256(failure_setup.read_bytes()).hexdigest()
@@ -207,6 +211,7 @@ def main():
                 assert active.parent.parent==install.parent and (active.parent/'.stellar-recovery').is_file(),active
                 assert (active.parent/probe.name).read_bytes()==probe.read_bytes()
                 assert status['version']==__version__ and Path(status['data_dir']).resolve()==data.resolve()
+                assert status['update']['recovery']=={'kind':'copy','original_install_dir':str(install.resolve()),'has_log':True},status['update']
                 assert Path(status['backup']['folder']).resolve()==backup_dir.resolve()
                 with archive.db() as db:after=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
                 assert before==after,'Recovery modified archived items'

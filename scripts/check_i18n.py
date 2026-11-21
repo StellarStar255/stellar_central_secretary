@@ -23,6 +23,18 @@ with tempfile.TemporaryDirectory() as temp:
     assert page.locator('#auto-ai').is_checked(),'unsaved settings must survive language switching'
     assert page.locator('#message-input').input_value()=='未发送的中文草稿'
     assert page.locator('#tutorial-open').get_attribute('href')=='/tutorial?lang=en'
+    recovery={'current':'0.1.134','phase':'idle','supported':True,'available':True,
+              'recovery':{'kind':'copy','original_install_dir':'D:/Stellar Secretary','has_log':True}}
+    page.evaluate('state=>renderUpdate(state)',recovery)
+    expect(page.locator('#update-recovery-summary')).to_contain_text('running from a recovery copy')
+    expect(page.locator('#update-repair-location')).to_have_text('Original installation folder · D:/Stellar Secretary')
+    expect(page.locator('#update-install')).to_be_hidden()
+    page.locator('#ui-language').select_option('zh')
+    expect(page.locator('#update-recovery-summary')).to_contain_text('已从恢复副本启动旧版')
+    expect(page.locator('#update-open-log')).to_have_text('打开更新日志')
+    page.locator('#ui-language').select_option('en')
+    expect(page.locator('#update-open-log')).to_have_text('Open update log')
+    expect(page.locator('#update-repair a')).to_have_text('Download official installer ↗')
     save=page.locator('#settings-save');scroll=page.locator('.settings-scroll')
     assert save.inner_text()=='Save settings'
     for width,height in ((1280,950),(460,540)):
