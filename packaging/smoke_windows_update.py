@@ -1,5 +1,6 @@
 """Real installed Windows app -> verified setup -> automatic relaunch, isolated data."""
 import functools
+import ctypes
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -23,7 +24,8 @@ def main():
     setup=Path(f'dist/Stellar-Secretary-{__version__}-windows-x64-setup.exe').resolve()
     sha=hashlib.sha256(setup.read_bytes()).hexdigest()
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with tempfile.TemporaryDirectory(prefix='stellar-update-',ignore_cleanup_errors=True) as temp:
+    test_drive=Path('D:/') if os.environ.get('GITHUB_ACTIONS')=='true' and Path('D:/').is_dir() else None
+    with tempfile.TemporaryDirectory(prefix='stellar-update-',dir=test_drive,ignore_cleanup_errors=True) as temp:
         root=Path(temp);install=root/'安装 test';data=root/'资料 test';assets=root/'assets';assets.mkdir()
         logs=Path('test-results/windows-update');logs.mkdir(parents=True,exist_ok=True)
         # Serve synthetic release metadata; the installer itself remains real and checksum verified.
@@ -166,6 +168,57 @@ def main():
                         headers={'Content-Type':'application/json','X-Knowledge-Token':current['token']})
                     opener.open(closing,timeout=5).close()
                 except OSError:pass
+
+            wait(lambda:not listening(manual_address))
+            # Use a deterministic exit-code fixture alongside the real Inno tests above.
+            # The sharing violation and the frozen worker and recovery window are native.
+            failure_source=root/'InstallerFailure.cs'
+            failure_source.write_text('class InstallerFailure {static int Main(){return 5;}}')
+            failure_setup=root/'InstallerFailure.exe'
+            subprocess.run([str(compiler),'/nologo','/out:'+str(failure_setup),str(failure_source)],check=True,capture_output=True)
+            failure_sha=hashlib.sha256(failure_setup.read_bytes()).hexdigest()
+            probe=install/'before-locked-update.txt'
+            probe.write_text('unchanged previous installation')
+            from secretary.windows_update_files import image,kernel
+            api=kernel()
+            # FILE_SHARE_READ | FILE_SHARE_WRITE, with no FILE_SHARE_DELETE.
+            directory_handle=api.CreateFileW(str(install),0x80000000,3,None,3,0x02000000,None)
+            if directory_handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+            locked_work=data/'updates'/'persistent-lock';locked_work.mkdir(parents=True)
+            try:
+                try:install.rename(root/'unexpected-directory-rename')
+                except OSError as error:assert error.winerror in (5,32,33),error
+                else:raise AssertionError('Expected a native directory lock')
+                with patch.object(paths,'DATA_DIR',data),patch.object(paths,'FROZEN',True),patch.object(sys,'executable',str(exe)),patch.object(sys,'argv',argv):
+                    update_transaction.prepare(failure_setup,locked_work,failure_sha,'99.0.1',desktop=True,kind='windows',parent_pid=0)
+                def locked_result():
+                    info=json.loads(result.read_text(encoding='utf-8-sig'))
+                    return info if info.get('phase')=='error' and info.get('version')=='99.0.1' else None
+                final=wait(locked_result,180)
+                assert '退出码 5' in final['error'] and '已从恢复副本启动旧版' in final['error'],final
+                status=wait(native_status)
+                wait(lambda:request('/api/status')['desktop'].get('window_visible') and request('/api/status')['desktop'].get('window_loaded'))
+                active_pid=request('/api/update/health')['pid']
+                active_handle=api.OpenProcess(0x1000,False,active_pid)
+                assert active_handle,active_pid
+                try:active=image(api,active_handle)
+                finally:api.CloseHandle(active_handle)
+                assert active and active.parent.name.startswith(install.name+'.restore-'),active
+                assert active.parent.parent==install.parent and (active.parent/'.stellar-recovery').is_file(),active
+                assert (active.parent/probe.name).read_bytes()==probe.read_bytes()
+                assert status['version']==__version__ and Path(status['data_dir']).resolve()==data.resolve()
+                assert Path(status['backup']['folder']).resolve()==backup_dir.resolve()
+                with archive.db() as db:after=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
+                assert before==after,'Recovery modified archived items'
+                assert request('/api/items')[0]['id']==item_id
+                print(f'PASS: native lock at {install.drive}, installer exit 5, visible recovery window, original library and custom backup path')
+                request('/api/shutdown',{})
+                wait(lambda:not listening(address))
+            finally:
+                api.CloseHandle(directory_handle)
+                for name in ('transaction.log','relaunch.log'):
+                    source=locked_work/name
+                    if source.exists():(logs/('locked-'+name)).write_bytes(source.read_bytes())
 
             print('PASS: real Windows updater download/checksum, detached helper, clean desktop exit, Inno in-place install, native automatic restart, custom port/Unicode paths and every item column preserved')
         finally:
