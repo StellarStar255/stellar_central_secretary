@@ -68,6 +68,5 @@ enum CredentialStore {
 
 struct CaptureEditor {
     var text = ""
-    var filename: String?
-    var data: Data?
+    var files: [ChatAttachment] = []
 }

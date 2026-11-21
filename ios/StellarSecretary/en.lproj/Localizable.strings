@@ -17,7 +17,10 @@
 "移除" = "Remove";
 "保存到知识库" = "Save to library";
 "暂存，连接后发送" = "Queue until connected";
-"只添加图片或文件也可归档。附件最多 10 MB，可在「连接 → 隐私与 AI」授权自动摘要。" = "You can save an image or file without a note. Attachments can be up to 10 MB. Allow automatic summaries under Connection → Privacy & AI.";
+"只添加图片或文件也可归档。附件最多 8 个，合计最多 10 MB。" = "You can archive images or files without a note. Up to 8 attachments, 10 MB total.";
+"附件最多 8 个，合计最多 10 MB。" = "Add up to 8 attachments, 10 MB total.";
+"请更新电脑端以发送多个附件。" = "Update the desktop app to send multiple attachments.";
+"待发送聊天附件合计最多 30 MB。" = "Queued chat attachments can total up to 30 MB.";
 "请选择非空文件。" = "Choose a nonempty file.";
 "待发送 · %lld" = "Pending · %lld";
 "正在上传" = "Uploading";

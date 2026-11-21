@@ -104,6 +104,16 @@ if __name__=='__main__':
     elif self.path=='/release-files':file_gate.set();value={'ok':True}
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
     elif self.path=='/release-items':list_gate.set();value={'ok':True}
+    elif self.path=='/prepare-multiple-photos':
+     from PIL import Image
+     images=[]
+     seed=os.urandom(3)
+     for index in range(3):
+      path=Path(folder)/(f'photo-{seed.hex()}-{index}.png')
+      Image.new('RGB',(64,64),(seed[0],seed[1],(seed[2]+index)%256)).save(path)
+      images.append(str(path))
+     subprocess.run(['xcrun','simctl','addmedia',sys.argv[1],*images],env=env,check=True)
+     value={'ok':True}
     elif self.path=='/prepare-original-export':
      import io
      from PIL import Image
@@ -159,7 +169,7 @@ if __name__=='__main__':
      print('Fixture chat calls:',chat_calls,flush=True)
      print('Fixture shared messages:',[(m.get('role'),m.get('text'),m.get('requestState')) for c in service.chat_history()['conversations'] if c['id']==shared_id for m in c['messages']],flush=True)
     result.check_returncode()
-    if len(sys.argv)==2:assert len(service.archive.list())==4
+    if len(sys.argv)==2:assert len(service.archive.list())==6
     assert 'Company queued note' not in [i['title'] for i in second.archive.list()]
     if len(sys.argv)>2:
      print('PASS: selected native iOS scenarios: '+', '.join(sys.argv[2:]))

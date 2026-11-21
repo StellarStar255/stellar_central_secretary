@@ -23,10 +23,20 @@ struct PendingChatMessage: Codable, Identifiable {
     var serverID:String;var fingerprint:String;var chatID:String;var text:String
     var lastError=""
     var attachment: ChatAttachment? = nil
+    var attachmentBatch: [ChatAttachment]? = nil
+    var files: [ChatAttachment] { attachmentBatch ?? attachment.map { [$0] } ?? [] }
 }
 struct ChatAttachment: Codable, Equatable {
     let name: String
     let data: Data
+
+    static let maxCount = 8
+    static let maxBytes = 10 * 1024 * 1024
+    static func fits(_ files: [Self]) -> Bool {
+        files.count <= maxCount && files.allSatisfy { !$0.data.isEmpty }
+            && files.reduce(0) { $0 + $1.data.count } <= maxBytes
+    }
+    var payload: [String:String] { ["name":name,"data":data.base64EncodedString()] }
 }
 struct ChatCache: Codable {
     var serverID:String;var fingerprint:String

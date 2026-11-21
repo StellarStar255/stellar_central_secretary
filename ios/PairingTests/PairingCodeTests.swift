@@ -297,10 +297,14 @@ final class ChatStoreTests:XCTestCase {
         XCTAssertEqual(ChatCache.load(url,serverID:"mac",fingerprint:"pin").snapshots["shared"]?.messages.first?.text,"Saved answer")
         XCTAssertTrue(ChatCache.load(url,serverID:"other",fingerprint:"pin").snapshots.isEmpty)
         XCTAssertTrue(ChatCache.load(url,serverID:"mac",fingerprint:"changed").snapshots.isEmpty)
-        let pending=PendingChatMessage(serverID:"mac",fingerprint:"pin",chatID:"shared",text:"Offline continuation")
-        let queue=folder.appendingPathComponent("queue.json");try ChatCache.protectedWrite(JSONEncoder().encode([pending]),to:queue)
+        let first=ChatAttachment(name:"one.png",data:Data([1]))
+        let second=ChatAttachment(name:"two.png",data:Data([2]))
+        let pending=PendingChatMessage(serverID:"mac",fingerprint:"pin",chatID:"shared",text:"Offline continuation",attachment:first)
+        let batch=PendingChatMessage(serverID:"mac",fingerprint:"pin",chatID:"shared",text:"Both photos",attachmentBatch:[first,second])
+        let queue=folder.appendingPathComponent("queue.json");try ChatCache.protectedWrite(JSONEncoder().encode([pending,batch]),to:queue)
         let restored=try JSONDecoder().decode([PendingChatMessage].self,from:Data(contentsOf:queue))
         XCTAssertEqual(restored.first?.id,pending.id);XCTAssertEqual(restored.first?.text,pending.text);XCTAssertEqual(restored.first?.chatID,"shared")
+        XCTAssertEqual(restored.map(\.files),[[first],[first,second]])
     }
     func testCacheTrimmingRetainsSelectedChatAndHistoryCanBeFetchedAgain() {
         var cache=ChatCache(serverID:"mac",fingerprint:"pin");cache.selectedID="selected"

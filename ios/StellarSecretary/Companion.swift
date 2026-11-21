@@ -27,6 +27,7 @@ struct Draft: Codable, Identifiable {
     var filename: String?
     var data: String?
     var created = ISO8601DateFormatter().string(from: Date())
+    var attachmentBatch: [ChatAttachment]? = nil
 }
 struct ModelPrivacy {
     let destination: String
@@ -109,11 +110,12 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     @Published private var activeWrites = 0
     @Published var captureEditor = CaptureEditor()
     @Published var chatInput = ""
-    @Published var chatAttachment: ChatAttachment?
+    @Published var chatFiles: [ChatAttachment] = []
     @Published private(set) var chatAttachmentsAvailable = false
+    @Published private(set) var multiAttachmentsAvailable = false
     private var captureEditors: [String:CaptureEditor] = [:]
     private var chatInputs: [String:String] = [:]
-    private var chatAttachments: [String:ChatAttachment] = [:]
+    private var chatDraftFiles: [String:[ChatAttachment]] = [:]
     private var credentialStoreAvailable = true
     var canChangeComputer: Bool { credentialStoreAvailable && !pairingInFlight && !flushing && !chatSubmitting && activeWrites == 0 }
     var currentDrafts: [Draft] { drafts.filter { $0.serverID == paired?.info.server_id && $0.fingerprint == paired?.info.fingerprint } }
@@ -236,7 +238,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         if let pair=paired {
             captureEditors[pair.id]=captureEditor
             chatInputs[pair.id+":"+selectedChatID]=chatInput
-            chatAttachments[pair.id+":"+selectedChatID]=chatAttachment
+            chatDraftFiles[pair.id+":"+selectedChatID]=chatFiles
         }
     }
     private func activateComputer(_ pair:PairedMac?) {
@@ -244,7 +246,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         privacySupported = false
         captureStatusAvailable = false
         reuseActiveChat = false
-        chatAttachmentsAvailable = false;chatAttachment=nil
+        chatAttachmentsAvailable = false;multiAttachmentsAvailable=false;chatFiles=[]
         captureWorkspace = "";captureReceipts = [];captureRevision += 1
         rebuildConnectionTransport()
         candidate=nil;waiting=false;code="";mayRetryConnection=false
@@ -381,7 +383,8 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                 throw NSError(domain:"Companion",code:426,userInfo:[NSLocalizedDescriptionKey:"请先更新电脑端，再从手机归档或发送消息。"])
             }
         }
-        let route = protectedWrite ? (body?["attachment"] != nil ? "/privacy-v2" : "/privacy-v1") + path : path
+        let chatFiles = body?["attachment"] != nil || body?["attachments"] != nil
+        let route = protectedWrite ? (chatFiles ? "/privacy-v2" : "/privacy-v1") + path : path
         guard let pair = pair ?? paired, let url = URL(string:(endpoint ?? sessionEndpoint) + route), let session else { throw NSError(domain:"Companion",code:1,userInfo:[NSLocalizedDescriptionKey:"请先扫码配对"]) }
         guard pair.id == (candidate ?? paired)?.id else {throw CancellationError()}
         let alternateSession = endpoint.map { _ in pinnedSession(pair) }
@@ -573,6 +576,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             captureStatusAvailable = value["capture_receipts"] as? Bool == true
             reuseActiveChat = value["reuse_active_chat"] as? Bool == true
             chatAttachmentsAvailable = value["chat_attachments"] as? Bool == true
+            multiAttachmentsAvailable = value["multi_attachments"] as? Bool == true
             online = true;status = "已连接 · \(pair.displayName)";error = "";discover();await flush();await flushChatMessages()
         } catch {
             guard connectionGeneration==generation,!Task.isCancelled else {return}
@@ -587,14 +591,15 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private func persist(_ next: [Draft]) throws {
         let data = try JSONEncoder().encode(next);try data.write(to:queueURL,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]);var values = URLResourceValues();values.isExcludedFromBackup = true;var url = queueURL;try? url.setResourceValues(values);drafts = next
     }
-    func enqueue(text: String, filename: String? = nil, data: Data? = nil, workspace:String) async -> Bool {
+    func enqueue(text: String, files: [ChatAttachment], workspace:String) async -> Bool {
         guard workspace==workspaceID else {return false}
         guard let pair = paired else { error = "请先配对电脑";return false }
-        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || data != nil else { return false }
-        guard (data?.count ?? 0) <= 10*1024*1024, drafts.count < 50 else { error = "每份附件最多 10 MB，待发送内容最多 50 条";return false }
-        if let data, data.isEmpty || filename?.isEmpty != false { error = "请选择非空文件。";return false }
+        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
+        guard ChatAttachment.fits(files), drafts.count < 50 else { error = "附件最多 8 个，合计最多 10 MB。";return false }
+        if files.count>1, online, !multiAttachmentsAvailable { error = "请更新电脑端以发送多个附件。";return false }
         do {
-            try persist(drafts + [Draft(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:filename,data:data?.base64EncodedString())])
+            let single = files.count == 1 ? files.first : nil
+            try persist(drafts + [Draft(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:single?.name,data:single?.data.base64EncodedString(),attachmentBatch:files.count>1 ? files : nil)])
             error = ""
             Task { await flush() }
             return true
@@ -610,13 +615,15 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             flushing = false;sendingDraftID=nil
             if paired?.transport == "bluetooth", !chatSubmitting { wifiRelay?.suspendDiscovery() }
         }
-        while let draft = currentDrafts.first {
+        while let draft = currentDrafts.first(where: { multiAttachmentsAvailable || $0.attachmentBatch == nil }) {
             sendingDraftID=draft.id
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
-            if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
+            if let files = draft.attachmentBatch { content["attachments"] = files.map(\.payload) }
+            else if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
             else if let url = URL(string:draft.text.trimmingCharacters(in:.whitespacesAndNewlines)), ["https","http"].contains(url.scheme ?? ""), !draft.text.contains("\n") { content["url"] = url.absoluteString;content["text"] = "" }
             do {
-                let upload = try await attachmentUpload(using:pair,size:draft.data.map { $0.utf8.count * 3 / 4 })
+                let size = draft.attachmentBatch.map { $0.reduce(0) { $0 + $1.data.count } } ?? draft.data.map { $0.utf8.count * 3 / 4 }
+                let upload = try await attachmentUpload(using:pair,size:size)
                 let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
                 if let value = (response["capture"] ?? response["item"]) as? [String:Any] {
                     let receipt = CaptureReceipt(value)
@@ -631,6 +638,8 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             }
             catch { self.error = "待发送内容已保留：" + error.localizedDescription;return }
         }
+        if !currentDrafts.isEmpty { error = "请更新电脑端以发送多个附件。" }
+        else if error == "请更新电脑端以发送多个附件。" { error = "" }
     }
     private func captureReceiptURL(_ pair: PairedMac) -> URL {
         cacheURL("capture-receipts",serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
@@ -720,7 +729,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         chatCache=ChatCache.load(cacheURL("chat",serverID:pair.info.server_id,fingerprint:pair.info.fingerprint),serverID:pair.info.server_id,fingerprint:pair.info.fingerprint)
         chatThreads=chatCache?.threads ?? [];selectedChatID=chatCache?.selectedID ?? "";chatSnapshot=chatCache?.snapshots[selectedChatID]
         chatInput=chatInputs[pair.id+":"+selectedChatID] ?? ""
-        chatAttachment=chatAttachments[pair.id+":"+selectedChatID]
+        chatFiles=chatDraftFiles[pair.id+":"+selectedChatID] ?? []
         chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice=""
     }
     private func saveChatCache() {if var cache=chatCache {cache.selectedID=selectedChatID;try? cache.save(chatCacheURL);chatCache=cache}}
@@ -730,18 +739,18 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             let oldKey=pair.id+":"+selectedChatID
             let key=pair.id+":"+id
             let previous=chatInput
-            let previousAttachment=chatAttachment
+            let previousFiles=chatFiles
             chatInputs[oldKey]=previous
-            chatAttachments[oldKey]=previousAttachment
+            chatDraftFiles[oldKey]=previousFiles
             chatInput=chatInputs[key] ?? ""
-            chatAttachment=chatAttachments[key]
+            chatFiles=chatDraftFiles[key] ?? []
             if selectedChatID.isEmpty, !id.isEmpty, chatInput.isEmpty {
                 chatInput=previous
                 chatInputs.removeValue(forKey:oldKey)
             }
-            if selectedChatID.isEmpty, !id.isEmpty, chatAttachment==nil {
-                chatAttachment=previousAttachment
-                chatAttachments.removeValue(forKey:oldKey)
+            if selectedChatID.isEmpty, !id.isEmpty, chatFiles.isEmpty {
+                chatFiles=previousFiles
+                chatDraftFiles.removeValue(forKey:oldKey)
             }
         }
         selectedChatID=id;chatSnapshot=chatCache?.snapshots[id];chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice="";saveChatCache()
@@ -812,16 +821,14 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private func persistChatQueue(_ messages:[PendingChatMessage]) throws {
         try ChatCache.protectedWrite(JSONEncoder().encode(messages),to:chatQueueURL);pendingChatMessages=messages
     }
-    func enqueueChat(_ text:String, workspace:String?=nil, chatID:String?=nil, attachment:ChatAttachment?=nil) async -> Bool {
+    func enqueueChat(_ text:String, workspace:String?=nil, chatID:String?=nil, files:[ChatAttachment]=[]) async -> Bool {
         guard workspace==nil || workspace==workspaceID, chatID==nil || chatID==selectedChatID else {return false}
         guard let pair=paired else {chatNotice="请先连接电脑";return false}
-        guard (!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || attachment != nil),text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
-        if let attachment {
-            let queued=pendingChatMessages.reduce(0) {$0+($1.attachment?.data.count ?? 0)}
+        guard (!text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !files.isEmpty),text.count<=4000,pendingChatMessages.count<50 else {chatNotice="消息最多 4000 字，待发送消息最多 50 条";return false}
+        if !files.isEmpty {
             guard chatAttachmentsAvailable || !online else {chatNotice="请更新电脑端后再发送聊天附件。";return false}
-            guard (1...10*1024*1024).contains(attachment.data.count),queued+attachment.data.count<=30*1024*1024 else {
-                chatNotice="聊天附件最多 10 MB，待发送附件合计最多 30 MB。";return false
-            }
+            guard files.count<=1 || multiAttachmentsAvailable || !online else {chatNotice="请更新电脑端以发送多个附件。";return false}
+            guard ChatAttachment.fits(files) else {chatNotice="附件最多 8 个，合计最多 10 MB。";return false}
         }
         let generation=deviceGeneration
         let selected=selectedChatID
@@ -851,8 +858,12 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             } catch {chatNotice=error.localizedDescription;return false}
         }
         guard generation==deviceGeneration,pendingChatMessages.count<50 else {return false}
+        let queuedBytes = pendingChatMessages.flatMap(\.files).reduce(0) { $0 + $1.data.count }
+        guard queuedBytes + files.reduce(0, { $0 + $1.data.count }) <= 30*1024*1024 else {
+            chatNotice="待发送聊天附件合计最多 30 MB。";return false
+        }
         do {
-            try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:destination,text:text,attachment:attachment)])
+            try persistChatQueue(pendingChatMessages+[PendingChatMessage(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,chatID:destination,text:text,attachment:files.count==1 ? files.first : nil,attachmentBatch:files.count>1 ? files : nil)])
             if selectedChatID.isEmpty {selectChat(destination)}
             chatNotice=""
             Task { await flushChatMessages() }
@@ -922,30 +933,36 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         var changed=false
         for pending in ready {
             if chatSnapshot?.id==pending.chatID && chatSnapshot?.running==true {continue}
+            let files = pending.files
             do {
-                if pending.attachment != nil, !chatAttachmentsAvailable {
+                if !files.isEmpty, !chatAttachmentsAvailable {
                     chatNotice="更新电脑端后会继续发送待发附件。"
+                    continue
+                }
+                if files.count>1, !multiAttachmentsAvailable {
+                    chatNotice="请更新电脑端以发送多个附件。"
                     continue
                 }
                 sendingChatID = pending.id
                 chatUploadTransport = nil
                 defer { sendingChatID=nil;chatUploadTransport=nil }
                 var body:[String:Any]=["request_id":pending.id,"text":pending.text]
-                let upload = try await attachmentUpload(using:pair,size:pending.attachment?.data.count)
-                if let file=pending.attachment {
+                let upload = try await attachmentUpload(using:pair,size:files.isEmpty ? nil : files.reduce(0) { $0 + $1.data.count })
+                if let file=files.first {
                     chatUploadTransport = upload.transport
                     pairingDiagnostic("chat-attachment-upload-start-"+(chatUploadTransport ?? "direct"))
-                    body["attachment"]=["name":file.name,"data":file.data.base64EncodedString()]
+                    if files.count==1 { body["attachment"]=file.payload }
+                    else { body["attachments"]=files.map(\.payload) }
                 }
                 let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
                 guard value["accepted"] as? Bool==true else {throw URLError(.cannotParseResponse)}
                 try persistChatQueue(pendingChatMessages.filter {$0.id != pending.id});changed=true
                 chatRetryAfter[pending.id] = nil
-                if pending.attachment != nil { pairingDiagnostic("chat-attachment-upload-accepted") }
+                if !files.isEmpty { pairingDiagnostic("chat-attachment-upload-accepted") }
             } catch {
                 if Task.isCancelled {return}
                 let ns=error as NSError
-                if pending.attachment != nil { pairingDiagnostic("chat-attachment-upload-interrupted",error:error) }
+                if !files.isEmpty { pairingDiagnostic("chat-attachment-upload-interrupted",error:error) }
                 if ns.domain == NSURLErrorDomain {
                     chatRetryAfter[pending.id] = Date().addingTimeInterval(10)
                     return

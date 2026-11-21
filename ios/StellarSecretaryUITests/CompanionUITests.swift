@@ -277,6 +277,7 @@ final class CompanionUITests: XCTestCase {
     }
     @MainActor func testSaveOriginalAttachmentToFilesAndPhotos() throws {
         continueAfterFailure = false
+        let initialCount = try XCTUnwrap(fixture("/count")["count"] as? Int)
         let name = try XCTUnwrap(fixture("/prepare-original-export")["name"] as? String)
         let app = XCUIApplication()
         app.launch()
@@ -341,22 +342,37 @@ final class CompanionUITests: XCTestCase {
             format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS %@",name
         )).firstMatch
         XCTAssertTrue(receipt.waitForExistence(timeout:15),app.debugDescription)
-        XCTAssertEqual(try fixture("/count")["count"] as? Int,2)
+        XCTAssertEqual(try fixture("/count")["count"] as? Int,initialCount+1)
 
-        app.buttons["添加截图或照片"].tap()
-        let newestPhoto = app.images.matching(NSPredicate(
+        _ = try fixture("/prepare-multiple-photos")
+        let choosePhotos = app.buttons["添加截图或照片"]
+        let photoGrid = app.images.matching(NSPredicate(
             format:"identifier == %@ OR label BEGINSWITH %@","PXGGridLayout-Info","Photo,"
-        )).firstMatch
-        XCTAssertTrue(newestPhoto.waitForExistence(timeout:10),app.debugDescription)
-        newestPhoto.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        ))
+        choosePhotos.tap()
+        XCTAssertTrue(photoGrid.element(boundBy:2).waitForExistence(timeout:10),app.debugDescription)
+        for index in 0...1 {
+            photoGrid.element(boundBy:index).coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        }
+        app.buttons["Add"].firstMatch.tap()
         let photoReady = expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:capture)
         wait(for:[photoReady],timeout:8)
+        XCTAssertTrue(app.staticTexts["Photo-2.png"].exists,app.debugDescription)
+        choosePhotos.tap()
+        let nextPhoto = photoGrid.element(boundBy:2)
+        XCTAssertTrue(nextPhoto.waitForExistence(timeout:10))
+        nextPhoto.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        app.buttons["Add"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Photo-3.png"].waitForExistence(timeout:10),app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Photo-2.png"].exists)
         capture.tap()
         let photoReceipt = app.buttons.matching(NSPredicate(
             format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Photo.'"
         )).firstMatch
         XCTAssertTrue(photoReceipt.waitForExistence(timeout:15),app.debugDescription)
-        XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
+        XCTAssertEqual(try fixture("/count")["count"] as? Int,initialCount+2)
+        photoReceipt.tap()
+        XCTAssertTrue(app.buttons["打开原件 · Photo-3.png"].waitForExistence(timeout:10))
     }
 
     @MainActor func testFirstChatCanStartFromComposer() throws {
@@ -403,6 +419,18 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.buttons["截图或照片"].waitForExistence(timeout:5))
         XCTAssertTrue(app.buttons["文件"].exists)
         XCTAssertTrue(app.buttons["拍照"].exists)
+        _ = try fixture("/prepare-multiple-photos")
+        app.buttons["截图或照片"].tap()
+        let thumbnails = app.images.matching(NSPredicate(
+            format:"identifier == %@ OR label BEGINSWITH %@","PXGGridLayout-Info","Photo,"
+        ))
+        XCTAssertTrue(thumbnails.element(boundBy:1).waitForExistence(timeout:10))
+        for index in 0...1 {
+            thumbnails.element(boundBy:index).coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        }
+        app.buttons["Add"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Photo-2.png"].waitForExistence(timeout:10))
+        XCTAssertTrue(send.isEnabled)
     }
     @MainActor func testSharedDesktopChatAndOfflineRecovery() throws {
         continueAfterFailure=false

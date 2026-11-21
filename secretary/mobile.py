@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 
-from .shared_chat import ChatBusy
+from .shared_chat import ChatBusy, attachment_batch
 from . import company_ai, mobile_privacy
 
 SERVICE_TYPE='_stellar-sec._tcp.local.'
@@ -366,6 +366,10 @@ class Mobile:
         key=body.get('request_id');content=body.get('content')
         if not isinstance(key,str) or not 1<=len(key)<=80 or not isinstance(content,dict):raise ValueError('归档请求格式无效')
         allowed={k:content[k] for k in ('text','url','filename','data','note_reference') if k in content};allowed['archive_only']=True
+        if 'attachments' in content:
+            if any(key in content for key in ('filename','data','url')):raise ValueError('附件格式无效')
+            allowed['attachments'],_=attachment_batch(content['attachments'])
+            allowed['title']=str(allowed.get('text') or '').strip()[:100] or allowed['attachments'][0]['name']
         signature=digest(json.dumps(allowed,sort_keys=True));receipt=device+':'+key
         with self.lock:
             previous=self.state['receipts'].get(receipt)
@@ -442,7 +446,7 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True,'multi_attachments':True})
                     if not post and parsed.path=='/captures':return self.send(200,{'captures':manager.recent_captures(device)})
                     if parsed.path=='/model-privacy':
                         return self.send(200,manager.set_model_privacy(device,body) if post else manager.model_privacy(device))

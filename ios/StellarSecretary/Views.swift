@@ -133,14 +133,41 @@ struct ConnectionBanner: View {
         }.padding(.vertical,4)
     }
 }
+private let attachmentLimit = "附件最多 8 个，合计最多 10 MB。"
+
+private func appendAttachment(_ file: ChatAttachment,to files:inout [ChatAttachment]) -> Bool {
+    if files.contains(where: { $0.data == file.data }) { return true }
+    guard ChatAttachment.fits(files+[file]) else { return false }
+    files.append(file)
+    return true
+}
+
+private func loadPhotos(_ photos:[PhotosPickerItem],addingTo existing:[ChatAttachment]) async -> ([ChatAttachment],String) {
+    var files = existing
+    var error = ""
+    for photo in photos {
+        if Task.isCancelled { break }
+        guard let data = try? await photo.loadTransferable(type:Data.self), !data.isEmpty else {
+            error = "无法读取照片。"
+            continue
+        }
+        let ext = photo.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+        let names = Set(files.map(\.name))
+        var name = "Photo."+ext
+        var suffix = 2
+        while names.contains(name) { name = "Photo-\(suffix)."+ext;suffix+=1 }
+        if !appendAttachment(ChatAttachment(name:name,data:data),to:&files) { error = attachmentLimit }
+    }
+    return (files,error)
+}
+
 struct CaptureView: View {
     @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
     @Environment(\.scenePhase) private var scene
     private var text: String {model.captureEditor.text}
-    @State private var photo: PhotosPickerItem?
-    private var image: Data? {model.captureEditor.data}
-    private var filename: String? {model.captureEditor.filename}
+    @State private var photos: [PhotosPickerItem] = []
+    @State private var loadingPhotos = false
     @State private var importing = false
     @State private var saving = false
     @FocusState private var editing: Bool
@@ -150,17 +177,34 @@ struct CaptureView: View {
                 Section { ConnectionBanner() }
                 Section("链接、笔记或安排") { TextEditor(text:$model.captureEditor.text).focused($editing).frame(minHeight:150).accessibilityLabel("归档内容") }
                 Section {
-                    PhotosPicker(selection:$photo,matching:.images) { Label("添加截图或照片",systemImage:"photo") }
-                    Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
-                    if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
-                    Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(LocalizedStringKey(model.online ? "保存到知识库":"暂存，连接后发送"),systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
-                } footer: { Text("只添加图片或文件也可归档。附件最多 10 MB，可在「连接 → 隐私与 AI」授权自动摘要。") }
+                    PhotosPicker(selection:$photos,maxSelectionCount:ChatAttachment.maxCount,selectionBehavior:.ordered,matching:.images,preferredItemEncoding:.current) {
+                        Label("添加截图或照片",systemImage:"photo")
+                    }.disabled(loadingPhotos || saving)
+                    Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }.disabled(loadingPhotos || saving)
+                    ForEach(Array(model.captureEditor.files.enumerated()),id:\.offset) { index,file in
+                        HStack {
+                            Text(file.name);Spacer()
+                            Button("移除") { model.captureEditor.files.remove(at:index) }.disabled(loadingPhotos || saving)
+                        }
+                    }
+                    if loadingPhotos { ProgressView("正在读取附件…") }
+                    Button {
+                        editing = false;saving = true
+                        let id=model.workspaceID,value=text,files=model.captureEditor.files
+                        Task {
+                            if await model.enqueue(text:value,files:files,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor() }
+                            saving = false
+                        }
+                    } label: {
+                        Label(LocalizedStringKey(model.online ? "保存到知识库":"暂存，连接后发送"),systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity)
+                    }.disabled(saving || loadingPhotos || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.captureEditor.files.isEmpty))
+                } footer: { Text("只添加图片或文件也可归档。附件最多 8 个，合计最多 10 MB。") }
                 if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
                         ForEach(model.currentDrafts) { draft in
                             VStack(alignment:.leading) {
-                                Text(draft.filename ?? draft.text).lineLimit(2)
+                                Text(draft.attachmentBatch?.map(\.name).joined(separator:", ") ?? draft.filename ?? draft.text).lineLimit(2)
                                 Text(LocalizedStringKey(model.sendingDraftID == draft.id ? "正在上传" : "待发送")).font(.caption).foregroundStyle(.secondary)
                             }.accessibilityIdentifier("capture-outbox-"+draft.id)
                             .swipeActions { if model.sendingDraftID != draft.id { Button("删除",role:.destructive) { model.removeDraft(draft.id) } } }
@@ -188,16 +232,26 @@ struct CaptureView: View {
                     try? await Task.sleep(for:.seconds(processing ? 3 : 10))
                 }
             }
-            .onChange(of:photo) { _,value in Task {
-                guard let value else { return }
-                let id=model.workspaceID
-                if let data = try? await value.loadTransferable(type:Data.self), data.count <= 10*1024*1024 {
+            .onChange(of:photos) { _,selection in
+                guard !selection.isEmpty else { return }
+                let id=model.workspaceID,existing=model.captureEditor.files
+                loadingPhotos=true
+                Task {
+                    defer { loadingPhotos=false;photos=[] }
+                    let (files,error) = await loadPhotos(selection,addingTo:existing)
                     guard id==model.workspaceID else {return}
-                    model.captureEditor.data = data;let type = value.supportedContentTypes.first;model.captureEditor.filename = "Photo." + (type?.preferredFilenameExtension ?? "jpg")
-                } else { model.error = "照片读取失败或超过 10 MB" }
-            } }
+                    model.captureEditor.files=files;model.error=error
+                }
+            }
             .fileImporter(isPresented:$importing,allowedContentTypes:[.item]) { result in
-                do { let url = try result.get();let access = url.startAccessingSecurityScopedResource();defer { if access { url.stopAccessingSecurityScopedResource() } };let values = try url.resourceValues(forKeys:[.fileSizeKey]);guard (values.fileSize ?? Int.max) <= 10*1024*1024 else { model.error = "文件超过 10 MB";return };model.captureEditor.data = try Data(contentsOf:url);model.captureEditor.filename = url.lastPathComponent }
+                do {
+                    let url = try result.get(), access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    let size = try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+                    guard (1...ChatAttachment.maxBytes).contains(size) else { model.error=attachmentLimit;return }
+                    let file=ChatAttachment(name:url.lastPathComponent,data:try Data(contentsOf:url))
+                    model.error = appendAttachment(file,to:&model.captureEditor.files) ? "" : attachmentLimit
+                }
                 catch { model.error = "无法读取文件" }
             }
         }
@@ -245,7 +299,7 @@ struct ChatView: View {
     @State private var pickingFile=false
     @State private var cameraTarget: CameraTarget?
     @State private var loadingAttachment=false
-    @State private var pickedPhoto:PhotosPickerItem?
+    @State private var pickedPhotos:[PhotosPickerItem]=[]
     @State private var attachmentError=""
     private var messages:[ChatMessage] {model.chatSnapshot?.messages ?? []}
     private var queued:[PendingChatMessage] {
@@ -255,12 +309,13 @@ struct ChatView: View {
     private func queueStatus(_ pending: PendingChatMessage) -> String {
         if !pending.lastError.isEmpty { return pending.lastError }
         if model.sendingChatID == pending.id {
-            if pending.attachment == nil { return "正在发送消息…" }
+            if pending.files.isEmpty { return "正在发送消息…" }
             if model.chatUploadTransport == "bluetooth" { return "正在通过蓝牙上传附件…" }
             if model.chatUploadTransport != nil { return "正在上传附件…" }
             return "正在准备上传附件…"
         }
         if !model.online { return "待发送 · 连接后由电脑处理" }
+        if pending.files.count>1, !model.multiAttachmentsAvailable { return "请更新电脑端以发送多个附件。" }
         if model.chatSnapshot?.id == pending.chatID, model.chatSnapshot?.running == true {
             return "等待上一条回答完成…"
         }
@@ -297,7 +352,7 @@ struct ChatView: View {
                                     VStack(alignment:.leading,spacing:8) {
                                         Text(LocalizedStringKey(message.role=="user" ? "我":"电脑")).font(.caption).foregroundStyle(.secondary)
                                         if !message.text.isEmpty {Text(message.text).textSelection(.enabled).foregroundStyle(message.error ? Color.orange:Color.primary)}
-                                        ForEach(message.files,id:\.self) {Text($0).font(.caption).foregroundStyle(.secondary)}
+                                        ForEach(Array(message.files.enumerated()),id:\.offset) {_,name in Text(name).font(.caption).foregroundStyle(.secondary)}
                                         if message.pending || message.requestState=="running" {
                                             Text(LocalizedStringKey(stage(model.chatStage))).font(.footnote).foregroundStyle(.secondary)
                                             if !model.chatPartial.isEmpty {Text(model.chatPartial).textSelection(.enabled);Text("回答生成中").font(.caption).foregroundStyle(.secondary)}
@@ -311,7 +366,7 @@ struct ChatView: View {
                             ForEach(queued) {pending in
                                 VStack(alignment:.leading,spacing:8) {
                                     if !pending.text.isEmpty {Text(pending.text).textSelection(.enabled)}
-                                    if let file=pending.attachment {Label(file.name,systemImage:"paperclip")}
+                                    ForEach(Array(pending.files.enumerated()),id:\.offset) {_,file in Label(file.name,systemImage:"paperclip")}
                                     Text(PhoneLanguage.text(queueStatus(pending),in:interfaceLocale)).font(.footnote).foregroundStyle(.secondary)
                                     HStack {
                                         if !pending.lastError.isEmpty || model.chatRetryAfter[pending.id] != nil {
@@ -329,13 +384,19 @@ struct ChatView: View {
                     .onChange(of:queued.count) {_,_ in withAnimation {reader.scrollTo("chat-bottom",anchor:.bottom)}}
                 }
                 VStack(alignment:.leading,spacing:8) {
-                    if let file=model.chatAttachment {
-                        HStack {
-                            Label(file.name,systemImage:"paperclip").lineLimit(1)
-                            Spacer()
-                            Button {model.chatAttachment=nil} label:{Image(systemName:"xmark.circle.fill")}
-                                .accessibilityLabel("移除聊天附件").disabled(sending)
-                        }.font(.subheadline)
+                    if !model.chatFiles.isEmpty {
+                        ScrollView {
+                            VStack(spacing:8) {
+                                ForEach(Array(model.chatFiles.enumerated()),id:\.offset) {index,file in
+                                    HStack {
+                                        Label(file.name,systemImage:"paperclip").lineLimit(1)
+                                        Spacer()
+                                        Button { model.chatFiles.remove(at:index) } label:{Image(systemName:"xmark.circle.fill")}
+                                            .accessibilityLabel("移除聊天附件").disabled(sending || loadingAttachment)
+                                    }.font(.subheadline).accessibilityIdentifier("chat-file-\(index)")
+                                }
+                            }
+                        }.frame(maxHeight:min(CGFloat(model.chatFiles.count)*34,120))
                     }
                     if loadingAttachment {ProgressView("正在读取附件…").font(.caption)}
                     if !attachmentError.isEmpty {Text(PhoneLanguage.text(attachmentError,in:interfaceLocale)).font(.footnote).foregroundStyle(.orange)}
@@ -361,18 +422,18 @@ struct ChatView: View {
                         }
                     Button("发送") {
                         guard !composing else {return}
-                        let value=input,id=model.workspaceID,chat=model.selectedChatID,file=model.chatAttachment
+                        let value=input,id=model.workspaceID,chat=model.selectedChatID,files=model.chatFiles
                         dismissKeyboard+=1;sending=true
                         Task {
                             defer {sending=false}
-                            if await model.enqueueChat(value,workspace:id,chatID:chat,attachment:file),
+                            if await model.enqueueChat(value,workspace:id,chatID:chat,files:files),
                                model.workspaceID==id,(chat.isEmpty || model.selectedChatID==chat) {
                                 if input==value,!composing {model.chatInput=""}
-                                if model.chatAttachment==file {model.chatAttachment=nil}
+                                if model.chatFiles==files {model.chatFiles=[]}
                             }
                         }
                     }.buttonStyle(.borderedProminent).controlSize(.large).accessibilityIdentifier("chat-send")
-                        .disabled(composing || sending || loadingAttachment || (input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.chatAttachment==nil) || model.chatSubmitting)
+                        .disabled(composing || sending || loadingAttachment || (input.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.chatFiles.isEmpty) || model.chatSubmitting)
                     }
                 }.padding()
             }.navigationTitle(model.chatSnapshot?.title ?? PhoneLanguage.text("聊天",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
@@ -388,18 +449,16 @@ struct ChatView: View {
                 }
                 .ignoresSafeArea()
             }
-            .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhoto,matching:.images)
-            .onChange(of:pickedPhoto) {_,photo in
-                guard let photo else {return}
-                let workspace=model.workspaceID,chat=model.selectedChatID
+            .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhotos,maxSelectionCount:ChatAttachment.maxCount,selectionBehavior:.ordered,matching:.images,preferredItemEncoding:.current)
+            .onChange(of:pickedPhotos) {_,selection in
+                guard !selection.isEmpty else {return}
+                let workspace=model.workspaceID,chat=model.selectedChatID,existing=model.chatFiles
                 loadingAttachment=true;attachmentError=""
                 Task {
-                    defer {loadingAttachment=false;pickedPhoto=nil}
-                    let data = try? await photo.loadTransferable(type:Data.self)
+                    defer {loadingAttachment=false;pickedPhotos=[]}
+                    let (files,error) = await loadPhotos(selection,addingTo:existing)
                     guard workspace==model.workspaceID,chat.isEmpty || chat==model.selectedChatID else {return}
-                    guard let data else {attachmentError="无法读取照片。";return}
-                    let ext=photo.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-                    setAttachment(name:"Photo."+ext,data:data)
+                    model.chatFiles=files;attachmentError=error
                 }
             }
             .fileImporter(isPresented:$pickingFile,allowedContentTypes:[.item]) { result in
@@ -462,8 +521,8 @@ struct ChatView: View {
     }
 
     private func setAttachment(name:String,data:Data) {
-        guard (1...10*1024*1024).contains(data.count) else {attachmentError="聊天附件须为非空文件，最多 10 MB。";return}
-        attachmentError="";model.chatAttachment=ChatAttachment(name:name,data:data)
+        let file=ChatAttachment(name:name,data:data)
+        attachmentError=appendAttachment(file,to:&model.chatFiles) ? "" : attachmentLimit
     }
 }
 

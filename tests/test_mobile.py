@@ -425,6 +425,45 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(messages[0]['files'],['fixture.txt'])
   self.assertEqual(messages[-1]['text'],'Fixture answer [1]')
 
+ def test_multiple_originals_stay_together_in_capture_and_chat(self):
+  import io,time
+  from PIL import Image
+  self.approve()
+  originals={}
+  for color in ('red','blue'):
+   stream=io.BytesIO()
+   Image.new('RGB',(12,12),color).save(stream,'PNG')
+   originals[color+'.png']=stream.getvalue()
+  files=[{'name':name,'data':base64.b64encode(raw).decode()} for name,raw in originals.items()]
+  self.assertTrue(self.request('/status',credential=self.credential)[1]['multi_attachments'])
+  capture={'request_id':'multi-capture','content':{'text':'','attachments':files}}
+  code,result=self.request('/privacy-v1/ingest',capture,self.credential)
+  self.assertEqual(code,200)
+  self.assertTrue(self.request('/privacy-v1/ingest',capture,self.credential)[1]['duplicate'])
+  capture_id=result['item']['id']
+  chat=self.request('/chats',{'request_id':'multi-chat'},self.credential)[1]['chat_id']
+  path='/privacy-v2/chats/'+chat+'/messages'
+  body={'request_id':'multi-question','text':'Compare these images','attachments':files}
+  self.assertEqual(self.request(path,body,self.credential)[0],403)
+  self.approve_model()
+  fields={'title':'Comparison','summary':'Both images','state':'ready','error':''}
+  with patch('secretary.ai.analyze_material',return_value=(fields,'Comparison result [1]')) as model:
+   self.assertEqual(self.request(path,body,self.credential)[0],200)
+   self.assertEqual(self.request(path,body,self.credential)[0],200)
+   deadline=time.monotonic()+5
+   while self.s.question_jobs.active_count() and time.monotonic()<deadline:time.sleep(.01)
+   model.assert_called_once()
+  messages=self.request('/chats/'+chat,credential=self.credential)[1]['messages']
+  self.assertEqual(messages[0]['files'],list(originals))
+  chat_item=messages[0]['sources'][0]['item_id']
+  for item_id in (capture_id,chat_item):
+   detail=self.request('/items/'+item_id,credential=self.credential)[1]['item']
+   self.assertEqual([file['name'] for file in detail['attachments']],list(originals))
+   for file in detail['attachments']:
+    _,original=self.m.attachment(item_id,'base',file['path'].rsplit('/',1)[-1])
+    self.assertEqual(original.read_bytes(),originals[file['name']])
+  self.assertEqual(len(self.s.archive.list()),2)
+
  def test_model_change_and_revocation_fence_already_admitted_worker(self):
   import threading
   self.approve();first=self.approve_model()
