@@ -104,6 +104,18 @@ if __name__=='__main__':
     elif self.path=='/release-files':file_gate.set();value={'ok':True}
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
     elif self.path=='/release-items':list_gate.set();value={'ok':True}
+    elif self.path=='/prepare-original-export':
+     import io
+     from PIL import Image
+     image=io.BytesIO();Image.new('RGB',(120,80),'orange').save(image,'PNG')
+     name='stellar-original-'+os.urandom(4).hex()
+     export_item=next(entry for entry in service.archive.list() if entry['title']=='Reference fixture')
+     service.append_material(export_item['id'],{'expected_updated':export_item['updated'],'attachments':[
+      {'name':name+'.txt','data':base64.b64encode(b'Stellar original export fixture').decode()},
+      {'name':name+'.png','data':base64.b64encode(image.getvalue()).decode()},
+     ],'summarize':False,'read_links':False})
+     subprocess.run(['xcrun','simctl','privacy',sys.argv[1],'grant','photos-add','io.github.stellarstar255.secretary.companion'],env=env,check=True)
+     value={'name':name}
     elif self.path=='/prepare-detail':
      item=next(item for item in service.archive.list() if item['title']=='Mobile fixture unique note')
      with service.archive.db() as db:db.execute('UPDATE items SET url=? WHERE id=?',('https://example.com/phone-original',item['id']))

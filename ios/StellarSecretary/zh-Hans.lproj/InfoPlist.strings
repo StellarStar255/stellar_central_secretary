@@ -1,4 +1,5 @@
 "CFBundleDisplayName" = "知识秘书";
 "NSBluetoothAlwaysUsageDescription" = "发现附近的 Mac，与 Wi-Fi 配合连接已配对知识库。";
 "NSCameraUsageDescription" = "扫描电脑显示的配对二维码，或拍摄照片作为聊天附件。";
+"NSPhotoLibraryAddUsageDescription" = "将你选中的图片原件保存到 iPhone 的照片图库。";
 "NSLocalNetworkUsageDescription" = "寻找并连接已配对的 Mac，共用知识库。";

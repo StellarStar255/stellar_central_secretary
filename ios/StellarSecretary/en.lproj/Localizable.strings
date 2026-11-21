@@ -115,6 +115,16 @@
 "重新加载" = "Reload";
 "图片预览（非原件）" = "Image Preview";
 "完整原件" = "Original File";
+"存储到文件" = "Save to Files";
+"保存到照片" = "Save to Photos";
+"正在保存照片…" = "Saving photo…";
+"原件已存储到文件。" = "Original saved to Files.";
+"原图已保存到照片。" = "Original image saved to Photos.";
+"这张原图已保存过" = "This original image was already saved";
+"仍然保存" = "Save Again";
+"如果你已从照片中删除原图，可以再次保存。" = "You can save it again if you deleted the original from Photos.";
+"请在 iPhone 设置中允许添加照片，或选择存储到文件。" = "Allow photo additions in iPhone Settings, or choose Save to Files.";
+"无法将原图保存到照片。你可以存储到文件。" = "Couldn’t save the original image to Photos. You can save it to Files.";
 "标签名称" = "Tag name";
 "添加" = "Add";
 "删除标签？" = "Remove tag?";

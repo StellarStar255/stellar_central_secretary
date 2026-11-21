@@ -41,6 +41,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>扫描电脑显示的配对二维码，或拍摄照片作为聊天附件。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>将你选中的图片原件保存到 iPhone 的照片图库。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>寻找并连接已配对的 Mac，共用知识库。</string>
 	<key>UILaunchScreen</key>

@@ -2,6 +2,8 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 import QuickLook
+import UniformTypeIdentifiers
+import CryptoKit
 
 enum PhoneLanguage {
     static let setting = "phoneInterfaceLanguage"
@@ -637,7 +639,164 @@ private struct PhoneLink: Identifiable {
         self.url=url;id=raw;title=value["title"] as? String ?? raw
     }
 }
-private struct PhonePreview: Identifiable {let id=UUID();let url:URL;let lightweight:Bool}
+private final class PhonePreview: Identifiable {
+    let url: URL
+    private let folder: URL
+
+    init(original: URL) throws {
+        let files = FileManager.default
+        let folder = files.temporaryDirectory.appendingPathComponent(UUID().uuidString,isDirectory:true)
+        let url = folder.appendingPathComponent(original.lastPathComponent)
+        try files.createDirectory(at:folder,withIntermediateDirectories:false)
+        do {
+            // Keep the original available even if the download cache is pruned.
+            do { try files.linkItem(at:original,to:url) }
+            catch { try files.copyItem(at:original,to:url) }
+        } catch {
+            try? files.removeItem(at:folder)
+            throw error
+        }
+        self.folder = folder
+        self.url = url
+    }
+
+    deinit { try? FileManager.default.removeItem(at:folder) }
+
+    var isImage: Bool {
+        UTType(filenameExtension:url.pathExtension)?.conforms(to:.image) == true
+    }
+
+    static func photoSaveKey(for url: URL) async throws -> String {
+        try await Task.detached(priority:.userInitiated) {
+            let file = try FileHandle(forReadingFrom:url)
+            defer { try? file.close() }
+            var hash = SHA256()
+            while let chunk = try file.read(upToCount:256 * 1024), !chunk.isEmpty { hash.update(data:chunk) }
+            return "savedOriginalPhoto." + hash.finalize().map { String(format:"%02x",$0) }.joined()
+        }.value
+    }
+}
+
+private struct OriginalFileSheet: View {
+    @Environment(\.locale) private var interfaceLocale
+    @Environment(\.dismiss) private var dismiss
+    let file: PhonePreview
+    @State private var exporting = false
+    @State private var savingPhoto = false
+    @State private var confirmDuplicate = false
+    @State private var result = ""
+
+    var body: some View {
+        NavigationStack {
+            OriginalPreview(url:file.url)
+                .safeAreaInset(edge:.bottom) {
+                    VStack(spacing:8) {
+                        ViewThatFits {
+                            HStack { saveButtons }
+                            VStack { saveButtons }
+                        }
+                        if !result.isEmpty {
+                            Text(LocalizedStringKey(result)).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth:.infinity)
+                    .padding()
+                    .background(.bar)
+                }
+                .navigationTitle(PhoneLanguage.text("完整原件",in:interfaceLocale))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement:.topBarTrailing) {
+                        Button("关闭") { dismiss() }.disabled(savingPhoto)
+                    }
+                }
+        }
+        .interactiveDismissDisabled(savingPhoto)
+        .sheet(isPresented:$exporting) {
+            OriginalFileExporter(file:file) { didSave in
+                if didSave { result = "原件已存储到文件。" }
+                exporting = false
+            }
+            .ignoresSafeArea()
+        }
+        .alert("这张原图已保存过",isPresented:$confirmDuplicate) {
+            Button("取消",role:.cancel) {}
+            Button("仍然保存") { Task { await savePhoto(allowDuplicate:true) } }
+        } message: {
+            Text("如果你已从照片中删除原图，可以再次保存。")
+        }
+    }
+
+    @ViewBuilder private var saveButtons: some View {
+        Button { result = "";exporting = true } label: { Label("存储到文件",systemImage:"folder") }
+            .accessibilityIdentifier("original-save-files")
+            .disabled(savingPhoto)
+        if file.isImage {
+            Button { Task { await savePhoto() } } label: {
+                if savingPhoto { ProgressView().accessibilityLabel("正在保存照片…") }
+                else { Label("保存到照片",systemImage:"photo") }
+            }
+            .accessibilityIdentifier("original-save-photo")
+            .disabled(savingPhoto)
+        }
+    }
+
+    private func savePhoto(allowDuplicate: Bool = false) async {
+        guard !savingPhoto else { return }
+        result = ""
+        savingPhoto = true
+        defer { savingPhoto = false }
+        let originalURL = file.url
+        do {
+            let key = try await PhonePreview.photoSaveKey(for:originalURL)
+            if !allowDuplicate, UserDefaults.standard.bool(forKey:key) {
+                confirmDuplicate = true
+                return
+            }
+            let authorization = await PHPhotoLibrary.requestAuthorization(for:.addOnly)
+            guard authorization == .authorized || authorization == .limited else {
+                result = "请在 iPhone 设置中允许添加照片，或选择存储到文件。"
+                return
+            }
+            try await PHPhotoLibrary.shared().performChanges {
+                let asset = PHAssetCreationRequest.forAsset()
+                asset.addResource(with:.photo,fileURL:originalURL,options:nil)
+            }
+            UserDefaults.standard.set(true,forKey:key)
+            result = "原图已保存到照片。"
+        } catch {
+            result = "无法将原图保存到照片。你可以存储到文件。"
+        }
+    }
+}
+
+private struct OriginalFileExporter: UIViewControllerRepresentable {
+    let file: PhonePreview
+    let onFinish: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish:onFinish) }
+
+    func makeUIViewController(context:Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting:[file.url],asCopy:true)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker:UIDocumentPickerViewController,context:Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onFinish: (Bool) -> Void
+        init(onFinish:@escaping (Bool) -> Void) { self.onFinish = onFinish }
+
+        func documentPicker(_ controller:UIDocumentPickerViewController,didPickDocumentsAt urls:[URL]) {
+            onFinish(!urls.isEmpty)
+        }
+
+        func documentPickerWasCancelled(_ controller:UIDocumentPickerViewController) { onFinish(false) }
+    }
+}
+
 private struct OriginalPreview: UIViewControllerRepresentable {
     let url:URL
     func makeCoordinator() -> Coordinator {Coordinator(url)}
@@ -725,11 +884,9 @@ struct DetailView: View {
     @State private var pendingName=""
     @State private var attachmentRequestID=UUID().uuidString
     @State private var preview:PhonePreview?
-    @State private var previewFolder:URL?
     @State private var fileTask:Task<Void,Never>?
     @State private var downloadDone:Int64=0
     @State private var downloadTotal:Int64=0
-    @State private var operationLabel=""
     var body:some View {
         ScrollView {
             VStack(alignment:.leading,spacing:20) {
@@ -750,7 +907,7 @@ struct DetailView: View {
                 }
                 if fileTask != nil {
                     VStack(alignment:.leading,spacing:8) {
-                        Text(PhoneLanguage.text(operationLabel,in:interfaceLocale)).font(.subheadline)
+                        Text("正在下载完整原件…").font(.subheadline)
                         if downloadTotal>0 {
                             ProgressView(value:Double(downloadDone),total:Double(max(downloadTotal,1)))
                             Text(ByteCountFormatter.string(fromByteCount:downloadDone,countStyle:.file)+" / "+ByteCountFormatter.string(fromByteCount:downloadTotal,countStyle:.file)).font(.caption).foregroundStyle(.secondary)
@@ -801,12 +958,7 @@ struct DetailView: View {
         }.navigationTitle(PhoneLanguage.text("资料详情",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
         .toolbar {Button("重新加载") {Task {await load()}}.disabled(working)}
         .task {await load()}
-        .sheet(item:$preview,onDismiss:{clearPreview()}) {value in
-            NavigationStack {
-                OriginalPreview(url:value.url).navigationTitle(PhoneLanguage.text(value.lightweight ? "图片预览（非原件）":"完整原件",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
-                    .toolbar {ToolbarItem(placement:.topBarTrailing) {Button("关闭") {preview=nil}}}
-            }
-        }
+        .sheet(item:$preview) { OriginalFileSheet(file:$0) }
         .alert("添加标签",isPresented:$addingTag) {
             TextField("标签名称",text:$newTag)
             Button("添加") {Task {await addTag()}}
@@ -816,7 +968,7 @@ struct DetailView: View {
             Button("删除标签",role:.destructive) {if let tag=deletingTag {Task {await saveTags(tags.filter {$0 != tag},notice:"标签已删除")}}}
             Button("取消",role:.cancel) {deletingTag=nil}
         } message: {Text("确定删除标签“\(deletingTag ?? "")”？")}
-        .onDisappear {fileTask?.cancel();if preview == nil {clearPreview()}}
+        .onDisappear {fileTask?.cancel()}
         .onChange(of:photo) {_,value in Task {
             guard let value else {return}
             if let data=try? await value.loadTransferable(type:Data.self) {select(data,name:"Photo."+(value.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"))}
@@ -878,23 +1030,20 @@ struct DetailView: View {
             pendingData=nil;photo=nil;error="";notice="附件已添加"
         } catch {self.error=error.localizedDescription}
     }
-    private func open(_ file:PhoneAttachment,lightweight:Bool=false) async {
+    private func open(_ file:PhoneAttachment) async {
         working=true;downloadDone=0;downloadTotal=0
-        operationLabel=lightweight ? "正在加载图片预览（非原件）…":"正在下载完整原件…"
         defer {working=false;fileTask=nil}
         do {
-            let url=try await model.downloadAttachment(lightweight ? file.previewPath:file.path,name:lightweight ? file.name+".preview.jpg":file.name,version:file.version,workspace:workspace) {done,total in
+            let url=try await model.downloadAttachment(file.path,name:file.name,version:file.version,workspace:workspace) {done,total in
                 Task {@MainActor in downloadDone=done;downloadTotal=total}
             }
             guard !Task.isCancelled else {return}
-            clearPreview();previewFolder=url.deletingLastPathComponent();preview=PhonePreview(url:url,lightweight:lightweight);error=""
+            preview=try PhonePreview(original:url);error=""
         } catch {
             if Task.isCancelled {return}
             self.error=error.localizedDescription
         }
     }
-    private func clearPreview() {previewFolder=nil}
-
 }
 struct DeviceView: View {
     @Environment(\.locale) private var interfaceLocale

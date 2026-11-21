@@ -275,6 +275,53 @@ final class CompanionUITests: XCTestCase {
         XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
         let screenshot = XCTAttachment(screenshot:app.screenshot());screenshot.name = "Paired iPhone capture";screenshot.lifetime = .keepAlways;add(screenshot)
     }
+    @MainActor func testSaveOriginalAttachmentToFilesAndPhotos() throws {
+        continueAfterFailure = false
+        let name = try XCTUnwrap(fixture("/prepare-original-export")["name"] as? String)
+        let app = XCUIApplication()
+        app.launch()
+        clearSavedComputers(app)
+        let pair = try fixture("/pair.json")
+        app.open(URL(string:try XCTUnwrap(pair["url"] as? String))!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        let search = app.tabBars.buttons["检索"]
+        XCTAssertTrue(search.waitForExistence(timeout:20))
+        search.tap()
+        let reference = app.buttons.containing(NSPredicate(format:"label CONTAINS 'Reference fixture'")).firstMatch
+        XCTAssertTrue(reference.waitForExistence(timeout:10))
+        reference.tap()
+
+        let document = app.buttons["打开原件 · "+name+".txt"]
+        XCTAssertTrue(document.waitForExistence(timeout:10))
+        document.tap()
+        let saveFile = app.buttons["original-save-files"]
+        XCTAssertTrue(saveFile.waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["original-save-photo"].exists)
+        saveFile.tap()
+        let save = app.buttons["Save"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout:10),app.debugDescription)
+        save.tap()
+        let fileSaved = app.staticTexts["原件已存储到文件。"]
+        XCTAssertTrue(fileSaved.waitForExistence(timeout:10),app.debugDescription)
+        app.buttons["关闭"].tap()
+
+        app.buttons["打开原件 · "+name+".png"].tap()
+        let savePhoto = app.buttons["original-save-photo"]
+        XCTAssertTrue(savePhoto.waitForExistence(timeout:10))
+        savePhoto.tap()
+        let photoSaved = app.staticTexts["原图已保存到照片。"]
+        XCTAssertTrue(photoSaved.waitForExistence(timeout:10),app.debugDescription)
+        app.buttons["关闭"].tap()
+        app.buttons["打开原件 · "+name+".png"].tap()
+        XCTAssertTrue(savePhoto.waitForExistence(timeout:10))
+        savePhoto.tap()
+        let duplicate = app.alerts["这张原图已保存过"]
+        XCTAssertTrue(duplicate.waitForExistence(timeout:10))
+        duplicate.buttons["取消"].tap()
+        XCTAssertFalse(photoSaved.exists)
+    }
+
     @MainActor func testFirstChatCanStartFromComposer() throws {
         continueAfterFailure=false
         let app=XCUIApplication();app.launch();clearSavedComputers(app)
