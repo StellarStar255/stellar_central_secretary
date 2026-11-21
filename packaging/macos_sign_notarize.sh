@@ -68,9 +68,8 @@ fi
 sign "$DMG"
 echo "==> Notarizing (this can take several minutes)"
 NOTARY_RESULT="$(mktemp)"
-NOTARY_UPLOAD=()
-if [ "${NOTARY_DISABLE_S3_ACCELERATION:-0}" = 1 ]; then NOTARY_UPLOAD=(--no-s3-acceleration); fi
-xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" "${NOTARY_UPLOAD[@]}" --wait --output-format json > "$NOTARY_RESULT"
+if [ "${NOTARY_DISABLE_S3_ACCELERATION:-0}" = 1 ]; then NOTARY_AUTH+=(--no-s3-acceleration); fi
+xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait --output-format json > "$NOTARY_RESULT"
 /usr/bin/plutil -extract status raw -o - "$NOTARY_RESULT" | grep -qx Accepted
 xcrun stapler staple "$DMG"
 spctl -a -t open --context context:primary-signature -v "$DMG"

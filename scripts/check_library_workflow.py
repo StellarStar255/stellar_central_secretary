@@ -26,7 +26,11 @@ with tempfile.TemporaryDirectory() as folder:
   with sync_playwright() as pw,patch.object(ai,'summary_fields',side_effect=fake_summary):
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
-    page=browser.new_page(viewport={'width':1440,'height':1000},timezone_id='Asia/Shanghai');errors=[];page.on('pageerror',lambda error:errors.append(str(error)));page.goto(base);expect(page.locator('#count')).to_have_text('106');page.locator('#library-open').click()
+    page=browser.new_page(viewport={'width':1440,'height':1000},timezone_id='Asia/Shanghai')
+    errors=[];request_failures=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    page.on('requestfailed',lambda request:request_failures.append((request.url,request.failure)))
+    page.goto(base);expect(page.locator('#count')).to_have_text('106');page.locator('#library-open').click()
     for shortcut in ('Meta+k','Control+k'):
      page.keyboard.press(shortcut);expect(page.locator('#library-dialog')).not_to_be_visible()
      page.keyboard.press(shortcut);expect(page.locator('#library-dialog')).to_be_visible();expect(page.locator('#search')).to_be_focused()
@@ -60,9 +64,23 @@ with tempfile.TemporaryDirectory() as folder:
     for key in ('created','text','summary','tags','state','filename','url'):assert after_rename[key]==before_rename[key],key
     expect(page.locator('#preview-timestamps [data-record-created]')).to_have_attribute('datetime',created_fixture)
     expect(page.locator('#preview-timestamps [data-record-updated]')).to_have_attribute('datetime',after_rename['updated'])
-    page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill('Robot camera saved via double click')
+    new_title='Robot camera saved via double click'
+    page.evaluate("""({id,title})=>{
+     const fetchOriginal=window.fetch,details='/api/items/'+id;
+     window.fetch=async(url,options)=>{
+      if(url===details+'/title'&&JSON.parse(options.body).title===title){
+       window.titleSavePending=true;
+       await new Promise(resolve=>setTimeout(resolve,700));
+       try{return await fetchOriginal(url,options)}finally{window.titleSavePending=false}
+      }
+      if(url===details&&window.titleSavePending)window.readDetailBeforeSave=true;
+      return fetchOriginal(url,options);
+     };
+    }""",{'id':linked,'title':new_title})
+    page.locator('#preview-title').dblclick();page.locator('#preview-title-input').fill(new_title)
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible()
-    expect(page.locator('#edit-title')).to_contain_text('Robot camera saved via double click')
+    assert not page.evaluate('window.readDetailBeforeSave'),'Details requested while the title was still saving'
+    expect(page.locator('#edit-title')).to_contain_text(new_title)
     assert service.archive.get(linked)['title']=='Robot camera saved via double click'
     page.locator('#detail-dialog .dialog-head button').click()
     # Restore the fixture title for subsequent persistence checks.
@@ -128,6 +146,9 @@ with tempfile.TemporaryDirectory() as folder:
     assert not errors,errors
     print('PASS: compact scope badges, inline preview title edit, Enter save, Esc cancel, refresh preserves draft, persisted rename without source changes, ranked/highlighted search, bounded pages, status filters, recent views, original-link double-click and single-click details')
    except Exception:
-    print({'page_errors':errors,'toast':page.locator('#toast').inner_text(),'html':page.locator('#result-count').inner_text()},flush=True);raise
+    print({'page_errors':errors,'failed_requests':request_failures,'toast':page.locator('#toast').inner_text(),
+           'preview_status':page.locator('#preview-status').text_content(),'results':page.locator('#result-count').inner_text()},
+          flush=True)
+    raise
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

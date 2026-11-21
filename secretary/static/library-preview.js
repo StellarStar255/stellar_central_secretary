@@ -16,17 +16,21 @@
  }
  function endEdit(focus=false){editing=null;$('#preview-title-editor').hidden=true;$('#preview-title').hidden=false;if(focus)$('#preview-title').focus()}
  function editTitle(){if(!cached||editing)return;editing={id:selected,saving:false};$('#preview-title-input').value=cached.title;StellarDrafts.track($('#preview-title-input'),selected+':title');$('#preview-title-input').disabled=false;$('#preview-title-save').disabled=false;$('#preview-title-cancel').disabled=false;$('#preview-title-error').textContent='';$('#preview-title').hidden=true;$('#preview-title-editor').hidden=false;$('#preview-title-input').focus();$('#preview-title-input').select()}
- async function saveTitle(event){
-  event.preventDefault();const draft=editing;if(!draft||draft.saving)return false;
+ function saveTitle(event){
+  event.preventDefault();const draft=editing;if(!draft)return false;
+  if(draft.saving)return draft.saving;
   const title=$('#preview-title-input').value.trim();if(!title){$('#preview-title-error').textContent=t('标题不能为空');$('#preview-title-input').focus();return false}
   if(cached&&title===cached.title){StellarDrafts.saved($('#preview-title-editor'));endEdit();return true}
-  draft.saving=true;StellarDrafts.status($('#preview-title-editor'),'正在保存…');for(const control of $('#preview-title-editor').querySelectorAll('input,button'))control.disabled=true;
-  try{
-   const result=await api('/api/items/'+draft.id+'/title',{title,expected_title:StellarDrafts.base($('#preview-title-input'))??cached?.title});StellarDrafts.saved($('#preview-title-editor'));
-   if(editing===draft){if(cached&&selected===draft.id){cached.title=result.item.title;cached.updated=result.item.updated;$('#preview-title').textContent=result.item.title;$('#preview-timestamps').innerHTML=timestamps(cached)}endEdit(true)}
-   toast(t('标题已保存'));await onSaved?.();return true;
-  }catch(error){if(editing===draft)$('#preview-title-error').textContent=StellarI18n.message(error.message);else toast(error.message);return false}
-  finally{draft.saving=false;if(editing===draft)for(const control of $('#preview-title-editor').querySelectorAll('input,button'))control.disabled=false}
+  StellarDrafts.status($('#preview-title-editor'),'正在保存…');for(const control of $('#preview-title-editor').querySelectorAll('input,button'))control.disabled=true;
+  draft.saving=(async()=>{
+   try{
+    const result=await api('/api/items/'+draft.id+'/title',{title,expected_title:StellarDrafts.base($('#preview-title-input'))??cached?.title});StellarDrafts.saved($('#preview-title-editor'));
+    if(editing===draft){if(cached&&selected===draft.id){cached.title=result.item.title;cached.updated=result.item.updated;$('#preview-title').textContent=result.item.title;$('#preview-timestamps').innerHTML=timestamps(cached)}endEdit(true)}
+    toast(t('标题已保存'));await onSaved?.();return true;
+   }catch(error){if(editing===draft)$('#preview-title-error').textContent=StellarI18n.message(error.message);else toast(error.message);return false}
+   finally{draft.saving=false;if(editing===draft)for(const control of $('#preview-title-editor').querySelectorAll('input,button'))control.disabled=false}
+  })();
+  return draft.saving;
  }
  function markSelection(){for(const row of $('#items').querySelectorAll('.library-row')){const active=row.dataset.id===selected;row.classList.toggle('selected',active);row.setAttribute('aria-pressed',String(active))}}
  function clear(){endEdit();revision++;loadingId='';selected='';cached=null;$('#preview-attachments').innerHTML='';$('#preview-timestamps').innerHTML='';markSelection();$('#preview-empty').hidden=false;$('#preview-material').hidden=true;$('#preview-status').textContent='';$('#preview-full').disabled=true;$('#preview-trash').disabled=true;$('#preview-original').hidden=true;$('#preview-file').hidden=true}
