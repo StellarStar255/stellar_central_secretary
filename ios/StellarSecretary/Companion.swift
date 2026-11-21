@@ -565,7 +565,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             pair.transport = bluetooth ? "bluetooth" : wireless ? "wifi" : "direct"
             if bluetooth {
                 bluetoothRelay?.rememberVerifiedPeer()
-                if !chatSubmitting { wifiRelay?.suspendDiscovery() }
+                if !chatSubmitting && !flushing { wifiRelay?.suspendDiscovery() }
             }
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             try remember(pair);paired = computers.selected
@@ -592,19 +592,32 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard let pair = paired else { error = "请先配对电脑";return false }
         guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || data != nil else { return false }
         guard (data?.count ?? 0) <= 10*1024*1024, drafts.count < 50 else { error = "每份附件最多 10 MB，待发送内容最多 50 条";return false }
-        do { try persist(drafts + [Draft(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:filename,data:data?.base64EncodedString())]);error = "";await flush();return true }
+        if let data, data.isEmpty || filename?.isEmpty != false { error = "请选择非空文件。";return false }
+        do {
+            try persist(drafts + [Draft(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:filename,data:data?.base64EncodedString())])
+            error = ""
+            Task { await flush() }
+            return true
+        }
         catch { self.error = "手机空间不足，内容尚未保存，请保留原内容";return false }
     }
     func removeDraft(_ id: String) { guard currentDrafts.contains(where:{$0.id==id}) else {return};do { try persist(drafts.filter { $0.id != id }) } catch { self.error = "无法移除待发送内容" } }
     func flush() async {
-        guard online, !flushing, let pair = paired else { return };flushing = true;defer { flushing = false;sendingDraftID=nil }
-        for draft in drafts where draft.serverID == pair.info.server_id && draft.fingerprint == pair.info.fingerprint {
+        guard online, !flushing, let pair = paired else { return }
+        guard !currentDrafts.isEmpty else { return }
+        flushing = true
+        defer {
+            flushing = false;sendingDraftID=nil
+            if paired?.transport == "bluetooth", !chatSubmitting { wifiRelay?.suspendDiscovery() }
+        }
+        while let draft = currentDrafts.first {
             sendingDraftID=draft.id
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
             else if let url = URL(string:draft.text.trimmingCharacters(in:.whitespacesAndNewlines)), ["https","http"].contains(url.scheme ?? ""), !draft.text.contains("\n") { content["url"] = url.absoluteString;content["text"] = "" }
             do {
-                let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair)
+                let upload = try await attachmentUpload(using:pair,size:draft.data.map { $0.utf8.count * 3 / 4 })
+                let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
                 if let value = (response["capture"] ?? response["item"]) as? [String:Any] {
                     let receipt = CaptureReceipt(value)
                     if !receipt.id.isEmpty {
@@ -861,7 +874,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
 
     // Keep the working Bluetooth session for status and small messages. When
     // sending files, probe faster paths without switching the paired computer.
-    private func fasterChatUploadEndpoint(_ pair: PairedMac) async -> String? {
+    private func fasterAttachmentUploadEndpoint(_ pair: PairedMac) async -> String? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--bluetooth-only") { return nil }
         #endif
@@ -885,6 +898,16 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         }
     }
 
+    private func attachmentUpload(using pair: PairedMac,size: Int?) async throws -> (endpoint:String?,timeout:TimeInterval?,transport:String?) {
+        guard let size else { return (nil,nil,nil) }
+        let endpoint = pair.transport == "bluetooth" ? await fasterAttachmentUploadEndpoint(pair) : nil
+        try Task.checkCancellation()
+        let transport = endpoint != nil ? "wifi" : pair.transport
+        // Bluetooth takes longer to transfer the same bytes than a direct connection.
+        let timeout = transport == "bluetooth" ? max(120,TimeInterval(size)/12_288) : 120
+        return (endpoint,timeout,transport)
+    }
+
     func flushChatMessages() async {
         guard online,!chatSubmitting,let pair=paired else {return}
         let ready = currentChatQueue.filter {
@@ -894,31 +917,27 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         chatSubmitting=true
         defer {
             sendingChatID=nil;chatUploadTransport=nil;chatSubmitting=false
-            if paired?.transport == "bluetooth" { wifiRelay?.suspendDiscovery() }
+            if paired?.transport == "bluetooth", !flushing { wifiRelay?.suspendDiscovery() }
         }
         var changed=false
         for pending in ready {
             if chatSnapshot?.id==pending.chatID && chatSnapshot?.running==true {continue}
             do {
+                if pending.attachment != nil, !chatAttachmentsAvailable {
+                    chatNotice="更新电脑端后会继续发送待发附件。"
+                    continue
+                }
                 sendingChatID = pending.id
                 chatUploadTransport = nil
                 defer { sendingChatID=nil;chatUploadTransport=nil }
                 var body:[String:Any]=["request_id":pending.id,"text":pending.text]
-                var uploadEndpoint: String?
-                var uploadTimeout: TimeInterval?
+                let upload = try await attachmentUpload(using:pair,size:pending.attachment?.data.count)
                 if let file=pending.attachment {
-                    guard chatAttachmentsAvailable else {chatNotice="更新电脑端后会继续发送待发附件。";continue}
-                    if pair.transport == "bluetooth" { uploadEndpoint = await fasterChatUploadEndpoint(pair) }
-                    try Task.checkCancellation()
-                    chatUploadTransport = uploadEndpoint != nil ? "wifi" : pair.transport
-                    // A Bluetooth relay can take considerably longer for the
-                    // same payload, even though the HTTPS session is healthy.
-                    uploadTimeout = chatUploadTransport == "bluetooth"
-                        ? max(120, TimeInterval(file.data.count)/12_288) : 120
+                    chatUploadTransport = upload.transport
                     pairingDiagnostic("chat-attachment-upload-start-"+(chatUploadTransport ?? "direct"))
                     body["attachment"]=["name":file.name,"data":file.data.base64EncodedString()]
                 }
-                let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:uploadTimeout,endpoint:uploadEndpoint)
+                let value=try await request(chatPath(pending.chatID)+"/messages",body:body,using:pair,timeout:upload.timeout,endpoint:upload.endpoint)
                 guard value["accepted"] as? Bool==true else {throw URLError(.cannotParseResponse)}
                 try persistChatQueue(pendingChatMessages.filter {$0.id != pending.id});changed=true
                 chatRetryAfter[pending.id] = nil

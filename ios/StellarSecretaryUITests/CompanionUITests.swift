@@ -320,6 +320,43 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(duplicate.waitForExistence(timeout:10))
         duplicate.buttons["取消"].tap()
         XCTAssertFalse(photoSaved.exists)
+
+        app.buttons["关闭"].tap()
+        app.tabBars.buttons["归档"].tap()
+        let capture = app.buttons["保存到知识库"]
+        XCTAssertFalse(capture.isEnabled)
+        app.buttons["添加文件"].tap()
+        let exported = app.staticTexts.matching(
+            NSPredicate(format:"label == %@ OR label BEGINSWITH %@",name,name+".txt")
+        ).firstMatch
+        XCTAssertTrue(exported.waitForExistence(timeout:10),app.debugDescription)
+        // In the Files grid the name is below the selectable thumbnail.
+        exported.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0)).withOffset(
+            CGVector(dx:0,dy:-40)
+        ).tap()
+        let ready = expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:capture)
+        wait(for:[ready],timeout:8)
+        capture.tap()
+        let receipt = app.buttons.matching(NSPredicate(
+            format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS %@",name
+        )).firstMatch
+        XCTAssertTrue(receipt.waitForExistence(timeout:15),app.debugDescription)
+        XCTAssertEqual(try fixture("/count")["count"] as? Int,2)
+
+        app.buttons["添加截图或照片"].tap()
+        let newestPhoto = app.images.matching(NSPredicate(
+            format:"identifier == %@ OR label BEGINSWITH %@","PXGGridLayout-Info","Photo,"
+        )).firstMatch
+        XCTAssertTrue(newestPhoto.waitForExistence(timeout:10),app.debugDescription)
+        newestPhoto.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        let photoReady = expectation(for:NSPredicate(format:"enabled == true"),evaluatedWith:capture)
+        wait(for:[photoReady],timeout:8)
+        capture.tap()
+        let photoReceipt = app.buttons.matching(NSPredicate(
+            format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Photo.'"
+        )).firstMatch
+        XCTAssertTrue(photoReceipt.waitForExistence(timeout:15),app.debugDescription)
+        XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
     }
 
     @MainActor func testFirstChatCanStartFromComposer() throws {

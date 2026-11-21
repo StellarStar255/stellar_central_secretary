@@ -17,7 +17,8 @@
 "移除" = "Remove";
 "保存到知识库" = "Save to library";
 "暂存，连接后发送" = "Queue until connected";
-"可在「连接 → 隐私与 AI」授权手机归档自动摘要。附件最多 10 MB。" = "You can allow automatic summaries under Connection → Privacy & AI. Attachments can be up to 10 MB.";
+"只添加图片或文件也可归档。附件最多 10 MB，可在「连接 → 隐私与 AI」授权自动摘要。" = "You can save an image or file without a note. Attachments can be up to 10 MB. Allow automatic summaries under Connection → Privacy & AI.";
+"请选择非空文件。" = "Choose a nonempty file.";
 "待发送 · %lld" = "Pending · %lld";
 "正在上传" = "Uploading";
 "待发送" = "Pending";

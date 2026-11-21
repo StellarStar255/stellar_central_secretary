@@ -23,9 +23,26 @@ with tempfile.TemporaryDirectory() as temp:
     assert page.locator('#auto-ai').is_checked(),'unsaved settings must survive language switching'
     assert page.locator('#message-input').input_value()=='未发送的中文草稿'
     assert page.locator('#tutorial-open').get_attribute('href')=='/tutorial?lang=en'
-    assert page.locator('#settings-save').inner_text()=='Save settings'
-    page.screenshot(path='/tmp/secretary-english-settings.png',full_page=True)
-    page.locator('#settings-dialog .dialog-head button').click();assert page.locator('#chat-scroll').bounding_box()['height']>150;page.screenshot(path='/tmp/secretary-english-home.png');page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click()
+    save=page.locator('#settings-save');scroll=page.locator('.settings-scroll')
+    assert save.inner_text()=='Save settings'
+    for width,height in ((1280,950),(460,540)):
+     page.set_viewport_size({'width':width,'height':height})
+     scroll.evaluate('(el)=>el.scrollTop=0')
+     at_top=save.bounding_box()
+     assert at_top and at_top['y']+at_top['height']<=height
+     scroll.evaluate('(el)=>el.scrollTop=el.scrollHeight')
+     assert scroll.evaluate('(el)=>el.scrollTop')>0
+     assert abs(save.bounding_box()['y']-at_top['y'])<1
+     expect(save).to_be_in_viewport()
+     assert save.evaluate("""button=>{
+      const bounds=button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(bounds.x+bounds.width/2,bounds.y+bounds.height/2))
+     }""")
+    page.set_viewport_size({'width':1280,'height':950})
+    page.screenshot(path='/tmp/secretary-english-settings.png')
+    save.click();expect(page.locator('#settings-dialog')).not_to_be_visible()
+    assert service.archive.settings()['auto_ai'] is True
+    assert page.locator('#chat-scroll').bounding_box()['height']>150;page.screenshot(path='/tmp/secretary-english-home.png');page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click()
     page.locator('#preview-full').click();page.locator('#edit-title').wait_for();assert page.locator('#edit-title').inner_text().strip()=='知识库 ✎'
     assert page.locator('#detail-content').get_by_role('heading',name='Summary',exact=True).count()==1
     assert '保留这段中文摘要' in page.locator('#detail-content .detail-text').first.inner_text()

@@ -72,6 +72,21 @@ with tempfile.TemporaryDirectory() as temp:
     assert len(service.archive.list())==2 and mocked.call_count==1
     picked=next(item for item in service.archive.list() if item['id']!=other)
     assert service.item_detail(picked['id'])['attachments'][0]['name']=='image.png'
+    # The library chat composer accepts originals by themselves, with no AI question.
+    page.locator('#input-mode').select_option('library')
+    expect(page.locator('#message-input')).to_have_value('')
+    raw=b'Attachment-only file goes straight to the archive.'
+    page.locator('#file-input').set_input_files({'name':'only-file.txt','mimeType':'text/plain','buffer':raw})
+    page.locator('#send-button').click();expect(page.locator('#messages .archive-card')).to_have_count(2)
+    standalone=next(item for item in service.archive.list() if item['filename']=='only-file.txt')
+    assert page.request.get(base+'/api/items/'+standalone['id']+'/file').body()==raw
+    page.locator('#message-input').fill('  ')
+    page.locator('#file-input').set_input_files({'name':'only-image.png','mimeType':'image/png','buffer':png})
+    page.locator('#send-button').click();expect(page.locator('#messages .archive-card')).to_have_count(3)
+    new_image=next((entry,item['id']) for item in service.archive.list() for entry in service.item_detail(item['id'])['attachments'] if entry['name']=='only-image.png')
+    assert page.request.get(base+'/api/items/'+new_image[1]+'/attachments/'+new_image[0]['id']+'/preview').body()==png
+    assert page.locator('#input-mode').input_value()=='library' and mocked.call_count==1
+    print('PASS: library chat archives a file and an image with no caption; original bytes preserved; no question sent')
     print('PASS: pasted PNG and clipboard text preserved; additional file submitted as one archive; one scoped model call; native image payload; originals preview; AI vision label; persisted image bubble; grouped deletion; unrelated source preserved; no cloud calls')
    finally:browser.close()
  finally:service.close();server.shutdown();server.server_close()

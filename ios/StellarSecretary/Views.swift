@@ -154,7 +154,7 @@ struct CaptureView: View {
                     Button { importing = true } label: { Label("添加文件",systemImage:"paperclip") }
                     if let filename { HStack { Text(filename);Spacer();Button("移除") { model.captureEditor.data = nil;model.captureEditor.filename = nil;photo = nil } } }
                     Button { editing = false;saving = true;let id=model.workspaceID,value=text,file=filename,data=image;Task { if await model.enqueue(text:value,filename:file,data:data,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor();photo = nil };saving = false } } label: { Label(LocalizedStringKey(model.online ? "保存到知识库":"暂存，连接后发送"),systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity) }.disabled(saving || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && image == nil))
-                } footer: { Text("可在「连接 → 隐私与 AI」授权手机归档自动摘要。附件最多 10 MB。") }
+                } footer: { Text("只添加图片或文件也可归档。附件最多 10 MB，可在「连接 → 隐私与 AI」授权自动摘要。") }
                 if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
