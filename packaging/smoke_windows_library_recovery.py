@@ -82,7 +82,7 @@ def main():
         preference.write_bytes(saved)
         env = {**os.environ, 'LOCALAPPDATA': str(root)}
         env.pop('SECRETARY_DATA_DIR', None)
-        process = subprocess.Popen([str(executable), '--desktop', '--no-browser', '--port', str(port)], env=env)
+        process = subprocess.Popen([str(executable), '--desktop', '--port', str(port)], env=env)
         try:
             window = wait_for(process, lambda: recovery_window(process), 'missing-database recovery dialog')
             database = library/'archive.sqlite3'
@@ -92,12 +92,20 @@ def main():
                 source.backup(destination)
             retry(window)
 
+            last_desktop = {}
+
             def ready():
                 status = request('/api/status')
-                if status['desktop'].get('window_loaded') and status['desktop'].get('window_visible'):
+                last_desktop.update(status['desktop'])
+                if last_desktop.get('window_loaded') and last_desktop.get('window_visible'):
                     return status
 
-            status = wait_for(process, ready, 'loaded Windows desktop')
+            try:
+                status = wait_for(process, ready, 'loaded Windows desktop')
+            except RuntimeError:
+                print('Last desktop state:', last_desktop, flush=True)
+                print('Recovery dialog still visible:', bool(recovery_window(process)), flush=True)
+                raise
             assert Path(status['data_dir']) == library and not status['temporary_library']
             assert any(row['id'] == item for row in request('/api/items'))
             assert preference.read_bytes() == saved
