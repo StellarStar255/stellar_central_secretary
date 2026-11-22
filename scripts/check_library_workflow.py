@@ -1,16 +1,19 @@
 """Real-browser library checks with isolated synthetic material and no model calls."""
 import io,json,os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from unittest.mock import patch
 from secretary import ai
 from playwright.sync_api import sync_playwright,expect
 
+class LibraryTestServer(LocalHTTPServer):
+ request_queue_size=32
+
 with tempfile.TemporaryDirectory() as folder:
  service=Service(folder);service.archive.configure('codex',False)
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=LibraryTestServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  linked,_=service.archive.add('Robot camera source','Original robot camera details',url=base+'/tutorial?lang=en#fixture')
  service.archive.update(linked,summary='【网页已加载内容归档】 仅包含已加载内容。\n\nUseful robot camera overview.',tags=['网页片段'],state='ready')
  created_fixture='2025-01-02T03:04:05+00:00';updated_fixture='2026-02-03T04:05:06+00:00'
@@ -188,8 +191,37 @@ with tempfile.TemporaryDirectory() as folder:
     assert options.first.evaluate('el=>el.scrollWidth>el.clientWidth')
     options.first.click()
     expect(search).to_have_value(past[-1])
+    page.evaluate("""() => localStorage.setItem('stellar.library-search-history',
+                  JSON.stringify(['日报例会','月度总结']))""")
+    page.reload()
+    page.locator('#library-open').click()
+    expect(history.get_by_role('option')).to_have_count(2)
+    before=page.locator('#result-count').inner_text()
+    assert search.evaluate("""input=>{
+      input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+      input.value='ri';
+      input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true,data:'ri'}));
+      return [
+        ...['ArrowDown','ArrowUp','Enter','Escape'].map(key=>({key,isComposing:true})),
+        {key:'Enter',keyCode:229}
+      ].every(event=>input.dispatchEvent(new KeyboardEvent('keydown',{...event,bubbles:true,cancelable:true})));
+    }"""), 'IME keys must keep their default action'
+    expect(search).to_have_value('ri')
+    expect(search).not_to_have_attribute('aria-activedescendant')
+    expect(history.get_by_role('option')).to_have_count(2)
+    expect(page.locator('#result-count')).to_have_text(before)
+    search.evaluate("""input=>{
+      input.value='日报';
+      input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'日报'}));
+    }""")
+    expect(history.get_by_role('option')).to_have_count(1)
+    expect(history.get_by_role('option')).to_have_text('日报例会')
+    search.press('ArrowDown')
+    search.press('Enter')
+    expect(search).to_have_value('日报例会')
+    expect(history).to_be_hidden()
     assert not errors,errors
-    print('PASS: recent keyword history reopens, filters, fills and executes via keyboard or pointer, and can be cleared')
+    print('PASS: recent searches, IME key handling, filtering after composition and keyboard selection')
    except Exception:
     print({'page_errors':errors,'failed_requests':request_failures,'toast':page.locator('#toast').inner_text(),
            'preview_status':page.locator('#preview-status').text_content(),'results':page.locator('#result-count').inner_text()},
