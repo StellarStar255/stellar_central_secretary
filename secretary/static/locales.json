@@ -39,6 +39,8 @@
   "主题分类": "Category",
   "全部主题": "All categories",
   "没有找到资料，试试其他关键词，或发一份资料给我。": "No items found. Try other keywords or add some material.",
+  "没有符合当前筛选条件的资料。": "No items match the current filters.",
+  "清除筛选": "Clear filters",
   "资料详情": "Item details",
   "在常用浏览器中采集": "Capture in your regular browser",
   "如果 Google 拒绝专用浏览器登录，可以在你平时使用、已经登录 ChatGPT 的 Chrome、Comet 或 Edge 中采集。无需在自动化窗口中登录。": "If Google blocks sign-in in the dedicated browser, capture from Chrome, Comet, or Edge where you are already signed in to ChatGPT.",

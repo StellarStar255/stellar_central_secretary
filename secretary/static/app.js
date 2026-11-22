@@ -426,6 +426,7 @@ function libraryPresentation(item){
 function highlightMatches(value){const text=String(value||''),words=[...new Set($('#search').value.trim().split(/\s+/).filter(Boolean))].slice(0,20).sort((a,b)=>b.length-a.length);if(!words.length)return esc(text);const pattern=new RegExp(words.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'giu');let html='',end=0;for(const match of text.matchAll(pattern)){html+=esc(text.slice(end,match.index))+'<mark>'+esc(match[0])+'</mark>';end=match.index+match[0].length}return html+esc(text.slice(end))}
 function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${highlightMatches(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${highlightMatches(item.search_snippet||view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button><div class="source-matches">${(item.source_matches||[]).map(hit=>`<button type="button" class="secondary" data-origin-item="${item.id}" data-origin="${esc(JSON.stringify(hit.origin))}">${esc(hit.origin.name)}${hit.origin.page?' · p.'+hit.origin.page:''}</button>`).join('')}</div><div class="library-flags">${['favorite','pinned'].map(flag=>`<button class="secondary" data-flag="${flag}" data-item="${item.id}" data-active="${Boolean(item[flag])}" aria-pressed="${Boolean(item[flag])}" title="${t(flag==='favorite'?(item[flag]?'取消收藏':'收藏'):(item[flag]?'取消置顶':'置顶'))}">${t(flag==='favorite'?(item[flag]?'★ 已收藏':'☆ 收藏'):(item[flag]?'已置顶':'置顶'))}</button>`).join('')}</div>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
 let libraryRequestRevision=0;let lastLibraryMarkup='',libraryOffset=0,libraryQueryKey='',libraryResults=[],lastRenderedLibraryKey='',lastRenderedLibraryOffset=0;
+const libraryFacets={kind:$('#kind-filter'),category:$('#category-filter'),favorite:$('#favorite-filter'),state:$('#state-filter'),days:$('#date-filter')};
 const librarySearchHistory=$('#library-search-history')?.replaceChildren?bindLibrarySearchHistory():null;
 function bindLibrarySearchHistory(){
  const input=$('#search'),field=$('#library-search-field'),menu=$('#library-search-history'),
@@ -545,7 +546,8 @@ function bindLibrarySearchHistory(){
  }};
 }
 async function renderLibrary(){
- const filters={q:$('#search').value.trim(),kind:$('#kind-filter').value,category:$('#category-filter').value,state:$('#state-filter').value,days:$('#date-filter').value,sort:$('#sort-filter').value,favorite:$('#favorite-filter').value};
+ const filters={q:$('#search').value.trim(),sort:$('#sort-filter').value};
+ for(const [name,select] of Object.entries(libraryFacets))filters[name]=select.value;
  const key=JSON.stringify(filters);if(key!==libraryQueryKey){libraryQueryKey=key;libraryOffset=0}
  const revision=++libraryRequestRevision,offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
  if(revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
@@ -554,6 +556,15 @@ async function renderLibrary(){
  const items=data.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));libraryResults=items;
  const cats=libraryCategories;$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(category=>`<option value="${esc(category)}" ${category===filters.category?'selected':''}>${esc(displayCategory(category))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(data.total,'份资料','item','items');$('#empty').hidden=items.length>0;
+ if(!items.length){
+  const active=[];
+  for(const [name,select] of Object.entries(libraryFacets)){
+   if(filters[name])active.push(name==='category'?displayCategory(filters.category):select.selectedOptions[0].textContent);
+  }
+  $('#library-empty-default').hidden=active.length>0;
+  $('#library-empty-filters').hidden=active.length===0;
+  $('#library-active-filters').textContent=active.join(' · ');
+ }
  $('#library-pager').hidden=data.total<=100;$('#library-prev').disabled=offset===0;$('#library-next').disabled=offset+items.length>=data.total;$('#library-page').textContent=(Math.floor(offset/100)+1)+' / '+Math.max(1,Math.ceil(data.total/100));
  const listScroll=$('#library-list-scroll'),scroll=key===lastRenderedLibraryKey&&offset===lastRenderedLibraryOffset?listScroll.scrollTop:0,focused=document.activeElement?.closest?.('#items .library-row')?.dataset.id;
  const expanded=new Set([...$('#items').querySelectorAll('details[open]')].map(node=>node.closest('[data-result-id]').dataset.resultId));
@@ -561,7 +572,13 @@ async function renderLibrary(){
 }
 $('#library-prev').onclick=()=>{libraryOffset=Math.max(0,libraryOffset-100);void renderLibrary().catch(error=>toast(error.message))};
 $('#library-next').onclick=()=>{libraryOffset+=100;void renderLibrary().catch(error=>toast(error.message))};
-for(const id of ['#state-filter','#date-filter','#sort-filter','#favorite-filter'])$(id).onchange=()=>renderLibrary().catch(error=>toast(error.message));
+for(const select of [...Object.values(libraryFacets),$('#sort-filter')])select.onchange=()=>renderLibrary().catch(error=>toast(error.message));
+$('#library-clear-filters').onclick=()=>{
+ clearTimeout(searchTimer);
+ for(const select of Object.values(libraryFacets))select.value='';
+ $('#result-count').focus({preventScroll:true});
+ void renderLibrary().catch(error=>toast(error.message));
+};
 async function openLibrary(){document.body.classList.remove('mobile-sidebar');$('#library-dialog').showModal();await renderLibrary();$('#search').focus()}
 async function toggleLibrary(){
  const dialog=$('#library-dialog');
@@ -577,7 +594,6 @@ function queueLibrarySearch(event){
  clearTimeout(searchTimer);searchTimer=setTimeout(()=>renderLibrary().catch(e=>toast(e.message)),180);
 }
 $('#search').oninput=$('#search').oncompositionend=queueLibrarySearch;
-$('#kind-filter').onchange=$('#category-filter').onchange=()=>renderLibrary().catch(e=>toast(e.message));
 $('#new-chat').onclick=newChat;
 $('#sidebar-toggle').onclick=()=>{if(window.innerWidth<=700)document.body.classList.toggle('mobile-sidebar');else{document.body.classList.toggle('sidebar-hidden');$('#workspace').classList.toggle('sidebar-hidden')}};
 $('#chat-scroll').onclick=()=>document.body.classList.remove('mobile-sidebar');

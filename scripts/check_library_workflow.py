@@ -239,8 +239,29 @@ with tempfile.TemporaryDirectory() as folder:
     expect(history).to_be_hidden()
     expect(page.locator('#library-search-toggle')).to_be_hidden()
     assert page.evaluate("JSON.parse(localStorage.getItem('stellar.library-search-history'))")==[]
+    service.archive.update(linked,category='迁移工具')
+    page.reload()
+    page.locator('#library-open').click()
+    search.fill('Other record 12')
+    expect(page.locator('#items .library-row')).to_have_count(1)
+    page.locator('#sort-filter').select_option('updated')
+    filters={'kind':'file','category':'迁移工具','favorite':'1','state':'ready','date':'7'}
+    for facet,value in filters.items():
+     page.locator(f'#{facet}-filter').select_option(value)
+    expect(page.locator('#library-active-filters')).to_have_text('Files · 迁移工具 · Favorites only · Ready · Archived in 7 days')
+    expect(page.locator('#library-clear-filters')).to_have_text('Clear filters')
+    expect(page.locator('#library-empty-default')).to_be_hidden()
+    page.locator('#library-clear-filters').click()
+    expect(page.locator('#items .library-row')).to_have_count(1)
+    expect(search).to_have_value('Other record 12')
+    expect(page.locator('#sort-filter')).to_have_value('updated')
+    for facet in filters:
+     expect(page.locator(f'#{facet}-filter')).to_have_value('')
+    search.fill('absent search fixture')
+    expect(page.locator('#library-empty-default')).to_be_visible()
+    expect(page.locator('#library-clear-filters')).to_be_hidden()
     assert not errors,errors
-    print('PASS: recent searches, IME input, keyboard selection and persistent single-entry deletion')
+    print('PASS: search history and one-click removal of all active filters with query and sort preserved')
    except Exception:
     print({'page_errors':errors,'failed_requests':request_failures,'toast':page.locator('#toast').inner_text(),
            'preview_status':page.locator('#preview-status').text_content(),'results':page.locator('#result-count').inner_text()},
