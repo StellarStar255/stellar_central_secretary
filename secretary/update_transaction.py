@@ -1,7 +1,8 @@
 """Detached update transaction: keep the previous program until the new app is healthy."""
 import argparse,ctypes,hashlib,json,os,shutil,subprocess,sys,time,urllib.request,uuid,threading
+import logging
 from pathlib import Path
-from . import paths,__version__
+from . import paths,update_retention,__version__
 
 def atomic(path,value):
     path=Path(path);temp=path.with_name(path.name+'.tmp-'+uuid.uuid4().hex)
@@ -257,7 +258,15 @@ def run(config):
         if not wait_health(config['version']):
             detail=' 日志：'+str(work/'relaunch.log') if windows else ''
             raise RuntimeError('新版窗口、版本或资料库健康检查未通过。'+detail)
-        report('complete');threading.Thread(target=child.wait,daemon=True).start();return True
+        report('complete')
+        try:
+            obsolete=update_retention.cache_artifacts(data,config['version'],keep_backup=backup)
+            if old_root is not None:
+                obsolete.append(old_root)
+            update_retention.remove_artifacts(obsolete)
+        except OSError:
+            logging.exception('Could not finish update cache cleanup')
+        threading.Thread(target=child.wait,daemon=True).start();return True
     except Exception as error:
         message=str(error)
         if changed:

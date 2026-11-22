@@ -3,6 +3,52 @@ import argparse,hashlib,json,os,plistlib,re,shutil,sqlite3,subprocess,sys,tempfi
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 REPO='StellarStar255/stellar_central_secretary'
+sys.path.insert(0,str(ROOT))
+from secretary.update_retention import remove_artifacts, version_key
+
+
+def old_build_artifacts(root, current, released):
+    limit=version_key(current)
+    for folder in ('build', 'dist'):
+        parent=root/folder
+        if parent.is_symlink() or not parent.is_dir():
+            continue
+        for path in parent.iterdir():
+            if path.is_symlink():
+                continue
+            if path.is_dir():
+                match=re.fullmatch(r'release-v(\d+(?:\.\d+\.\d+)?)',path.name)
+            elif folder=='dist' and path.is_file():
+                match=re.fullmatch(r'Stellar-Secretary-(\d+\.\d+\.\d+)-(?:macos-arm64\.dmg|browser-extension\.zip)',path.name)
+            else:
+                continue
+            if match:
+                version=match[1] if '.' in match[1] else '0.1.'+match[1]
+                if version_key(version)<limit and version in released:
+                    yield path
+
+
+def mac_rollback_copies(target):
+    copies=[]
+    for path in target.parent.glob('.Stellar Secretary.backup-*.app'):
+        if path.is_symlink() or not re.fullmatch(r'\.Stellar Secretary\.backup-[a-f0-9]{10}\.app',path.name):
+            continue
+        try:
+            identifier=plistlib.loads((path/'Contents/Info.plist').read_bytes())['CFBundleIdentifier']
+            if identifier=='io.github.stellarstar255.stellar-secretary' and (path/'Contents/MacOS/Stellar Secretary').is_file():
+                copies.append(path)
+        except (OSError, ValueError, KeyError) as error:
+            print(f'Skipping unreadable rollback copy {path}: {error}',file=sys.stderr)
+    return sorted(copies,key=lambda path:path.stat().st_mtime,reverse=True)
+
+
+def old_mac_rollbacks(target, newest=None):
+    copies=mac_rollback_copies(target)
+    if newest in copies:
+        copies.remove(newest)
+        copies.insert(0,newest)
+    commands=output('/bin/ps','-axo','command=').splitlines()
+    return [path for path in copies[2:] if not any(str(path)+'/' in line for line in commands)]
 
 def require(value,message):
     if not value:raise RuntimeError(message)
@@ -103,6 +149,12 @@ class Release:
         if release['isDraft']:run('gh','release','edit',self.tag,'--repo',REPO,'--draft=false','--latest')
         release=self.view();verify_assets(release,self.load('expected.json'));require(not release['isDraft'],'Release remains a draft')
         self.save('published.json',release);print('PASS: published '+release['url'])
+        try:
+            released={path.name for path in self.state.parent.iterdir() if (path/'published.json').is_file()}
+            for path in remove_artifacts(old_build_artifacts(ROOT,self.version,released)):
+                print('Removed old build artifact:',path)
+        except OSError as error:
+            print(f'Could not finish old build cleanup: {error}',file=sys.stderr)
     def install(self,args):
         # This helper only upgrades the known running macOS installation.
         mac=self.load('signed-mac.json');require(digest(self.app/'Contents/MacOS/Stellar Secretary')==mac['app_digest'],'App differs from verified DMG');require(digest(self.dmg)==mac['digest'],'Verified DMG changed')
@@ -155,6 +207,11 @@ class Release:
         for name in ('bundle-ui.js','library-preview.js','image-viewer.js'):
             require(get('/'+name)==(self.app/'Contents/Resources/secretary/static'/name).read_bytes(),'Running UI differs: '+name)
         print(f'PASS: installed {self.tag}; all columns of {count} records preserved; backup: {backup}')
+        try:
+            for path in remove_artifacts(old_mac_rollbacks(target,backup)):
+                print('Removed old program rollback:',path)
+        except (OSError,subprocess.CalledProcessError) as error:
+            print(f'Could not finish old program rollback cleanup: {error}',file=sys.stderr)
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

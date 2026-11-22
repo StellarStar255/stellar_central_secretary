@@ -2,6 +2,34 @@ import hashlib,json,os,shutil,signal,socket,sys,tarfile,tempfile,unittest
 from pathlib import Path
 from secretary.update_transaction import run
 
+
+class UpdateRetentionTest(unittest.TestCase):
+    def test_success_keeps_rollback_and_logs_and_leaves_newer_downloads(self):
+        from secretary.update_retention import cache_artifacts, remove_artifacts
+        with tempfile.TemporaryDirectory() as folder:
+            data=Path(folder)
+            rollback={}
+            packages={}
+            logs=[]
+            for version in ('0.1.9','0.1.10','0.1.11'):
+                work=data/'updates'/version
+                work.mkdir(parents=True)
+                rollback[version]=work/('previous-program-'+'a'*32)
+                rollback[version].mkdir()
+                packages[version]=work/f'Stellar-Secretary-{version}-windows-x64-setup.exe'
+                packages[version].touch()
+                log=work/'installer.log'
+                log.touch()
+                logs.append(log)
+            untouched=data/'updates'/'0.1.9'/'user-file.zip'
+            untouched.touch()
+            keep=rollback['0.1.10']
+            removed=remove_artifacts(cache_artifacts(data,'0.1.10',keep_backup=keep))
+            self.assertCountEqual(removed,[rollback['0.1.9'],packages['0.1.9'],packages['0.1.10']])
+            for path in [*logs,keep,rollback['0.1.11'],packages['0.1.11'],untouched]:
+                self.assertTrue(path.exists())
+
+
 class WindowsRollbackTest(unittest.TestCase):
     def exercise(self,persistent):
         from unittest.mock import Mock,patch
