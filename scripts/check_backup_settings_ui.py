@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     expect(page.locator('#library-location-change')).to_have_text('Change folder…')
     page.locator('#ui-language').select_option('zh')
     expect(page.locator('#data-dir')).to_have_text(str(service.archive.root))
+    expect(page.locator('#library-location-restart')).to_be_hidden()
     expect(page.locator('#library-location-change')).to_have_attribute('aria-expanded','false')
     expect(page.locator('#library-location-editor')).to_be_hidden()
     expect(page.locator('#library-location-save')).to_be_hidden()
@@ -33,6 +34,12 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     destination=(Path(temp)/'New Library 记忆').resolve();destination.mkdir()
     configured_backup=service.backups.folder
     old_snapshot=service.backups.create()
+    with patch('secretary.attachment_editor.launch') as launch:
+     for purpose in ('library','backup'):
+      with page.expect_response(lambda response:response.url.endswith('/api/data-directory/open')) as opened:
+       page.locator('#'+purpose+'-folder-open').click()
+      assert opened.value.ok
+     assert [call.args[0] for call in launch.call_args_list]==[service.archive.root,configured_backup]
     existing=destination/'existing'
     existing.touch()
     with patch('secretary.directory_picker.choose',side_effect=[str(backup),None,None,str(destination)]) as choose:
@@ -74,12 +81,20 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     assert '备份目录已更改' in response
     page.evaluate('status=>StellarBackups.sync(status)',stale)
     expect(page.locator('#backup-folder')).to_have_value(str(backup/'Stellar Secretary Backups'))
+    expect(page.locator('#backup-status')).to_contain_text('此目录尚无备份')
+    expect(page.locator('#backup-status')).not_to_contain_text('最近验证通过')
     expect(page.locator('#backup-create-result')).to_contain_text('已保存备份目录')
     page.locator('#library-location-save').click()
     expect(page.locator('#library-location-status')).to_contain_text(str(destination))
+    expect(page.locator('#library-location-restart')).to_be_visible()
     expect(page.locator('#library-location-editor')).to_be_hidden()
     expect(page.locator('#data-dir')).to_contain_text(str(service.archive.root))
     assert library_location.read()['target']==str(destination)
+    service.restart_supported=True
+    with patch.object(service,'runtime',return_value={'processing':1,'reading':0,'answering':0}):
+     page.locator('#library-location-restart').click()
+     expect(page.locator('#library-restart-status')).to_contain_text('请等待当前任务')
+    assert not service.restart_requested
     assert service.backups.folder==backup/'Stellar Secretary Backups'
     page.locator('#library-location-cancel').click()
     expect(page.locator('#library-location-cancel')).to_be_hidden()

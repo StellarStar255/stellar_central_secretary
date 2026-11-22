@@ -6,6 +6,7 @@ from unittest.mock import patch
 from secretary import library_location
 from secretary.core import Archive
 from secretary.local_backups import Backups
+from secretary.server import Service
 
 
 class LibraryLocationTest(unittest.TestCase):
@@ -94,3 +95,27 @@ class LibraryLocationTest(unittest.TestCase):
                 library_location.schedule(self.root, str(self.target), self.backups.folder)
         self.assertTrue(full['error'])
         self.assertFalse(self.preference.exists())
+
+    def test_restart_admission_checks_pending_destination_and_active_work(self):
+        service = Service(self.root)
+        self.addCleanup(service.close)
+        service.restart_supported = True
+        library_location.schedule(self.root, str(self.target), service.backups.folder)
+        self.assertTrue(service.enter_post())
+        with self.assertRaisesRegex(ValueError, '目录已更改'):
+            service.request_library_restart(str(self.backup))
+        with patch.object(service, 'runtime', return_value={'processing': 1}):
+            with self.assertRaisesRegex(ValueError, '等待当前任务'):
+                service.request_library_restart(str(self.target))
+        with patch('secretary.server.updater.status', return_value={'phase': 'installing'}):
+            with self.assertRaisesRegex(ValueError, '等待当前任务'):
+                service.request_library_restart(str(self.target))
+        self.assertTrue(service.enter_post())
+        with self.assertRaisesRegex(ValueError, '等待当前任务'):
+            service.request_library_restart(str(self.target))
+        service.leave_post()
+        with patch('secretary.server.updater.status', return_value={'phase': 'idle'}):
+            service.request_library_restart(str(self.target))
+        self.assertFalse(service.enter_post())
+        self.assertTrue(service.backups.stop.is_set())
+        service.leave_post()

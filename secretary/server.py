@@ -108,6 +108,10 @@ class Service:
         self.busy = set();self.trash_cancellations=set();self.summary_futures={}; self.lock = threading.Lock()
         self.questions = 0
         self.location_lock = threading.Lock()
+        self.request_lock = threading.Lock()
+        self.active_posts = 0
+        self.restart_requested = False
+        self.restart_supported = False
         from .completion_notifications import CompletionEvents
         self.completion_events=CompletionEvents();self.summary_jobs.on_finished=self.notify_summary_finished
         from .question_progress import QuestionProgress
@@ -341,6 +345,35 @@ class Service:
         with self.lock:value={'processing':len(self.busy), 'reading':len(self.captures), 'answering':self.questions}
         value['answering']=max(value['answering'],self.question_jobs.active_count())
         return value
+
+    def enter_post(self):
+        with self.request_lock:
+            if self.restart_requested:
+                return False
+            self.active_posts += 1
+            return True
+
+    def leave_post(self):
+        with self.request_lock:
+            self.active_posts -= 1
+
+    def request_library_restart(self, folder):
+        busy = '请等待当前任务、备份或升级完成后再重启。'
+        with self.request_lock:
+            if not self.restart_supported:
+                raise ValueError('请手动重启程序以迁移记忆。')
+            pending = library_location.status(self.archive.root).get('pending')
+            if not pending or folder != pending:
+                raise ValueError('待迁移目录已更改，请刷新设置。')
+            if (self.active_posts != 1 or any(self.runtime().values())
+                    or updater.status().get('phase') in ('downloading','verifying','installing')
+                    or not self.backups.lock.acquire(blocking=False)):
+                raise ValueError(busy)
+            try:
+                self.restart_requested = True
+                self.backups.stop.set()
+            finally:
+                self.backups.lock.release()
     def append_material(self,item_id,body):
         if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
@@ -1335,6 +1368,15 @@ def handler(service):
             except Exception as exc: self.send(500, {'error':str(exc)})
         def do_POST(self):
             if not self.trusted() or self.headers.get('X-Knowledge-Token') != token: return self.send(403, {'error':'请求验证失败，请刷新页面'})
+            if not service.enter_post():
+                self.close_connection=True
+                return self.send(503, {'error':'程序正在重启，请稍后重试。'})
+            try:
+                return self.handle_post()
+            finally:
+                service.leave_post()
+
+        def handle_post(self):
             try:
                 path = urllib.parse.urlsplit(self.path).path
                 length = int(self.headers.get('Content-Length', 0))
@@ -1431,6 +1473,12 @@ def handler(service):
                     result=dashboard(service.archive,body.get('ids',[]),active);result['items']=[service.with_progress(item) for item in result['items']];return self.send(200,result)
                 if path=='/api/library-location/check':
                     return self.send(200,library_location.preflight(service.archive.root,body.get('folder'),service.backups.folder))
+                if path=='/api/library-location/restart':
+                    service.request_library_restart(body.get('folder'))
+                    try:
+                        return self.send(200,{'ok':True})
+                    finally:
+                        threading.Thread(target=self.server.shutdown, daemon=True).start()
                 if path=='/api/library-location':
                     with service.location_lock:
                         if updater.status().get('phase') in ('downloading','verifying','installing'):
@@ -1444,6 +1492,18 @@ def handler(service):
                     elif purpose=='backup':title,initial='选择记忆备份目录',service.backups.folder
                     else:raise ValueError('无效的文件夹类型')
                     return self.send(200,{'folder':choose(translate(title,service.archive.settings()['ui_language']),initial)})
+                if path=='/api/data-directory/open':
+                    purpose=body.get('purpose')
+                    if purpose=='library':folder=service.archive.root
+                    elif purpose=='backup':folder=service.backups.folder
+                    else:raise ValueError('无效的文件夹类型')
+                    try:
+                        if not folder.is_dir():
+                            raise ValueError('目录不可用，请检查硬盘连接。')
+                        attachment_editor.launch(folder)
+                    except (OSError,subprocess.SubprocessError) as error:
+                        raise ValueError('无法打开本地路径，请检查访问权限或系统文件管理器。') from error
+                    return self.send(200,{'ok':True})
                 if path=='/api/backups/configure':
                     with service.location_lock:
                         pending=library_location.status(service.archive.root).get('pending')
@@ -1651,9 +1711,21 @@ def main(desktop=False):
             log = open(destination/'app.log','a',encoding='utf-8',buffering=1)
             sys.stdout = sys.stderr = log
         service = Service(destination, first_run_tutorial=paths.FROZEN)
+        service.restart_supported = True
         stack.callback(service.close)
         server.RequestHandlerClass = handler(service)
         run_service(service, server, args, desktop)
+    if service.restart_requested:
+        from .update_transaction import spawn
+        if paths.FROZEN:
+            command = [sys.executable, '--port', str(args.port), '--data-dir', str(destination)]
+            if desktop:
+                command.append('--desktop')
+            if args.no_browser:
+                command.append('--no-browser')
+        else:
+            command = [sys.executable, *sys.orig_argv[1:]]
+        spawn(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def run_service(service, server, args, desktop):

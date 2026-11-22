@@ -18,9 +18,30 @@ class Backups:
         self.error=self.state.get('last_error','')
         if self.state.get('state')=='creating':self.error='上次备份未完成，请重新备份。';self.state.update(state='error',last_error=self.error)
     def _save_state(self,**values):
+        if 'state' in values:
+            values['state_folder']=str(self.folder)
         self.state={**self.state,**values,'revision':self.state.get('revision',0)+1};temporary=self.state_path.with_suffix('.tmp');temporary.write_text(json.dumps(self.state));temporary.replace(self.state_path)
     def status(self):
-        return {**self.state,'folder':str(self.folder),'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,'last_error':self.error,'config_revision':self.config.get('revision',0),'state_revision':self.state.get('revision',0)}
+        folder,config,state=self.folder,self.config,self.state
+        entries=self._entries(folder)
+        try:available=folder.is_dir()
+        except OSError:available=False
+        verified=[entry for entry in entries if entry.get('verification',{}).get('state')=='verified']
+        verification=max((entry['verification'] for entry in entries if entry.get('verification')),
+                         key=lambda check:check.get('checked_at',''),default=None)
+        live=state.get('last_verification') or {}
+        if live.get('state')=='checking' and live.get('folder')==str(folder):
+            verification=live
+        current=state.get('state_folder',str(self.default))==str(folder)
+        return {'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
+                'state':state.get('state','ready') if current else 'ready',
+                'last_error':self.error if current else '',
+                'last_attempt':state.get('last_attempt') if current else None,
+                'warning':state.get('warning','') if current else '',
+                'used_bytes':sum(entry['size'] for entry in entries),'snapshot_count':len(entries),
+                'last_success':max((entry['created'] for entry in verified),default=None),
+                'last_verification':verification,
+                'config_revision':config.get('revision',0),'state_revision':state.get('revision',0)}
     def configure(self,body):
         limit=body.get('max_bytes',self.limit);daily=body.get('daily_keep',self.daily_keep);other=body.get('other_keep',self.other_keep)
         if type(limit) is not int or not 100*1024**2<=limit<=2000*1024**3 or type(daily) is not int or not 1<=daily<=30 or type(other) is not int or not 1<=other<=10:raise ValueError('备份容量或保留份数无效')
@@ -48,18 +69,22 @@ class Backups:
             self.config=value;self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
             return self.status()
     def entries(self):
-        result=[]
         folders=list(dict.fromkeys([str(self.folder),str(self.default),*self.config.get('previous_folders',[])]))
-        for location in folders:
-            folder=Path(location)
-            try:paths=list(folder.glob('*.json'))
-            except OSError:continue
-            for path in paths:
-                try:
-                    value=json.loads(path.read_text());source=folder/(value['id']+'.zip')
-                    if re.fullmatch('[a-f0-9]{32}',value['id']) and source.is_file():result.append({**value,'folder':str(folder)})
-                except (OSError,ValueError,KeyError):pass
+        result=[entry for location in folders for entry in self._entries(Path(location))]
         return sorted(result,key=lambda value:value['created'],reverse=True)
+    @staticmethod
+    def _entries(folder):
+        result=[]
+        try:metadata=list(folder.glob('*.json'))
+        except OSError:return result
+        for path in metadata:
+            try:
+                value=json.loads(path.read_text())
+                if path.stem==value['id'] and re.fullmatch('[a-f0-9]{32}',path.stem):
+                    source=path.with_suffix('.zip')
+                    if source.is_file():result.append({**value,'size':source.stat().st_size,'folder':str(folder)})
+            except (OSError,ValueError,KeyError,TypeError):pass
+        return result
     def _prune(self,keep):
         active=[value for value in self.entries() if Path(value['folder'])==self.folder]
         remove=set()
@@ -74,7 +99,7 @@ class Backups:
             try:(self.folder/(key+'.zip')).unlink(missing_ok=True);(self.folder/(key+'.json')).unlink(missing_ok=True)
             except OSError:continue  # An open Windows download may temporarily hold an old backup.
         used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder)
-        self._save_state(used_bytes=used,warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
+        self._save_state(warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
     def create(self,reason='manual',*,expected_folder=None):
         with self.lock:
             if expected_folder is not None and expected_folder!=str(self.folder):
@@ -112,7 +137,7 @@ class Backups:
                     self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
                     return value
                 self._prune(key)
-                self._save_state(state='ready',last_success=value['created'],last_error='')
+                self._save_state(state='ready',last_error='')
                 self.error='';return {**value,'folder':str(self.folder)}
             except Exception as error:
                 if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
@@ -128,7 +153,7 @@ class Backups:
                 encoded={name:value for name,value in entry.items() if name!='folder'}
                 temporary=meta.with_suffix('.verify-part');temporary.write_text(json.dumps(encoded));temporary.replace(meta)
                 self._save_state(last_verification=value)
-            self._save_state(last_verification={'state':'checking','id':key,'checked_at':checked})
+            self._save_state(last_verification={'state':'checking','id':key,'checked_at':checked,'folder':entry['folder']})
             try:
                 with self.archive.db() as db:max_schema=db.execute('PRAGMA user_version').fetchone()[0]
                 result=backup_verification.verify(Path(entry['folder'])/(key+'.zip'),entry['sha256'],max_schema,allow_source_mismatch)
@@ -137,7 +162,9 @@ class Backups:
             except Exception as error:
                 save({'state':'failed','id':key,'checked_at':datetime.now(timezone.utc).isoformat(),'error':str(error)[:1000]});raise
     def due(self):
-        if not any(Path(value['folder'])==self.folder and value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self.entries()):self.create('daily')
+        with self.lock:
+            if self.stop.is_set():return
+            if not any(value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self._entries(self.folder)):self.create('daily')
     def start(self):
         def loop():
             while not self.stop.is_set():

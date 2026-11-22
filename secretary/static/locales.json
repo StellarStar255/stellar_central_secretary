@@ -1451,5 +1451,18 @@
   "已保存备份目录：": "Saved backup folder: ",
   "正在创建并验证备份…": "Creating and verifying the backup…",
   "备份已写入并通过验证：": "Backup saved and verified in: ",
-  "备份目录已更改，请刷新设置后重试。": "The backup folder has changed. Refresh Settings and try again."
+  "备份目录已更改，请刷新设置后重试。": "The backup folder has changed. Refresh Settings and try again.",
+  "此目录尚无备份": "No backups in this folder yet",
+  "当前备份目录不可用。": "The current backup folder is unavailable.",
+  "立即重启": "Restart now",
+  "打开文件夹": "Open folder",
+  "打开记忆保存目录": "Open library folder",
+  "打开记忆备份目录": "Open backup folder",
+  "目录不可用，请检查硬盘连接。": "The folder is unavailable. Check the drive connection.",
+  "请等待当前任务、备份或升级完成后再重启。": "Wait for current tasks, backups, or updates to finish before restarting.",
+  "请手动重启程序以迁移记忆。": "Restart the app manually to move the library.",
+  "待迁移目录已更改，请刷新设置。": "The destination folder has changed. Refresh Settings.",
+  "程序正在重启，请稍后重试。": "The app is restarting. Try again shortly.",
+  "正在重启并迁移记忆…": "Restarting and moving the library…",
+  "仍在等待程序启动。迁移完成后请重新打开窗口。": "Still waiting for the app to start. Reopen the window when the move finishes."
 }

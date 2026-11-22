@@ -421,7 +421,13 @@ class Mobile:
                 try:self.wfile.write(data)
                 except OSError:pass
             def do_GET(self):self.route(False)
-            def do_POST(self):self.route(True)
+            def do_POST(self):
+                if not manager.service.enter_post():
+                    return self.send(503,{'error':'程序正在重启，请稍后重试。'})
+                try:
+                    self.route(True)
+                finally:
+                    manager.service.leave_post()
             def route(self,post):
                 upload_key=None
                 try:

@@ -10,13 +10,18 @@ class BackupCapacityTest(unittest.TestCase):
    try:
     ident,_=service.archive.add('Before','retained backup text');old=service.backups.create()
     destination=Path(temp)/'custom snapshots'/'Stellar Secretary Backups'
-    service.backups.configure({'folder':str(destination),'max_bytes':100*1024**2,'daily_keep':1,'other_keep':1})
+    status=service.backups.configure({'folder':str(destination),'max_bytes':100*1024**2,'daily_keep':1,'other_keep':1})
+    self.assertEqual((status['snapshot_count'],status['used_bytes'],status['last_success'],status['last_verification']),(0,0,None,None))
+    service.backups.verify(old['id'])
+    self.assertIsNone(service.backups.status()['last_verification'])
     self.assertEqual(service.backups.folder,destination.resolve())
     service.archive.update(ident,title='After');service.backups.create();service.backups.create()
     entries=service.backups.entries();self.assertEqual(len([entry for entry in entries if Path(entry['folder'])==service.backups.folder]),1)
     self.assertTrue(any(entry['id']==old['id'] for entry in entries));service.backups.restore(old['id']);self.assertEqual(service.archive.get(ident)['title'],'Before')
     self.assertLessEqual(service.backups.status()['used_bytes'],100*1024**2)
     again=Backups(service.archive);self.assertEqual(again.folder,service.backups.folder);self.assertTrue(again.status()['last_success'])
+    service.backups.configure({'folder':str(service.backups.default)})
+    self.assertEqual(service.backups.status()['last_success'],old['created'])
    finally:service.close()
  def test_failure_retains_previous_backup_and_persists_notice(self):
   with tempfile.TemporaryDirectory() as temp:
