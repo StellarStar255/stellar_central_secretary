@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     page=browser.new_page(viewport={'width':1300,'height':1000})
     page.on('pageerror',lambda error:print('PAGE ERROR:',error,flush=True))
     page.goto(base);stale=page.request.get(base+'/api/status').json()['backup'];page.locator('#settings-open').click()
+    expect(page.locator('#backup-error')).to_be_hidden()
     page.locator('#capture-proxy-mode').select_option('direct')
     with patch.object(browser_reader,'test_chatgpt_connection',return_value={'mode':'direct','route':'direct','stage':'blocked','status':403}) as probe:
      page.locator('#capture-connection-test').click()
@@ -108,6 +109,7 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     assert not library_location.read().get('target')
     page.locator('#backup-create').click()
     expect(page.locator('#backup-create-result')).to_contain_text('备份已写入并通过验证：'+str(service.backups.folder))
+    expect(page.locator('#backup-error')).to_be_hidden()
     expect(page.locator('#backup-history-dialog')).to_be_hidden()
     expect(page.locator('#settings-dialog #backup-entries')).to_have_count(0)
     page.locator('#backup-list').click()
@@ -139,7 +141,9 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
      page.unroute('**/api/backups')
      page.set_viewport_size({'width':1300,'height':1000})
     service.backups.error='Synthetic backup failure';service.backups._save_state(state='error',last_error=service.backups.error,last_attempt='fixture')
-    page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
+    page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_be_visible();expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
+    service.backups.error='';service.backups._save_state(state='ready',last_error='')
+    page.evaluate('refresh()');expect(page.locator('#backup-error')).to_be_hidden()
     page.locator('#settings-dialog .dialog-head button').click()
     library_location.write({'source':str(service.archive.root),'target':str(destination),
                             'migration':'move-failed','error':'目标磁盘可用空间不足。'})

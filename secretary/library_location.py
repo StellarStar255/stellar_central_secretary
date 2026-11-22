@@ -13,7 +13,10 @@ from . import paths
 
 
 class Unavailable(ValueError):
-    pass
+    def __init__(self, root, reason):
+        self.root = root
+        self.reason = reason
+        super().__init__(f'{reason} {root}')
 
 
 _DATABASE = 'archive.sqlite3'
@@ -59,6 +62,76 @@ def selected(value, override):
             current, *value.get('previous', []))):
         return Path(current)
     return Path(override or paths.DATA_DIR).expanduser().resolve()
+
+
+def _check_existing(root):
+    database = root/_DATABASE
+    try:
+        if not root.is_dir():
+            raise Unavailable(root, '无法访问记忆文件夹。请检查硬盘、盘符或访问权限。')
+        if not database.is_file():
+            raise Unavailable(root, '文件夹中找不到记忆数据库 archive.sqlite3。')
+        if not database.stat().st_size:
+            raise Unavailable(root, '记忆数据库 archive.sqlite3 是空文件。')
+        with closing(sqlite3.connect(database.as_uri()+'?mode=rw', uri=True, timeout=2)) as db:
+            db.execute('SELECT 1 FROM items LIMIT 1').fetchone()
+        with tempfile.TemporaryFile(dir=root):
+            pass
+    except (OSError, sqlite3.Error) as error:
+        raise Unavailable(root, '无法读取或写入记忆数据库。请检查文件权限或数据库是否损坏。') from error
+
+
+def startup_directory(stack, override, recover=None):
+    """Lease the current library, or an explicitly chosen recovery directory."""
+    action, choice = 'retry', None
+    while True:
+        value = read()
+        original = selected(value, override)
+        temporary = action == 'temporary'
+        root = original
+        if action == 'existing':
+            root = Path(choice).expanduser().resolve()
+        elif temporary:
+            root = paths._windows_metadata().with_name('Stellar Secretary Temporary Library').resolve()
+        try:
+            remembered = paths.remembered_windows_data_dir() if sys.platform == 'win32' and paths.FROZEN else None
+            if action == 'existing' and paths.inside_program(root):
+                raise Unavailable(root, '记忆目录不能位于程序安装目录中。')
+            if temporary:
+                if (root.is_relative_to(original) or original.is_relative_to(root) or paths.inside_program(root)):
+                    raise Unavailable(root, '临时知识库与当前记忆目录或程序目录重叠。')
+                root.mkdir(parents=True, exist_ok=True)
+                if any(path.name != '.stellar-library.lock' for path in root.iterdir()):
+                    _check_existing(root)
+            elif (action == 'existing' or str(root) in (value.get('active'), value.get('source')) or
+                  remembered is not None and root == remembered.resolve()):
+                _check_existing(root)
+            else:
+                root.mkdir(parents=True, exist_ok=True)
+            stack.enter_context(lease(root))
+        except OSError as error:
+            problem = Unavailable(root, '无法打开记忆目录。请检查硬盘和访问权限。')
+            if recover is None:
+                raise problem from error
+        except Unavailable as error:
+            if recover is None:
+                raise
+            problem = error
+        else:
+            if temporary:
+                return root, original
+            if action == 'existing' and root != original:
+                previous = list(dict.fromkeys([*value.get('previous', []), str(original)]))
+                write({'active': str(root), 'previous': [path for path in previous if path != str(root)]})
+                return root, None
+            destination = migrate(root, value)
+            if destination != root:
+                stack.enter_context(lease(destination))
+            return destination, None
+        response = recover(problem)
+        if response is None:
+            return None, None
+        action, choice = response
 
 
 @contextmanager

@@ -20,15 +20,19 @@ def _windows_fixed_drives():
             yield Path(drive + '\\')
 
 
-def _windows_data_dir():
-    import tempfile
-    legacy = _windows_metadata()
-    preference = legacy/'data-location.txt'
+def remembered_windows_data_dir():
+    preference = _windows_metadata()/'data-location.txt'
     try:
         saved = Path(preference.read_text(encoding='utf-8').strip())
     except FileNotFoundError:
         saved = None
-    if saved is not None and saved.is_absolute():
+    return saved if saved is not None and saved.is_absolute() else None
+
+
+def _windows_data_dir():
+    import tempfile
+    legacy = _windows_metadata()
+    if saved := remembered_windows_data_dir():
         return saved
     if (legacy/'archive.sqlite3').is_file():
         return legacy

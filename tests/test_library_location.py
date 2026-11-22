@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,55 @@ class LibraryLocationTest(unittest.TestCase):
         self.target.mkdir()
         self.archive = Archive(self.root)
         self.backups = Backups(self.archive)
+
+    def test_recovery_requires_an_existing_library_and_replaces_stale_preference(self):
+        missing = self.root.parent/'unavailable'
+        corrupt = self.root.parent/'corrupt'
+        corrupt.mkdir()
+        (corrupt/'archive.sqlite3').write_bytes(b'not SQLite')
+        item, _ = self.archive.add('Existing memory', 'Original text')
+        library_location.write({'active': str(missing), 'previous': [str(self.root)]})
+        choices = iter((('existing', self.target), ('existing', corrupt), ('existing', self.root)))
+        problems = []
+
+        def recover(problem):
+            problems.append(problem.root)
+            return next(choices)
+
+        with ExitStack() as stack:
+            self.assertEqual(library_location.startup_directory(stack, None, recover), (self.root, None))
+        self.assertEqual(problems, [missing, self.target, corrupt])
+        self.assertEqual(library_location.read(), {'active': str(self.root), 'previous': [str(missing)]})
+        self.assertEqual(self.archive.get(item)['text'], 'Original text')
+        self.assertFalse(missing.exists())
+        self.assertFalse((self.target/'archive.sqlite3').exists())
+        self.assertEqual((corrupt/'archive.sqlite3').read_bytes(), b'not SQLite')
+
+    def test_temporary_open_preserves_preference_and_next_start_retries_original(self):
+        missing = self.root.parent/'unavailable'
+        library_location.write({'active': str(missing)})
+        preference = self.preference.read_bytes()
+        with patch.object(library_location.paths, '_windows_metadata', return_value=self.preference.parent):
+            with ExitStack() as stack:
+                temporary, unavailable = library_location.startup_directory(
+                    stack, None, lambda _: ('temporary', None))
+                self.assertEqual(unavailable, missing)
+                Archive(temporary).add('Temporary note', 'Keep this in the separate library')
+            with ExitStack() as stack, self.assertRaises(library_location.Unavailable):
+                library_location.startup_directory(stack, None)
+            Archive(missing)
+            with ExitStack() as stack:
+                self.assertEqual(library_location.startup_directory(stack, None), (missing, None))
+        self.assertEqual(self.preference.read_bytes(), preference)
+        self.assertEqual(len(Archive(temporary).list()), 1)
+        self.assertEqual(Archive(missing).list(), [])
+
+    def test_legacy_windows_location_without_database_is_not_recreated(self):
+        with patch.object(library_location.paths, 'remembered_windows_data_dir', return_value=self.target), \
+             patch.object(library_location.paths, 'FROZEN', True), \
+             patch.object(library_location.sys, 'platform', 'win32'), ExitStack() as stack:
+            self.assertEqual(library_location.startup_directory(stack, str(self.target), lambda _: None), (None, None))
+        self.assertFalse((self.target/'archive.sqlite3').exists())
 
     def test_move_preserves_archive_and_independent_backup_location(self):
         item, _ = self.archive.add('Memory', 'A saved memory', filename='original.txt', data=b'original')

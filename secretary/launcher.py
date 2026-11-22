@@ -104,7 +104,11 @@ def _main():
         pass
     try:
         from .server import main as serve
-        serve(desktop=desktop)
+        recovery = None
+        if sys.platform == 'win32' and desktop and not known.data_dir and not os.environ.get('SECRETARY_DATA_DIR'):
+            from .library_recovery import choose
+            recovery = choose
+        serve(desktop=desktop, recover_library=recovery)
     except library_location.Unavailable as error:
         if desktop:
             if sys.platform == 'darwin':

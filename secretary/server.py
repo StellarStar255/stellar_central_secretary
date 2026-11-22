@@ -113,6 +113,7 @@ class Service:
         self.active_posts = 0
         self.restart_requested = False
         self.restart_supported = False
+        self.unavailable_library = None
         from .completion_notifications import CompletionEvents
         self.completion_events=CompletionEvents();self.summary_jobs.on_finished=self.notify_summary_finished
         from .question_progress import QuestionProgress
@@ -1247,7 +1248,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'tutorial_pending':service.tutorial_pending, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'temporary_library':service.unavailable_library is not None, 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'tutorial_pending':service.tutorial_pending, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1489,6 +1490,8 @@ def handler(service):
                         threading.Thread(target=self.server.shutdown, daemon=True).start()
                 if path=='/api/library-location':
                     with service.location_lock:
+                        if service.unavailable_library is not None:
+                            raise ValueError('请退出临时知识库后再更改记忆目录。')
                         if updater.status().get('phase') in ('downloading','verifying','installing'):
                             raise ValueError('请等待升级完成后再更改记忆目录。')
                         return self.send(200,library_location.schedule(service.archive.root,body.get('folder'),service.backups.folder))
@@ -1539,6 +1542,8 @@ def handler(service):
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/open-log': return self.send(200, updater.open_windows_update_log())
                 if path=='/api/update/install':
+                    if service.unavailable_library is not None:
+                        raise ValueError('请退出临时知识库后再升级。')
                     def require_idle():
                         if any(service.runtime().values()):
                             raise ValueError('请等待摘要和会话读取完成后再升级')
@@ -1697,7 +1702,7 @@ def handler(service):
     return Handler
 
 
-def main(desktop=False):
+def main(desktop=False, recover_library=None):
     parser = argparse.ArgumentParser(description='Stellar Secretary · 知识秘书')
     parser.add_argument('--port', type=int, default=8768)
     parser.add_argument('--data-dir')
@@ -1706,23 +1711,17 @@ def main(desktop=False):
     from contextlib import ExitStack
     with ExitStack() as stack:
         server = stack.enter_context(LocalHTTPServer(('127.0.0.1', args.port), BaseHTTPRequestHandler))
-        value = library_location.read()
-        root = library_location.selected(value, args.data_dir or os.environ.get('SECRETARY_DATA_DIR'))
-        if str(root) in (value.get('active'), value.get('source')):
-            if not (root/'archive.sqlite3').is_file():
-                raise library_location.Unavailable(f'记忆目录不可用，请检查硬盘连接：{root}')
-        else:
-            root.mkdir(parents=True, exist_ok=True)
-        stack.enter_context(library_location.lease(root))
-        destination = library_location.migrate(root, value)
-        if destination != root:
-            stack.enter_context(library_location.lease(destination))
+        destination, unavailable = library_location.startup_directory(
+            stack, args.data_dir or os.environ.get('SECRETARY_DATA_DIR'), recover_library)
+        if destination is None:
+            return
         paths.DATA_DIR = destination
         if paths.FROZEN:
             log = open(destination/'app.log','a',encoding='utf-8',buffering=1)
             sys.stdout = sys.stderr = log
         service = Service(destination, first_run_tutorial=paths.FROZEN, memory_mcp=args.memory_mcp)
-        service.restart_supported = True
+        service.unavailable_library = unavailable
+        service.restart_supported = unavailable is None
         stack.callback(service.close)
         server.RequestHandlerClass = handler(service)
         run_service(service, server, args, desktop)
@@ -1742,7 +1741,7 @@ def main(desktop=False):
 
 
 def run_service(service, server, args, desktop):
-    if args.port == 8768:
+    if args.port == 8768 and service.unavailable_library is None:
         try:paths.remember_windows_data_dir(service.archive.root)
         except OSError as error:print('Could not save Windows data location:',error,file=sys.stderr,flush=True)
     for item in service.archive.list():
