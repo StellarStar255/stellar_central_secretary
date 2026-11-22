@@ -5,11 +5,90 @@ import tempfile
 import threading
 from pathlib import Path
 from http.server import ThreadingHTTPServer
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT))
 from secretary.server import Service,handler
+
+
+def check_first_run(browser, directory):
+    root=Path(directory)/'fresh'
+    service=Service(root,first_run_tutorial=True)
+    service.archive.set_language('en')
+    server=ThreadingHTTPServer(('127.0.0.1',0),handler(service))
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    context=browser.new_context()
+    try:
+        page=context.new_page()
+        page.goto(base)
+        popup=page.locator('#first-run-tutorial')
+        expect(popup).to_be_visible()
+        iframe=page.frame_locator('#first-run-tutorial-frame')
+        expect(iframe.locator('h1')).to_have_text('Learn by trying it yourself.')
+        iframe.locator('#import-sample').click()
+        iframe.locator('#next').click()
+        iframe.locator('#practice-search').fill('June Science Monthly')
+        expect(iframe.locator('#search-results .result')).to_have_count(1)
+        iframe.locator('#next').click()
+        iframe.locator('#practice-title').click()
+        iframe.locator('#practice-title-input').fill('My reading list')
+        iframe.locator('#practice-title-input').press('Enter')
+        iframe.locator('#next').click()
+        iframe.locator('#practice-open-pdf').click()
+        expect(iframe.locator('#sample-pdf-preview')).to_contain_text('Tutorial PDF')
+        iframe.locator('#next').click()
+        iframe.locator('#settings').click()
+        iframe.locator('#practice-mode').click()
+        iframe.locator('#next').click()
+        iframe.locator('#backup').click()
+        iframe.locator('#next').click()
+        expect(iframe.locator('#completion')).to_have_text('Completed 6 / 6')
+        iframe.locator('#return-app').click()
+        expect(popup).to_be_hidden()
+        page.reload()
+        expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
+        expect(popup).to_be_hidden()
+        page.locator('#settings-open').click()
+        with page.expect_popup() as manual:
+            page.locator('#tutorial-open').click()
+        expect(manual.value.locator('h1')).to_have_text('Learn by trying it yourself.')
+        assert not service.archive.list()
+    finally:
+        context.close()
+        server.shutdown();server.server_close();service.close()
+    restarted=Service(root,first_run_tutorial=True)
+    try:
+        assert not restarted.tutorial_pending
+    finally:
+        restarted.close()
+
+
+def check_skipped_or_upgraded(browser, directory):
+    for legacy in (False,True):
+        root=Path(directory)/('upgrade' if legacy else 'skipped')
+        if legacy:
+            old=Service(root)
+            old.close()
+        service=Service(root,first_run_tutorial=True)
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler(service))
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        page=browser.new_page()
+        try:
+            page.goto(f'http://127.0.0.1:{server.server_port}')
+            popup=page.locator('#first-run-tutorial')
+            if not legacy:
+                expect(popup).to_be_visible()
+                popup.get_by_role('button',name='跳过教程').click()
+                expect(popup).to_be_hidden()
+                page.reload()
+            expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
+            expect(popup).to_be_hidden()
+            assert not service.tutorial_pending
+        finally:
+            page.close()
+            server.shutdown();server.server_close();service.close()
 
 with tempfile.TemporaryDirectory() as temp:
     service=Service(temp);service.archive.configure('codex',False)
@@ -49,6 +128,9 @@ with tempfile.TemporaryDirectory() as temp:
                 assert service.archive.export()==before and service.archive.settings()==settings
                 assert not (Path(temp)/'conversations.json').exists()
                 print('PASS: all six tutorial exercises, search AND, rename/cancel, PDF popup, mode preview, backup, reset, mobile/dark layout, offline HTML; zero API requests and no archive/settings/model changes')
+                check_first_run(browser,temp)
+                check_skipped_or_upgraded(browser,temp)
+                print('PASS: packaged first run opens the embedded tutorial once; finish, skip, reload, restart, upgrade and manual reopen')
             finally:browser.close()
     finally:
         server.shutdown();server.server_close();service.close()

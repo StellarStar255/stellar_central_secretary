@@ -10,6 +10,8 @@ const lessons=[
  {title:'选择桌面或网页模式',short:'切换模式',sub:'在模型与设置中',instruction:'先点练习区左侧「模型与设置」，再切换使用方式。',hint:'本步骤仅模拟切换位置，不会修改你真实程序的设置。',tip:'macOS 安装版在「模型与设置 → 使用方式」切换桌面窗口或网页模式。两种模式共用知识库和对话，程序记住选择；托盘也可切换。'},
  {title:'把知识库备份带走',short:'备份资料',sub:'原件也在里面',instruction:'点击练习区左下角「导出知识库备份」，查看备份中包含什么。',hint:'这里只展示备份清单，不会下载文件，也不会导出你的资料。',tip:'真实程序的「导出知识库备份」会生成 ZIP，包含原文件、数据库和 JSON 清单。换电脑后通过「导入知识库备份」合并恢复。'}
 ];
+const embedded = new URLSearchParams(location.search).get('embedded')==='1' && window.parent!==window;
+const samplePdfLines=['Stellar Secretary - Tutorial PDF','Fictional science magazine, June 2026.','Topics: Moon exploration, robots and clean energy.','This is a practice file. No private documents are used.'];
 let current=0,done=new Set(),imported=false,renamedTitle=t('科学月刊 · 2026年6月'),mode='browser',pdfUrl='';
 const sampleSummary='《科学月刊》2026年6月的虚构示例，介绍月球探索、机器人与能源。概览为教程预置，不代表真实模型结果。';
 function ensureFile(){imported=true;$('#recent-file').hidden=false;$('#recent-file').textContent='▧ '+renamedTitle;}
@@ -37,7 +39,19 @@ function showSearch(){
 }
 function showDetail(){
  ensureFile();$('#workspace-content').innerHTML=ui`<button id="practice-title" class="title-button" title="点击修改标题">${escapeHtml(renamedTitle)} <span aria-hidden="true">✎</span></button><p class="small">科学与技术 · 已整理 · 虚构示例</p><div><span class="tag">月球探索</span><span class="tag">6月</span><span class="tag">前部概览</span></div><div class="row"><button class="secondary" id="practice-open-pdf">浏览器打开 PDF ↗</button><button class="secondary" id="practice-default">默认程序打开</button></div><div class="preview-box"><h4>资料摘要</h4><p>【PDF 前 5 页概览】${t(sampleSummary)}</p></div><p class="small">示例原文件：练习月刊_2026年6月.pdf</p>`;
- $('#practice-title').onclick=editTitle;$('#practice-open-pdf').onclick=()=>{if(!pdfUrl)pdfUrl=URL.createObjectURL(new Blob([makePdf()],{type:'application/pdf'}));window.open(pdfUrl,'_blank','noopener');complete(3,t('✓ 示例 PDF 已在新标签页打开。关掉它即可继续练习。'));};$('#practice-default').onclick=()=>{$('#feedback').textContent=t('真实程序会调用系统默认 PDF 应用。教程只演示入口；请点击「浏览器打开 PDF」完成练习。');};
+ $('#practice-title').onclick=editTitle;$('#practice-open-pdf').onclick=()=>{
+  if(embedded){
+   if(!$('#sample-pdf-preview')){
+    const preview=document.createElement('section');preview.id='sample-pdf-preview';preview.className='preview-box';
+    samplePdfLines.forEach((line,index)=>{const node=document.createElement(index?'p':'strong');node.textContent=line;preview.append(node)});
+    $('#practice-open-pdf').parentElement.after(preview);
+   }
+   complete(3,t('✓ 已打开示例 PDF 预览。'));
+  }else{
+   if(!pdfUrl)pdfUrl=URL.createObjectURL(new Blob([makePdf()],{type:'application/pdf'}));
+   window.open(pdfUrl,'_blank','noopener');complete(3,t('✓ 示例 PDF 已在新标签页打开。关掉它即可继续练习。'));
+  }
+ };$('#practice-default').onclick=()=>{$('#feedback').textContent=t('真实程序会调用系统默认 PDF 应用。教程只演示入口；请点击「浏览器打开 PDF」完成练习。');};
 }
 function editTitle(){
  const parent=$('#practice-title').parentElement;const form=document.createElement('form');form.id='practice-title-form';form.innerHTML=ui`<label class="search-label" for="practice-title-input">修改示例标题</label><input id="practice-title-input" maxlength="300" required value="${escapeHtml(renamedTitle)}"><div class="row"><button class="primary" type="submit">保存标题</button><button class="secondary" type="button" id="practice-title-cancel">取消</button></div>`;$('#practice-title').replaceWith(form);$('#practice-title-input').focus();$('#practice-title-input').select();const cancel=()=>showDetail();$('#practice-title-cancel').onclick=cancel;$('#practice-title-input').onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();cancel();}};form.onsubmit=event=>{event.preventDefault();const title=$('#practice-title-input').value.trim();if(!title){$('#feedback').textContent=t('标题不能为空。');return;}const changed=title!==renamedTitle;renamedTitle=title;ensureFile();showDetail();if(changed)complete(2,t('✓ 标题已修改。示例摘要和 PDF 内容保持不变。'));else $('#feedback').textContent=t('试试换一个不同的名字，再保存。');};
@@ -54,10 +68,16 @@ function showResult(){
 }
 function reset(){current=0;done=new Set();imported=false;renamedTitle=t('科学月刊 · 2026年6月');mode='browser';$('#mode-badge').textContent=t('网页练习');$('#recent-file').hidden=true;go(0);}
 function makePdf(){
- const stream='BT /F1 22 Tf 44 730 Td (Stellar Secretary - Tutorial PDF) Tj 0 -40 Td /F1 13 Tf (Fictional science magazine, June 2026.) Tj 0 -28 Td (Topics: Moon exploration, robots and clean energy.) Tj 0 -42 Td (This is a practice file. No private documents are used.) Tj ET';
+ const stream=`BT /F1 22 Tf 44 730 Td (${samplePdfLines[0]}) Tj 0 -40 Td /F1 13 Tf (${samplePdfLines[1]}) Tj 0 -28 Td (${samplePdfLines[2]}) Tj 0 -42 Td (${samplePdfLines[3]}) Tj ET`;
  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];let pdf='%PDF-1.4\n';const offsets=[0];objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});const xref=pdf.length;pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`+offsets.slice(1).map(offset=>String(offset).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;return pdf;
 }
 $('#previous').onclick=()=>{if(current>0)go(current-1);};$('#next').onclick=()=>{if(!done.has(current))return;if(current<5)go(current+1);else showResult();};$('#reset').onclick=reset;$('#library').onclick=showSearch;$('#new-note').onclick=showHome;$('#recent-file').onclick=showDetail;$('#settings').onclick=showSettings;$('#backup').onclick=showBackup;
 $('#tutorial-language').value=StellarI18n.language;
 $('#tutorial-language').onchange=()=>{const oldDefault=t('科学月刊 · 2026年6月');const isDefault=renamedTitle===oldDefault;StellarI18n.setLanguage($('#tutorial-language').value,{persist:false});if(isDefault)renamedTitle=t('科学月刊 · 2026年6月');if(imported)ensureFile();$('#mode-badge').textContent=mode==='desktop'?t('桌面练习'):t('网页练习');go(current)};
-$('#return-app').href=location.protocol==='file:'?'http://127.0.0.1:8768/':location.origin+'/';window.addEventListener('beforeunload',()=>{if(pdfUrl)URL.revokeObjectURL(pdfUrl);});go(0);
+$('#return-app').href=location.protocol==='file:'?'http://127.0.0.1:8768/':location.origin+'/';
+if(embedded){
+ const close=()=>window.parent.postMessage('stellar-tutorial-close',location.origin);
+ $('#return-app').onclick=event=>{event.preventDefault();close()};
+ window.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();close()}});
+}
+window.addEventListener('beforeunload',()=>{if(pdfUrl)URL.revokeObjectURL(pdfUrl);});go(0);

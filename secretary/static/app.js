@@ -1005,7 +1005,24 @@ globalThis.StellarCompanyAI?.setup({api,toast,reload:loadStatus,onModeChanged:re
 globalThis.StellarSemantic?.bind({api,toast});globalThis.StellarModelAPI?.bind({api,toast});globalThis.StellarModelProxy?.bind({api,toast});
 $('#backend').addEventListener('change',()=>{backendRevision++;updateModelLabel()});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{if($('#completion-notifications').checked&&globalThis.Notification&&Notification.permission==='default')await Notification.requestPermission();const body={model_proxy:globalThis.StellarModelProxy?.collect(),capture_proxy:globalThis.StellarModelProxy?.collectBrowser(),backend:$('#backend').value,auto_ai:$('#auto-ai').checked,summary_language:$('#summary-language')?.value || 'auto',completion_notifications:$('#completion-notifications').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value};if(body.backend==='api')body.model_api=StellarModelAPI.collect();const saved=await api('/api/settings',body);await globalThis.StellarSemantic?.save();if(body.backend==='api')StellarModelAPI.saved(saved.model_api);globalThis.StellarModelProxy?.saved(saved.model_proxy,saved.capture_proxy);updateModelLabel();await loadStatus();$('#settings-dialog').close();toast(t('设置已保存'))});
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));const linkedItem=new URLSearchParams(globalThis.location?.search||'').get('item');if(/^[a-f0-9]{32}$/.test(linkedItem||''))await detail(linkedItem,true);scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+async function openFirstRunTutorial(){
+ // The macOS host creates its WebKit window on demand. WebKit can still report
+ // that page hidden during startup, even though the host opened the window.
+ const backgroundTab=document.hidden&&globalThis.__stellarDesktop!==true;
+ if(!latestStatus?.tutorial_pending||backgroundTab||document.querySelector('dialog[open]'))return;
+ const state=await api('/api/tutorial/claim',{});
+ latestStatus.tutorial_pending=false;
+ if(!state.show)return;
+ $('#first-run-tutorial-frame').src='/tutorial?embedded=1&lang='+StellarI18n.language;
+ $('#first-run-tutorial').showModal();
+}
+$('#first-run-tutorial').addEventListener('close',()=>$('#first-run-tutorial-frame').removeAttribute('src'));
+window.addEventListener('message',event=>{
+ if(event.origin!==location.origin||event.source!==$('#first-run-tutorial-frame').contentWindow||event.data!=='stellar-tutorial-close')return;
+ $('#first-run-tutorial').close();
+});
+document.addEventListener('visibilitychange',()=>void openFirstRunTutorial().catch(()=>{}));
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));await openFirstRunTutorial();const linkedItem=new URLSearchParams(globalThis.location?.search||'').get('item');if(/^[a-f0-9]{32}$/.test(linkedItem||''))await detail(linkedItem,true);scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
