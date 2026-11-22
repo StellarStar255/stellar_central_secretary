@@ -80,3 +80,33 @@ class CaptureProxyTests(unittest.TestCase):
      self.assertEqual(run.call_args.kwargs['proxy'],'socks5://127.0.0.1:1080')
      self.assertEqual(service.archive.get(item)['text'],'retained source')
    finally:service.close()
+
+ def test_public_probe_reports_proxy_tls_and_website_failures_separately(self):
+  from playwright.sync_api import Error, TimeoutError
+
+  policy={'mode':'custom','url':'socks5://127.0.0.1:1080'}
+  with patch.object(network,'local_proxy_alive',return_value=False):
+   result=browser_reader.test_chatgpt_connection(policy,None)
+   self.assertEqual((result['stage'],result['route']),('proxy_port',policy['url']))
+
+  with patch.object(network,'local_proxy_alive',return_value=True),patch.object(browser_reader,'chrome_executable',return_value='/fixture/chrome'),patch('playwright.sync_api.sync_playwright') as playwright:
+   launch=playwright.return_value.__enter__.return_value.chromium.launch
+   browser=launch.return_value
+   goto=browser.new_page.return_value.goto
+   for response,stage in (
+       (Mock(status=200),'ok'),
+       (Mock(status=403),'blocked'),
+       (Error('net::ERR_SSL_PROTOCOL_ERROR'),'tls'),
+       (Error('net::ERR_TUNNEL_CONNECTION_FAILED'),'proxy_tunnel'),
+       (Error('net::ERR_CONNECTION_CLOSED'),'network'),
+       (TimeoutError('fixture timeout'),'timeout')):
+    with self.subTest(stage=stage):
+     goto.side_effect=response if isinstance(response,Exception) else None
+     goto.return_value=response
+     previous=browser.close.call_count
+     result=browser_reader.test_chatgpt_connection(policy,None)
+     self.assertEqual(result['stage'],stage)
+     self.assertEqual(result['route'],policy['url'])
+     self.assertEqual(goto.call_args.args,('https://chatgpt.com/',))
+     self.assertIn('--proxy-server='+policy['url'],launch.call_args.kwargs['args'])
+     self.assertEqual(browser.close.call_count,previous+1)

@@ -23,7 +23,9 @@ class HTTP(socketserver.StreamRequestHandler):
    line=self.rfile.readline(8192)
    while self.rfile.readline(8192) not in (b'\r\n',b''):pass
    if b'http://fixture.proxy.test/' in line:seen.append(('http',line));response(self.request)
-   else:self.request.sendall(b'HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+   else:
+    if line.startswith(b'CONNECT chatgpt.com:443 '):seen.append(('public-probe',line))
+    self.request.sendall(b'HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
   except (OSError,EOFError):pass
 class SOCKS(socketserver.BaseRequestHandler):
  def handle(self):
@@ -66,5 +68,10 @@ def main():
      except Exception:proc.terminate();proc.wait(timeout=5)
     assert any(row[0]==scheme for row in seen)
     print('PASS: real Chrome through '+scheme+', session route persisted, changed route refuses silent reuse')
+   if scheme=='http':
+    result=browser_reader.test_chatgpt_connection({'mode':'custom','url':route},None)
+    assert result['stage']=='proxy_tunnel',result
+    assert any(row[0]=='public-probe' for row in seen)
+    print('PASS: isolated Chrome probe reported a rejected HTTPS tunnel')
   finally:server.shutdown();server.server_close()
 if __name__=='__main__':main()

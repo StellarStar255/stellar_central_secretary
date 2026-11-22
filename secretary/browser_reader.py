@@ -71,6 +71,63 @@ def chrome_executable():
     return shutil.which('google-chrome') or shutil.which('google-chrome-stable') or shutil.which('chromium')
 
 
+def _proxy_args(proxy):
+    if proxy == 'direct://':
+        return ['--no-proxy-server']
+    if proxy:
+        return ['--proxy-server='+proxy, '--proxy-bypass-list=localhost;127.0.0.1;[::1]']
+    return []
+
+
+def test_chatgpt_connection(capture_policy, model_policy):
+    """Probe the public homepage with capture's proxy flags and a temporary Chrome profile."""
+    from .network import capture_proxy_config, capture_proxy_route, describe, proxy_config
+
+    policy = capture_proxy_config(capture_policy)
+    configured = proxy_config(model_policy) if policy['mode'] == 'model' else policy
+    result = {'mode': policy['mode']}
+    try:
+        proxy = capture_proxy_route(policy, model_policy)
+    except RuntimeError:
+        return {**result, 'stage': 'proxy_port', 'route': configured['url']}
+    result['route'] = ('direct' if proxy == 'direct://' else
+                       describe({'HTTP_PROXY': proxy}) if proxy else 'system')
+    chrome = chrome_executable()
+    if not chrome:
+        return {**result, 'stage': 'no_chrome'}
+
+    from playwright.sync_api import Error, TimeoutError, sync_playwright
+
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch(executable_path=chrome, headless=True,
+                                         args=_proxy_args(proxy), timeout=10000)
+        except Error:
+            return {**result, 'stage': 'browser'}
+        try:
+            page = browser.new_page()
+            response = page.goto('https://chatgpt.com/', wait_until='commit', timeout=15000)
+            status = response.status if response else 0
+            stage = 'blocked' if status == 403 else 'ok' if 200 <= status < 400 else 'http' if status else 'network'
+            return {**result, 'stage': stage, 'status': status}
+        except TimeoutError:
+            return {**result, 'stage': 'timeout'}
+        except Error as error:
+            match = re.search(r'net::(ERR_[A-Z0-9_]+)', str(error))
+            code = match[1] if match else ''
+            if code in ('ERR_PROXY_CONNECTION_FAILED', 'ERR_SOCKS_CONNECTION_FAILED'):
+                stage = 'proxy_port'
+            elif code in ('ERR_TUNNEL_CONNECTION_FAILED', 'ERR_SOCKS_CONNECTION_HOST_UNREACHABLE'):
+                stage = 'proxy_tunnel'
+            elif code.startswith(('ERR_SSL_', 'ERR_CERT_')):
+                stage = 'tls'
+            else:
+                stage = 'network'
+            return {**result, 'stage': stage, 'code': code}
+        finally:
+            browser.close()
+
+
 def wait_for_manual_login(proc, confirmed, cancelled, timeout=600):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -166,8 +223,7 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
     args = ['--user-data-dir='+str(profile), '--no-first-run',
             '--remote-debugging-address=127.0.0.1', '--remote-debugging-port='+str(port),
             *(['--no-startup-window'] if background else ['--new-window', target])]
-    if proxy=='direct://':args.append('--no-proxy-server')
-    elif proxy:args.extend(['--proxy-server='+proxy,'--proxy-bypass-list=localhost;127.0.0.1;[::1]'])
+    args.extend(_proxy_args(proxy))
     options = {}
     if background and sys.platform == 'darwin':
         command = ['/usr/bin/open', '-g', '-n', '-a', str(Path(chrome).parents[2]), '--args', *args]

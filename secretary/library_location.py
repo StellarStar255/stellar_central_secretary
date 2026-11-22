@@ -16,6 +16,11 @@ class Unavailable(ValueError):
     pass
 
 
+_DATABASE = 'archive.sqlite3'
+_COPY_SKIP = {_DATABASE, _DATABASE+'-wal', _DATABASE+'-shm', _DATABASE+'-journal',
+              'local-backups', 'updates', '.stellar-library.lock', '.stellar-migration'}
+
+
 def preference_file():
     if sys.platform == 'win32':
         directory = paths._windows_metadata().with_name('Stellar Secretary Settings')
@@ -80,6 +85,84 @@ def status(root):
     return {}
 
 
+def _target_path(root, requested, backup_folder):
+    if not isinstance(requested, str) or not requested.strip():
+        raise ValueError('请输入记忆目录的完整路径。')
+    target = Path(requested.strip()).expanduser()
+    if not target.is_absolute():
+        raise ValueError('请输入记忆目录的完整路径。')
+    target = target.resolve()
+    backup = backup_folder.resolve()
+    if (target.is_relative_to(root) or root.is_relative_to(target) or
+            target.is_relative_to(backup) or backup.is_relative_to(target) or
+            preference_file().resolve().is_relative_to(target)):
+        raise ValueError('请选择独立于现有记忆和备份目录的文件夹。')
+    if paths.inside_program(target):
+        raise ValueError('记忆目录不能位于程序安装目录中。')
+    return target
+
+
+def _copy_ignore(root, directory, names):
+    transient = {name for name in names if name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket')
+                 or (directory/name).is_socket()}
+    return transient | _COPY_SKIP if directory == root else transient
+
+
+def _estimate_bytes(root):
+    def fail(error):
+        raise error
+
+    total = 0
+    for path, directories, files in os.walk(root, onerror=fail):
+        directory = Path(path)
+        ignored = _copy_ignore(root, directory, directories + files)
+        directories[:] = [name for name in directories if name not in ignored]
+        files.extend(name for name in directories if (directory/name).is_symlink())
+        for name in files:
+            if name in ignored and not (directory == root and name in (_DATABASE, _DATABASE+'-wal')):
+                continue
+            try:
+                total += (directory/name).lstat().st_size
+            except FileNotFoundError:
+                # A live browser or SQLite may remove a transient file during the scan.
+                continue
+    return total
+
+
+def _check_destination(target, required_bytes):
+    result = {'estimated_bytes': required_bytes, 'free_bytes': None, 'empty': None, 'writable': None}
+    if not target.is_dir():
+        return {**result, 'error': '请选择一个已存在的空文件夹作为记忆目录。'}
+    try:
+        result['empty'] = next(target.iterdir(), None) is None
+        result['free_bytes'] = shutil.disk_usage(target).free
+    except OSError:
+        return {**result, 'error': '无法读取目标文件夹或磁盘空间。'}
+    try:
+        with tempfile.TemporaryFile(dir=target):
+            pass
+        result['writable'] = True
+        if target.is_mount():
+            return {**result, 'error': '请在目标磁盘中选择一个空的子文件夹。'}
+        with tempfile.TemporaryFile(dir=target.parent):
+            pass
+    except OSError:
+        error = '目标文件夹不可写。' if result['writable'] is None else '无法在目标文件夹的上一级创建迁移副本。'
+        if result['writable'] is None:
+            result['writable'] = False
+        return {**result, 'error': error}
+    if not result['empty']:
+        return {**result, 'error': '请选择一个已存在的空文件夹作为记忆目录。'}
+    if result['free_bytes'] < required_bytes:
+        return {**result, 'error': '目标磁盘可用空间不足。'}
+    return result
+
+
+def preflight(root, requested, backup_folder):
+    target = _target_path(root, requested, backup_folder)
+    return _check_destination(target, _estimate_bytes(root))
+
+
 def schedule(root, requested, backup_folder):
     value = read()
     if value.get('active') not in (None, str(root)) or value.get('source') not in (None, str(root)):
@@ -89,21 +172,9 @@ def schedule(root, requested, backup_folder):
     if not requested.strip():
         value = {key: val for key, val in value.items() if key in ('active', 'previous')}
     else:
-        target = Path(requested.strip()).expanduser()
-        if not target.is_absolute():
-            raise ValueError('请输入记忆目录的完整路径。')
-        target = target.resolve()
-        backup = backup_folder.resolve()
-        if (target.is_relative_to(root) or root.is_relative_to(target) or
-                target.is_relative_to(backup) or backup.is_relative_to(target) or
-                preference_file().resolve().is_relative_to(target)):
-            raise ValueError('请选择独立于现有记忆和备份目录的文件夹。')
-        if paths.inside_program(target):
-            raise ValueError('记忆目录不能位于程序安装目录中。')
-        if not target.is_dir() or any(target.iterdir()):
-            raise ValueError('请选择一个已存在的空文件夹作为记忆目录。')
-        with tempfile.TemporaryFile(dir=target):
-            pass
+        target = _target_path(root, requested, backup_folder)
+        if error := _check_destination(target, _estimate_bytes(root)).get('error'):
+            raise ValueError(error)
         value.update(source=str(root), target=str(target), migration=uuid.uuid4().hex)
         value.pop('error', None)
     write(value)
@@ -112,18 +183,11 @@ def schedule(root, requested, backup_folder):
 
 def _copy(root, stage):
     # Keep the previous default backups discoverable without duplicating their ZIP files.
-    skip = {'archive.sqlite3', 'archive.sqlite3-wal', 'archive.sqlite3-shm',
-            'archive.sqlite3-journal', 'local-backups', 'updates', '.stellar-library.lock',
-            '.stellar-migration'}
-    def ignore(directory, names):
-        transient = {name for name in names if name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket')
-                     or (Path(directory)/name).is_socket()}
-        return transient | skip if Path(directory) == root else transient
-
-    shutil.copytree(root, stage, symlinks=True, ignore=ignore, dirs_exist_ok=True)
-    database = 'archive.sqlite3'
-    with closing(sqlite3.connect((root/database).as_uri()+'?mode=rw', uri=True)) as source:
-        with closing(sqlite3.connect(stage/database)) as destination:
+    shutil.copytree(root, stage, symlinks=True,
+                    ignore=lambda directory, names: _copy_ignore(root, Path(directory), names),
+                    dirs_exist_ok=True)
+    with closing(sqlite3.connect((root/_DATABASE).as_uri()+'?mode=rw', uri=True)) as source:
+        with closing(sqlite3.connect(stage/_DATABASE)) as destination:
             source.backup(destination)
             if destination.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                 raise ValueError('新目录中的记忆数据库未通过核验。')
@@ -144,8 +208,8 @@ def migrate(root, value):
     stage = None
     try:
         if not (marker.is_file() and marker.read_text() == value['migration']):
-            if not target.is_dir() or any(target.iterdir()):
-                raise ValueError('请选择一个已存在的空文件夹作为记忆目录。')
+            if error := _check_destination(target, _estimate_bytes(root)).get('error'):
+                raise ValueError(error)
             stage = Path(tempfile.mkdtemp(prefix='.stellar-move-', dir=target.parent))
             _copy(root, stage)
             (stage/marker.name).write_text(value['migration'])

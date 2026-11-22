@@ -16,10 +16,38 @@
  function sync(value,browser,expected=revision){if(expected!==revision)return;if(!dirty){fill('model',value);fill('capture',browser)}toggle()}
  function saved(value,browser){revision++;dirty=false;sync(value,browser)}
  function bind({api}){
+  const captureResult=$('#capture-connection-result');
   for(const prefix of ['model','capture']){
-   for(const part of ['mode','location','host','port',...(prefix==='capture'?['type']:[])])for(const event of ['input','change'])id(prefix,part).addEventListener(event,()=>{dirty=true;revision++;toggle();$('#model-connection-result').textContent=''});
+   for(const part of ['mode','location','host','port',...(prefix==='capture'?['type']:[])])for(const event of ['input','change'])id(prefix,part).addEventListener(event,()=>{dirty=true;revision++;toggle();$('#model-connection-result').textContent='';captureResult.textContent=''});
    id(prefix,'example').addEventListener('change',()=>{const sample=id(prefix,'example').value;if(!sample)return;const [type,port]=sample.includes(':')?sample.split(':'):['http',sample];dirty=true;revision++;id(prefix,'mode').value='custom';id(prefix,'host').value='127.0.0.1';id(prefix,'location').value='local';id(prefix,'port').value=port;if(prefix==='capture')id(prefix,'type').value=type;toggle();$('#model-connection-result').textContent='';id(prefix,'example').value=''});
   }
+  for(const prefix of ['model','capture'])id(prefix,'example').addEventListener('change',()=>{captureResult.textContent=''});
+  $('#capture-connection-test').onclick=async event=>{
+   const button=event.currentTarget, expected=revision;
+   button.disabled=true;
+   captureResult.textContent=t('正在测试采集浏览器连接…');
+   try{
+    const capture_proxy=collectBrowser();
+    const result=await api('/api/capture-connection/test',{capture_proxy,model_proxy:capture_proxy.mode==='model'?collect():undefined});
+    if(expected!==revision)return;
+    const route={direct:'直连',system:'由 Chrome 使用系统代理'}[result.route]||result.route;
+    const messages={
+     ok:'采集浏览器已访问 ChatGPT 首页。',
+     proxy_port:'无法连接代理，请核对代理类型和端口。',
+     proxy_tunnel:'代理未能建立到目标网站的连接。',
+     tls:'到 ChatGPT 的 TLS 握手或证书校验失败。',
+     blocked:'已连接到网站，网站拒绝了本次测试请求。',
+     http:'已连接到网站，网站返回错误。',
+     timeout:'等待 ChatGPT 首页响应超时。',
+     network:'采集浏览器未能访问 ChatGPT 首页。',
+     browser:'无法启动用于测试的 Chrome。',
+     no_chrome:'未找到 Google Chrome。'
+    };
+    const mode={system:'使用系统浏览器代理',model:'与上面的模型连接一致',direct:'不使用代理',custom:'使用另一个代理'}[result.mode];
+    captureResult.textContent=[t(mode),route&&t(route),t(messages[result.stage]),result.status&&'HTTP '+result.status,result.code].filter(Boolean).join(' · ');
+   }catch(error){if(expected===revision)captureResult.textContent=error.message}
+   finally{button.disabled=false}
+  };
   for(const prefix of ['model','capture'])id(prefix,'check').onclick=async()=>{const button=id(prefix,'check');button.disabled=true;$('#proxy-port-result').textContent=t('正在检查代理端口…');try{const browser=prefix==='capture',capture_proxy=browser?collectBrowser():undefined;const result=await api('/api/proxy/check',{browser,model_proxy:!browser||capture_proxy.mode==='model'?collect():undefined,capture_proxy});$('#proxy-port-result').textContent=t(result.message)}catch(error){$('#proxy-port-result').textContent=t(error.message)}finally{button.disabled=false}};
   $('#model-connection-test').onclick=async()=>{const button=$('#model-connection-test');button.disabled=true;let timer;const start=Date.now();$('#model-connection-result').textContent=t('正在检查代理端口…');try{const body={backend:$('#backend').value,model_proxy:collect()};if(body.backend==='api')body.model_api=StellarModelAPI.collect();await api('/api/proxy/check',{model_proxy:body.model_proxy,backend:body.backend,base_url:body.model_api?.base_url});$('#model-connection-result').textContent=t('代理检查完成，正在等待模型响应…');timer=setInterval(()=>{$('#model-connection-result').textContent=t('正在等待模型响应，已用时 ')+Math.floor((Date.now()-start)/1000)+t(' 秒')},1000);await api('/api/model-connection/test',body);$('#model-connection-result').textContent=t('模型连接测试成功')+' · '+Math.round((Date.now()-start)/1000)+t(' 秒')}catch(error){$('#model-connection-result').textContent=t(error.message)}finally{clearInterval(timer);button.disabled=false}};
 

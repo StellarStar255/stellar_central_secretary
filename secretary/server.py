@@ -1384,6 +1384,9 @@ def handler(service):
                     from .network import check_proxy_port,is_loopback_url
                     if body.get('backend')=='api' and not body.get('browser') and is_loopback_url(body.get('base_url','')):return self.send(200,{'ok':True,'proxied':False,'message':'本机模型直接连接，无需代理。'})
                     return self.send(200,check_proxy_port(body.get('capture_proxy') if body.get('browser') else body.get('model_proxy'),browser=body.get('browser') is True,model=body.get('model_proxy')))
+                if path=='/api/capture-connection/test':
+                    from .browser_reader import test_chatgpt_connection
+                    return self.send(200,test_chatgpt_connection(body.get('capture_proxy'),body.get('model_proxy')))
                 pdf_summary=re.fullmatch(r'/api/items/([a-f0-9]{32})/summarize-pdf-pages',path)
                 if pdf_summary:
                     item=service.archive.get(pdf_summary[1]);new_only=body.get('new_only') is True
@@ -1426,6 +1429,8 @@ def handler(service):
                     from .library import dashboard
                     with service.lock:active=set(service.busy)|set(service.captures)
                     result=dashboard(service.archive,body.get('ids',[]),active);result['items']=[service.with_progress(item) for item in result['items']];return self.send(200,result)
+                if path=='/api/library-location/check':
+                    return self.send(200,library_location.preflight(service.archive.root,body.get('folder'),service.backups.folder))
                 if path=='/api/library-location':
                     with service.location_lock:
                         if updater.status().get('phase') in ('downloading','verifying','installing'):
@@ -1448,7 +1453,7 @@ def handler(service):
                                 raise ValueError('请选择独立于现有记忆和备份目录的文件夹。')
                         return self.send(200,service.backups.configure(body))
                 if path=='/api/backups/verify':return self.send(200,service.backups.verify(body.get('id')))
-                if path=='/api/backups/create':return self.send(200,service.backups.create())
+                if path=='/api/backups/create':return self.send(200,service.backups.create(expected_folder=body.get('folder')))
                 if path=='/api/backups/restore':
                     if body.get('confirmed') is not True:raise ValueError('请先确认恢复此备份')
                     with service.lock:

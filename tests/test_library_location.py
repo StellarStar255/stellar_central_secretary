@@ -62,3 +62,35 @@ class LibraryLocationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             library_location.schedule(self.root, str(self.backup), self.backups.default)
         self.assertFalse(self.preference.exists())
+
+    def test_preflight_checks_size_space_and_destination_without_scheduling(self):
+        self.archive.add('Memory', 'Original bytes', filename='original.txt', data=b'original')
+        result = library_location.preflight(self.root, str(self.target), self.backups.folder)
+        self.assertGreater(result['estimated_bytes'], len(b'original'))
+        self.assertGreater(result['free_bytes'], 0)
+        self.assertEqual((result['empty'], result['writable']), (True, True))
+        self.assertFalse(list(self.target.iterdir()))
+        self.assertFalse(self.preference.exists())
+
+        (self.root/'updates').mkdir()
+        (self.root/'updates'/'installer').write_bytes(b'x'*1024)
+        (self.target/'existing').touch()
+        nonempty = library_location.preflight(self.root, str(self.target), self.backups.folder)
+        self.assertEqual(nonempty['estimated_bytes'], result['estimated_bytes'])
+        self.assertFalse(nonempty['empty'])
+        self.assertTrue(nonempty['error'])
+        (self.target/'existing').unlink()
+
+        with patch.object(library_location.tempfile, 'TemporaryFile', side_effect=PermissionError):
+            unwritable = library_location.preflight(self.root, str(self.target), self.backups.folder)
+        self.assertFalse(unwritable['writable'])
+        self.assertTrue(unwritable['error'])
+
+        disk = type('Disk', (), {'free': 0})()
+        with patch.object(library_location.shutil, 'disk_usage', return_value=disk):
+            full = library_location.preflight(self.root, str(self.target), self.backups.folder)
+            self.assertEqual(full['free_bytes'], 0)
+            with self.assertRaisesRegex(ValueError, '空间不足'):
+                library_location.schedule(self.root, str(self.target), self.backups.folder)
+        self.assertTrue(full['error'])
+        self.assertFalse(self.preference.exists())

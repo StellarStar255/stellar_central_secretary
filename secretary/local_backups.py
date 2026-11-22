@@ -75,8 +75,10 @@ class Backups:
             except OSError:continue  # An open Windows download may temporarily hold an old backup.
         used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder)
         self._save_state(used_bytes=used,warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
-    def create(self,reason='manual'):
+    def create(self,reason='manual',*,expected_folder=None):
         with self.lock:
+            if expected_folder is not None and expected_folder!=str(self.folder):
+                raise ValueError('备份目录已更改，请刷新设置后重试。')
             self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
             key=uuid.uuid4().hex;target=self.folder/(key+'.zip');temporary=target.with_suffix('.part')
             try:
@@ -111,7 +113,7 @@ class Backups:
                     return value
                 self._prune(key)
                 self._save_state(state='ready',last_success=value['created'],last_error='')
-                self.error='';return value
+                self.error='';return {**value,'folder':str(self.folder)}
             except Exception as error:
                 if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
                 self.error=str(error);self._save_state(state='error',last_error=self.error);raise
