@@ -188,7 +188,7 @@ with tempfile.TemporaryDirectory() as folder:
     options=history.get_by_role('option')
     expect(options).to_have_count(1)
     expect(options.first).to_have_attribute('title',past[-1])
-    assert options.first.evaluate('el=>el.scrollWidth>el.clientWidth')
+    assert options.first.locator('.search-history-label').evaluate('el=>el.scrollWidth>el.clientWidth')
     options.first.click()
     expect(search).to_have_value(past[-1])
     page.evaluate("""() => localStorage.setItem('stellar.library-search-history',
@@ -215,13 +215,32 @@ with tempfile.TemporaryDirectory() as folder:
       input.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'日报'}));
     }""")
     expect(history.get_by_role('option')).to_have_count(1)
-    expect(history.get_by_role('option')).to_have_text('日报例会')
+    expect(history.get_by_role('option')).to_have_accessible_name('日报例会')
     search.press('ArrowDown')
     search.press('Enter')
     expect(search).to_have_value('日报例会')
     expect(history).to_be_hidden()
+    page.locator('#library-search-toggle').click()
+    monthly=history.get_by_role('option',name='月度总结',exact=True)
+    expect(monthly.locator('.search-history-remove')).to_be_hidden()
+    monthly.hover()
+    monthly.locator('.search-history-remove').click()
+    expect(monthly).to_have_count(0)
+    expect(search).to_have_value('日报例会')
+    expect(history.get_by_role('option')).to_have_count(1)
+    page.reload()
+    page.locator('#library-open').click()
+    expect(history.get_by_role('option')).to_have_count(1)
+    search.press('ArrowDown')
+    expect(history.get_by_role('option').locator('.search-history-remove')).to_be_visible()
+    search.press('Shift+Delete')
+    expect(search).to_have_value('')
+    expect(search).to_be_focused()
+    expect(history).to_be_hidden()
+    expect(page.locator('#library-search-toggle')).to_be_hidden()
+    assert page.evaluate("JSON.parse(localStorage.getItem('stellar.library-search-history'))")==[]
     assert not errors,errors
-    print('PASS: recent searches, IME key handling, filtering after composition and keyboard selection')
+    print('PASS: recent searches, IME input, keyboard selection and persistent single-entry deletion')
    except Exception:
     print({'page_errors':errors,'failed_requests':request_failures,'toast':page.locator('#toast').inner_text(),
            'preview_status':page.locator('#preview-status').text_content(),'results':page.locator('#result-count').inner_text()},

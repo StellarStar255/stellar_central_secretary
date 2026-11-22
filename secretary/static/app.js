@@ -431,7 +431,7 @@ function bindLibrarySearchHistory(){
  const input=$('#search'),field=$('#library-search-field'),menu=$('#library-search-history'),
        options=$('#library-search-options'),toggle=$('#library-search-toggle'),storage='stellar.library-search-history';
  const normalize=value=>value.trim().replace(/\s+/g,' ').toLowerCase();
- let recent=[],active=-1,draft=false,submit=false,lastResult='';
+ let recent=[],active=-1,draft=false,submit=false,lastResult='',showingAll=false;
  try{
   const saved=JSON.parse(localStorage.getItem(storage)||'[]');
   if(Array.isArray(saved))recent=saved.filter(value=>typeof value==='string'&&value.trim()&&value.length<=300).slice(0,20);
@@ -461,7 +461,23 @@ function bindLibrarySearchHistory(){
   draft=submit=true;
   searchNow();
  }
+ function selectOption(index){
+  active=index;
+  for(const [i,option] of [...options.children].entries())option.setAttribute('aria-selected',String(i===active));
+  const selected=options.children[active];
+  input.setAttribute('aria-activedescendant',selected.id);
+  selected.scrollIntoView({block:'nearest'});
+ }
+ function remove(value){
+  const key=normalize(value),previous=active;
+  recent=recent.filter(entry=>normalize(entry)!==key);
+  if(normalize(input.value)===key)draft=submit=false;
+  persist();
+  show(showingAll);
+  if(previous>=0&&options.children.length)selectOption(Math.min(previous,options.children.length-1));
+ }
  function show(all=false){
+  showingAll=all;
   const query=normalize(input.value);
   const matches=recent.filter(value=>{
    const term=normalize(value);
@@ -473,10 +489,21 @@ function bindLibrarySearchHistory(){
    option.id='library-search-option-'+index;
    option.setAttribute('role','option');
    option.setAttribute('aria-selected','false');
-   option.textContent=value;
+   option.dataset.value=value;
+   const label=document.createElement('span'),removeButton=document.createElement('button');
+   label.className='search-history-label';
+   label.textContent=value;
+   removeButton.className='search-history-remove';
+   removeButton.type='button';
+   removeButton.tabIndex=-1;
+   removeButton.setAttribute('aria-hidden','true');
+   removeButton.title=t('删除此条搜索记录（Shift + Delete）');
+   removeButton.textContent='×';
+   removeButton.onclick=event=>{event.stopPropagation();remove(value)};
    option.title=value;
    option.addEventListener('pointerdown',event=>event.preventDefault());
    option.onclick=()=>choose(value);
+   option.append(label,removeButton);
    options.append(option);
   }
   expanded(matches.length>0);
@@ -499,7 +526,8 @@ function bindLibrarySearchHistory(){
  input.addEventListener('keydown',event=>{
   if(event.isComposing||event.keyCode===229){event.stopPropagation();return}
   if(event.metaKey||event.ctrlKey||event.altKey)return;
-  if(event.key==='Enter'&&active>=0&&!menu.hidden)choose(options.children[active].textContent);
+  if(event.shiftKey&&['Delete','Backspace'].includes(event.key)&&active>=0&&!menu.hidden)remove(options.children[active].dataset.value);
+  else if(event.key==='Enter'&&active>=0&&!menu.hidden)choose(options.children[active].dataset.value);
   else if(event.key==='Enter'){
    expanded(false);
    if(!draft||input.value.trim()===lastResult){commit();return}
@@ -507,11 +535,7 @@ function bindLibrarySearchHistory(){
   }else if(event.key==='Escape'&&!menu.hidden)expanded(false);
   else if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!menu.hidden){
    const size=options.children.length,step=event.key==='ArrowDown'?1:-1;
-   active=active<0?(step>0?0:size-1):(active+step+size)%size;
-   for(const [index,option] of [...options.children].entries())option.setAttribute('aria-selected',String(index===active));
-   const selected=options.children[active];
-   input.setAttribute('aria-activedescendant',selected.id);
-   selected.scrollIntoView({block:'nearest'});
+   selectOption(active<0?(step>0?0:size-1):(active+step+size)%size);
   }else return;
   event.preventDefault();event.stopPropagation();
  });

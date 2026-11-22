@@ -1473,5 +1473,6 @@
   "目标记忆目录不可用，请检查硬盘连接后重试。": "The destination library folder is unavailable. Check the drive connection and try again.",
   "近期搜索": "Recent searches",
   "显示近期搜索": "Show recent searches",
-  "清空历史": "Clear history"
+  "清空历史": "Clear history",
+  "删除此条搜索记录（Shift + Delete）": "Remove this search (Shift + Delete)"
 }

@@ -71,7 +71,12 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .search-history-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;color:var(--muted);font-size:.85rem}
 #library-search-clear{padding:3px 8px}
 #library-search-options{max-height:40vh;overflow:auto}
-#library-search-options [role=option]{border-radius:6px;padding:7px 10px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#library-search-options [role=option]{display:flex;align-items:center;gap:8px;border-radius:6px;padding:3px 6px 3px 10px;cursor:pointer}
+.search-history-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-history-remove{visibility:hidden;flex:none;width:28px;height:28px;padding:0;border-radius:5px;background:transparent;color:var(--muted);font-size:1.2rem}
+#library-search-options [role=option]:hover .search-history-remove,#library-search-options [aria-selected=true] .search-history-remove{visibility:visible}
+.search-history-remove:hover{background:var(--bg);color:var(--text)}
+@media(hover:none){.search-history-remove{visibility:visible}}
 #library-search-options [role=option]:hover,#library-search-options [aria-selected=true]{background:var(--hover)}
 @media(max-width:700px){.library-search-field{flex-basis:100%}}
 .library-directory{align-items:center;justify-content:space-between;flex-wrap:wrap}
