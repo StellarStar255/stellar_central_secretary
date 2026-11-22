@@ -45,9 +45,31 @@ with tempfile.TemporaryDirectory() as root:
    page.locator('#message-input').fill('附件呢');page.locator('#send-button').click()
    expect(page.locator('#toast')).to_have_text('请先归档附件，再在知识库对话中提问。')
    expect(page.locator('#message-input')).to_have_value('附件呢');assert len(service.archive.export())==1
+   page.locator('#attachments [data-remove]').click()
+   conversation_url='https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc'
+   model_calls=len(calls)
+   with patch('secretary.server.fetch_page',return_value=('','')) as fetch,patch.object(service,'start_capture') as capture:
+    expect(page.locator('#input-mode')).to_have_value('library')
+    page.locator('#message-input').fill(conversation_url)
+    page.locator('#send-button').click()
+    expect(page.locator('.message.assistant .archive-card').last).to_be_visible()
+    archived=[record for record in service.archive.export() if record['url']==conversation_url]
+    assert len(archived)==1 and archived[0]['kind']=='link'
+    fetch.assert_called_once_with(conversation_url)
+    capture.assert_called_once_with(archived[0]['id'])
+    assert len(calls)==model_calls
+    expect(page.locator('#input-mode')).to_have_value('library')
+   page.locator('#archive-only').check()
+   second_url='https://example.com/reference'
+   page.locator('#message-input').fill(conversation_url+'\n'+second_url)
+   page.locator('#send-button').click()
+   expect(page.locator('.message.assistant .archive-card')).to_have_count(2)
+   group=next(record for record in service.archive.export() if record['filename']=='materials.stellar.zip')
+   assert [link['url'] for link in service.archive.get(group['id'])['group_links']]==[conversation_url,second_url]
+   assert len(calls)==model_calls
    page.locator('#settings-open').click();page.locator('#ui-language').select_option('en')
    expect(page.locator('#input-mode option[value="library"]')).to_have_text('Library chat')
    assert not errors,errors
    browser.close()
-   print('PASS: real browser + HTTP server, library entry, source answer, follow-up history, clickable source, new-chat isolation, attachment preservation and English UI; model responses mocked')
+   print('PASS: real browser + HTTP server, library question and follow-up, source evidence, attachment preservation, URL-only archive and capture routing, and English UI')
  finally:server.shutdown();server.server_close();service.close()

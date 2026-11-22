@@ -157,12 +157,25 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
  assert.equal(libraryCall.body.history[0].question,'本地部署方案');assert.equal(libraryCall.body.history[0].answer,'这是带来源的答案。');
  assert.deepEqual(libraryCall.body.history[0].source_ids,['a0']);
  input.value='https://example.com 这份资料说了什么';await form.onsubmit({preventDefault(){}});
- assert.equal(archive.length,beforeLibraryArchive,'Library questions and URLs must not be archived');
+ assert.equal(archive.length,beforeLibraryArchive,'A library question containing a URL must not implicitly archive the link');
+ assert.equal(calls.filter(call=>call.path==='/api/ask').at(-1).body.question,'https://example.com 这份资料说了什么');
  elements.get('#new-chat').onclick();input.value='继续';await form.onsubmit({preventDefault(){}});
  assert.deepEqual(calls.filter(c=>c.path==='/api/ask').at(-1).body.history,[],'New chats must not reuse previous context');
  elements.get('#archive-only').checked=true;input.value='只保存这段文字';await form.onsubmit({preventDefault(){}});
  assert.equal(archive.length,beforeLibraryArchive+1);elements.get('#archive-only').checked=false;
- console.log('PASS: library mode, declarative follow-ups, bounded question/answer context, source references, URLs without ingestion, new-chat isolation, archive-only override');
+ const bareLink='https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc?view=latest';
+ const asksBeforeLinks=countAsk();
+ for(const archiveOnly of [false,true]){
+  elements.get('#archive-only').checked=archiveOnly;
+  const before=calls.length;
+  input.value=bareLink+'\n'+bareLink;await form.onsubmit({preventDefault(){}});
+  const ingests=calls.slice(before).filter(call=>call.path==='/api/ingest');
+  assert.deepEqual(ingests.map(call=>call.body),[{url:bareLink,context:'',archive_only:archiveOnly}]);
+  assert.equal(elements.get('#input-mode').value,'library');
+ }
+ assert.equal(countAsk(),asksBeforeLinks);
+ elements.get('#archive-only').checked=false;
+ console.log('PASS: library follow-ups and sources, linked questions, bare URL archiving, new-chat isolation, archive-only override');
  elements.get('#new-chat').onclick();elements.get('#input-mode').value='auto';
  askReply={timings:{total_seconds:12.34,queue_seconds:0,planning_seconds:0,retrieval_seconds:0.01,image_seconds:0.1,answer_seconds:12.2,fast_followup:true},answer:'**已核对课程表**，仅覆盖旧周，不能推断今天。[2]',sources:[{number:1,item_id:'a0',title:'罗马皇位继承'},{number:2,item_id:'a1',title:'2026年第9周课程表',text:'周四上午 <课表原文>'},{number:3,item_id:'a2',title:'消费贷款'}],answer_evidence:{kind:'library',passage_count:3,history_turns:1,conditions:['只按这份课表判断'],pdf_pages:[{item_id:'a1',name:'schedule.pdf',pages:'1–2, 5'}]}};
  const beforeScheduleArchive=archive.length;

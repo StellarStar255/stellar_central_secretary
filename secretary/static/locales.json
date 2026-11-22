@@ -1197,7 +1197,7 @@
   "知识库对话": "Library chat",
   "⌕ 开始知识库对话": "⌕ Chat with your library",
   "直接提问，自动搜索知识库；可以继续追问…": "Ask a question to search your library, then ask follow-up questions…",
-  "知识库对话：结合最近对话检索已存资料，回答附来源。只添加附件即可直接归档。": "Library chat uses recent conversation context and cites saved sources. Send attachments on their own to archive them.",
+  "知识库对话：结合最近对话检索已存资料，回答附来源。只发送链接或附件会直接归档。": "Library chat uses recent conversation context and cites saved sources. Send links or attachments on their own to archive them.",
   "请先归档附件，再在知识库对话中提问。": "Archive attachments first, then ask about them in Library chat.",
   "正在理解问题、检索知识库，整理答案…": "Understanding your question, searching the library and preparing an answer…",
   "知识库对话上下文格式无效": "Invalid library conversation context",

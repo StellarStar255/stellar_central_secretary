@@ -604,7 +604,7 @@ function archiveReply(result){const i=result.item;
 function updateInputMode(){
  const mode=$('#input-mode').value,archive=$('#archive-only').checked===true,note=mode==='note',library=mode==='library',dialogue=mode==='auto'&&hasKnowledgeContext();
  $('#message-input').placeholder=t(archive||note?'归档模式：输入要保存的文字或添加附件…':library||dialogue?'继续提问、补充条件或纠正上一条回答…':'发送消息、粘贴图片或链接，或拖入文件…');
- $('#composer-hint').textContent=t(archive?'仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。':note?'归档模式：当前文字保存为笔记，不进行问答。':mode==='group'?'组合归档：本次文字、链接和附件保存为一份资料。':library?'知识库对话：结合最近对话检索已存资料，回答附来源。只添加附件即可直接归档。':dialogue?'对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。':'自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。');
+ $('#composer-hint').textContent=t(archive?'仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。':note?'归档模式：当前文字保存为笔记，不进行问答。':mode==='group'?'组合归档：本次文字、链接和附件保存为一份资料。':library?'知识库对话：结合最近对话检索已存资料，回答附来源。只发送链接或附件会直接归档。':dialogue?'对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。':'自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。');
  $('#composer-hint').classList.toggle('archive-mode-hint',archive||note);
  $('#resume-conversation').hidden=!(archive||note);
  $('#send-button').title=t(archive||note?'仅保存当前消息，不进行问答':'发送 (Enter)');
@@ -803,8 +803,12 @@ function bindArchiveRecovery(chat){
   finally{sending=false;message.restoringDuplicate=false;renderChat(false);updateSend()}
  });
 }
+const inputLinkPattern=/https?:\/\/[^\s<>"，。！？；）)]+/gi;
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
- if(mode==='library'&&hasFiles&&!text.trim())return 'auto';
+ if(mode==='library'){
+  if(hasFiles&&!text.trim())return 'auto';
+  if(!hasFiles&&text.trim()&&!text.replace(inputLinkPattern,'').trim())return 'auto';
+ }
  // An explicit save request takes precedence over an ongoing conversation.
  if(['auto','library','ask'].includes(mode)&&archiveInstruction(text))return 'note';
  if(mode==='group'&&!hasFiles&&!/https?:\/\//i.test(text))return 'note';
@@ -836,26 +840,25 @@ $('#composer-form').onsubmit=async event=>{
    const data=await askWithProgress(chat,response,{question:text,history:knowledgeHistory(chat,userMessage),context:rememberedContext(chat,userMessage)});
    updateMessage(chat,response,{text:data.answer,sources:data.sources,retrievalNotice:data.retrieval_notice||'',answerEvidence:data.answer_evidence,localReply:data.local_reply===true,catalog:data.catalog||null,timings:data.timings||null,pending:false,error:false});return;
   }
-  const groupLinks=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
-  const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||groupLinks.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
+  const urls=mode==='note'?[]:[...new Set(text.match(inputLinkPattern)||[])];
+  const remaining=urls.length?text.replace(inputLinkPattern,'').trim():text;
+  const grouped=files.some(file=>file.size>8*1024*1024)||mode==='group'||urls.length>1||files.length>1||files.some(isImageFile)||(files.length&&(text||mode==='ask'));
   if(grouped){
-   const groupQuestion=groupLinks.reduce((value,url)=>value.replace(url,''),text).trim();
+   const groupQuestion=remaining;
    const asking=!archiveOnly&&(mode==='ask'||mode==='auto'&&!!groupQuestion&&/[?？]|总结|分析|比较|查找|哪些|什么|如何|怎么|为何|是否|能否|解释|帮我|看看|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why|explain|describe|please)\b/i.test(groupQuestion));
    updateMessage(chat,response,{text:t('正在保存这组资料…')});
    const attachments=[];for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{$('#composer-status').textContent=t('正在上传：')+name+' '+percent+'%'}));
-   const result=await api('/api/ingest',{text,attachments,links:groupLinks,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup(attachments);results.push(result);response.items.push(result.item.id);
+   const result=await api('/api/ingest',{text,attachments,links:urls,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup(attachments);results.push(result);response.items.push(result.item.id);
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
-   if(asking){if(groupLinks.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
+   if(asking){if(urls.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
    updateMessage(chat,response,{text:answer,pending:false,error:false});return;
   }
   for(const file of files){updateMessage(chat,response,{text:t('正在归档「')+file.name+'」…'});try{const result=await api('/api/ingest',{filename:file.name,data:await readFile(file),archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){if(!text&&files.length===1)throw e;errors.push(file.name+'：'+e.message)}}
-  const urls=mode==='note'?[]:[...new Set(text.match(/https?:\/\/[^\s<>"，。！？；）)]+/g)||[])];
-  for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const context=urls.reduce((value,link)=>value.replace(link,''),text).trim();const result=await api('/api/ingest',{url,context,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
+  for(const url of urls){updateMessage(chat,response,{text:t('正在保存链接…')});try{const result=await api('/api/ingest',{url,context:remaining,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}catch(e){errors.push(url+'：'+e.message)}}
   if(mode==='note'&&text){const note=archiveNote(text,chat,userMessage);const result=await api('/api/ingest',{...note,archive_only:archiveOnly});results.push(result);response.items.push(result.item.id)}
   await refresh();
-  const remaining=urls.reduce((value,url)=>value.replace(url,''),text).trim();
   // Commands and declarative text are notes; explicit questions use retrieval.
   const shouldAsk=!archiveOnly&&mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
