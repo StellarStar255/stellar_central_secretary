@@ -51,6 +51,10 @@ For compatible APIs, enable **Stream answers** in API settings to show provision
 
 A small in-memory cache can reuse recent source-backed answers. It expires within five minutes and invalidates on question/context, minute/date/timezone, archived-record, original/added-file metadata, model configuration or semantic-index changes. It still checks company-data authorization. **Check again** bypasses the cache and rereads the material. Restarting clears the cache; it is not exported or shared across devices.
 
+## Memory MCP
+
+Connect a local MCP client to search and read your library. See [Memory MCP setup](docs/memory-mcp.md).
+
 ## Local semantic search
 
 Enable **Models & settings → Local semantic search** to combine keyword retrieval with locally generated embeddings. Answers continue to use the selected CLI/API model and existing company-data confirmation.

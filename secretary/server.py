@@ -89,9 +89,10 @@ def service_pdf_material(archive,item,source,scope):
 
 
 class Service:
-    def __init__(self, root, first_run_tutorial=False):
+    def __init__(self, root, first_run_tutorial=False, memory_mcp=False):
         new_library = first_run_tutorial and not (Path(root)/'archive.sqlite3').exists()
         self.archive = Archive(root); self.pool = ThreadPoolExecutor(max_workers=2)
+        self.memory_mcp = memory_mcp
         self.tutorial_pending = False
         if first_run_tutorial:
             with self.archive.db() as db:
@@ -1398,6 +1399,13 @@ def handler(service):
                         return self.send(200,import_backup(service.archive,source))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                if path=='/api/memory':
+                    if not service.memory_mcp:
+                        return self.send(403,{'error':'Start Stellar Secretary with --memory-mcp to enable access.'})
+                    from .memory_access import read_memory
+                    with service.archive.lock:
+                        result=read_memory(service.archive,body)
+                    return self.send(200,result)
                 upload_status=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/status',path)
                 if upload_status:return self.send(200,service.uploads.status(upload_status[1],body.get('lease')))
                 if path=='/api/uploads/start':return self.send(200,service.uploads.start(body.get('name'),body.get('size'),body.get('fingerprint'),body.get('owner'),body.get('fresh') is True))
@@ -1693,6 +1701,7 @@ def main(desktop=False):
     parser = argparse.ArgumentParser(description='Stellar Secretary · 知识秘书')
     parser.add_argument('--port', type=int, default=8768)
     parser.add_argument('--data-dir')
+    parser.add_argument('--memory-mcp', action='store_true')
     parser.add_argument('--no-browser', action='store_true'); args = parser.parse_args()
     from contextlib import ExitStack
     with ExitStack() as stack:
@@ -1712,7 +1721,7 @@ def main(desktop=False):
         if paths.FROZEN:
             log = open(destination/'app.log','a',encoding='utf-8',buffering=1)
             sys.stdout = sys.stderr = log
-        service = Service(destination, first_run_tutorial=paths.FROZEN)
+        service = Service(destination, first_run_tutorial=paths.FROZEN, memory_mcp=args.memory_mcp)
         service.restart_supported = True
         stack.callback(service.close)
         server.RequestHandlerClass = handler(service)
@@ -1725,6 +1734,8 @@ def main(desktop=False):
                 command.append('--desktop')
             if args.no_browser:
                 command.append('--no-browser')
+            if args.memory_mcp:
+                command.append('--memory-mcp')
         else:
             command = [sys.executable, *sys.orig_argv[1:]]
         spawn(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

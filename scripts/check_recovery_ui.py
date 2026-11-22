@@ -6,11 +6,14 @@ from secretary.server import Service,handler
 from secretary.local_http import LocalHTTPServer
 from playwright.sync_api import sync_playwright,expect
 
+class RecoveryTestServer(LocalHTTPServer):
+ request_queue_size=32
+
 with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False);service.archive.set_language('en')
  clip=(Path(__file__).resolve().parent.parent/'tests/fixtures/video.mp4').read_bytes()
  item=service.ingest({'text':'Recovery fixture','attachments':[{'name':'clip.mp4','data':base64.b64encode(clip).decode()}],'archive_only':True})['item'];ident=item['id']
- server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=RecoveryTestServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None))
@@ -38,7 +41,10 @@ with tempfile.TemporaryDirectory() as root:
     assert service.item_detail(uploaded['id'])['attachments'][0]['size']==55*1024*1024
     page.wait_for_function('()=>!sending',timeout=30000)
     assert not list(service.uploads.folder.iterdir()),'Completed upload staging was not removed'
-    page.locator('#settings-open').click();page.locator('#backup-create').click();expect(page.locator('#backup-entries').get_by_role('button',name='Restore this backup',exact=True)).to_have_count(1,timeout=15000)
+    page.locator('#settings-open').click();page.locator('#backup-create').click()
+    expect(page.locator('#backup-create-result')).to_contain_text('Backup saved and verified',timeout=15000)
+    page.locator('#backup-list').click()
+    expect(page.locator('#backup-entries').get_by_role('button',name='Restore this backup',exact=True)).to_have_count(1,timeout=15000)
     service.archive.update(ident,title='Later change')
     page.once('dialog',lambda dialog:dialog.accept());
     with page.expect_response(lambda response:response.url.endswith('/api/backups/restore'),timeout=30000) as restoration:page.locator('#backup-entries').get_by_role('button',name='Restore this backup',exact=True).click()

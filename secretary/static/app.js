@@ -1237,10 +1237,72 @@ globalThis.StellarTasks?.bind({api,toast,openItem:id=>detail(id,true)});
 globalThis.StellarLibraryPreview?.bind({api,toast,openDetails:id=>detail(id),openOriginal:openLibraryOriginal,link:originalLink,describe:libraryPresentation,onSaved:refresh});
 
 async function localBackupList(){
- const result=await api('/api/backups');globalThis.StellarBackups?.sync(result.status);const target=$('#backup-entries');target.innerHTML='';
- for(const entry of result.items){const row=document.createElement('p');row.title=entry.folder||'';row.textContent=new Date(entry.created).toLocaleString()+' · '+t(({daily:'每日备份',upgrade:'升级前备份',manual:'手动备份','before-restore':'恢复前备份'})[entry.reason]||entry.reason)+' · '+(entry.size/1048576).toFixed(1)+' MB ';const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent=t('恢复此备份');button.onclick=async()=>{if(!confirm(t('恢复会将资料、速记和对话恢复到此备份的时间点。恢复前会自动保存当前资料。继续？')))return;button.disabled=true;try{if(!await StellarDrafts.flush())return;await api('/api/backups/restore',{id:entry.id,confirmed:true});await StellarDrafts.clearAll();location.reload()}catch(error){$('#backup-error').textContent=error.message}finally{button.disabled=false}};button.disabled=['failed','inconsistent'].includes(entry.verification?.state);const verified=document.createElement('small');verified.textContent=' · '+t(entry.verification?.state==='verified'?(entry.verification.mode==='legacy'?'完整性已验证（旧版无逐文件清单）':'数据库与原件已验证'):entry.verification?.state==='failed'?'备份验证失败':entry.verification?.state==='inconsistent'?'恢复前现场副本：原件与索引不一致':'尚未验证')+(entry.verification?.checked_at?' · '+new Date(entry.verification.checked_at).toLocaleString():'');const check=document.createElement('button');check.type='button';check.className='secondary';check.dataset.backupVerify=entry.id;check.textContent=t('验证此备份');check.onclick=async()=>{check.disabled=true;try{await api('/api/backups/verify',{id:entry.id});toast(t('备份验证通过，当前资料未修改'))}catch(error){toast(error.message)}finally{await localBackupList()}};row.append(verified,button,check);target.append(row)}
+ const dialog=$('#backup-history-dialog'),target=$('#backup-entries'),status=$('#backup-history-status');
+ const result=await api('/api/backups');
+ globalThis.StellarBackups?.sync(result.status);
+ if(!dialog.open)return;
+ const format=value=>new Date(value).toLocaleString(StellarI18n.locale,{dateStyle:'medium',timeStyle:'short'});
+ const reasonNames={daily:'每日备份',upgrade:'升级前备份',manual:'手动备份','before-restore':'恢复前备份'};
+ const verificationNames={verified:'数据库与原件已验证',failed:'备份验证失败',inconsistent:'恢复前现场副本：原件与索引不一致'};
+ const verifyFocus=document.activeElement?.dataset?.backupVerify;
+ const rows=result.items.map(entry=>{
+  const row=document.createElement('li'),details=document.createElement('div'),title=document.createElement('strong'),
+        metadata=document.createElement('small'),actions=document.createElement('div'),
+        restore=document.createElement('button'),verify=document.createElement('button');
+  const verification=entry.verification,verificationState=verification?.state;
+  const canRestore=!['failed','inconsistent'].includes(verificationState);
+  row.className='backup-history-row';
+  row.title=entry.folder||'';
+  title.textContent=format(entry.created)+' · '+t(reasonNames[entry.reason]||entry.reason);
+  const verificationLabel=verificationState==='verified'&&verification.mode==='legacy'
+    ?'完整性已验证（旧版无逐文件清单）':verificationNames[verificationState]||'尚未验证';
+  metadata.textContent=[(entry.size/1048576).toFixed(1)+' MB',t(verificationLabel),
+    entry.folder&&entry.folder!==result.status?.folder?t('旧备份目录'):''].filter(Boolean).join(' · ');
+  if(verification?.checked_at)metadata.title=t('最近验证：')+format(verification.checked_at);
+  details.append(title,metadata);
+  actions.className='backup-history-actions';
+  for(const button of [restore,verify]){button.type='button';button.className='secondary'}
+  restore.textContent=t('恢复此备份');
+  restore.disabled=!canRestore;
+  restore.onclick=async()=>{
+   if(!confirm(t('恢复会将资料、速记和对话恢复到此备份的时间点。恢复前会自动保存当前资料。继续？')))return;
+   restore.disabled=verify.disabled=true;
+   try{
+    if(!await StellarDrafts.flush())return;
+    await api('/api/backups/restore',{id:entry.id,confirmed:true});
+    await StellarDrafts.clearAll();
+    location.reload();
+   }catch(error){toast(error.message)}
+   finally{restore.disabled=!canRestore;verify.disabled=false}
+  };
+  verify.dataset.backupVerify=entry.id;
+  verify.textContent=t('验证此备份');
+  verify.onclick=async()=>{
+   restore.disabled=verify.disabled=true;
+   try{
+    await api('/api/backups/verify',{id:entry.id});
+    toast(t('备份验证通过，当前资料未修改'));
+   }catch(error){toast(error.message)}
+   finally{
+    restore.disabled=!canRestore;verify.disabled=false;
+    try{await localBackupList()}catch(error){toast(error.message)}
+   }
+  };
+  actions.append(restore,verify);
+  row.append(details,actions);
+  return row;
+ });
+ target.replaceChildren(...rows);
+ status.textContent=rows.length?StellarI18n.count(rows.length,'份备份','backup','backups'):t('暂无本机备份。');
+ if(verifyFocus)target.querySelector('[data-backup-verify="'+verifyFocus+'"]')?.focus({preventScroll:true});
 }
-$('#backup-list').onclick=()=>busy($('#backup-list'),localBackupList);
+$('#backup-list').onclick=async()=>{
+ const dialog=$('#backup-history-dialog'),status=$('#backup-history-status');
+ $('#backup-entries').replaceChildren();
+ status.textContent=t('正在读取备份记录…');
+ dialog.showModal();
+ try{await localBackupList()}catch(error){status.textContent=error.message}
+};
 
 if(globalThis.StellarUploads)StellarUploads.bind(api);
 

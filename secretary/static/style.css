@@ -70,6 +70,16 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .library-result-summary #result-count{margin:0}
 #library-result-filters{font-size:.85rem}
 #library-clear-result-filters{padding:3px 8px}
+#backup-history-dialog{width:min(720px,94vw);max-height:80vh;overflow:hidden}
+#backup-history-dialog[open]{display:flex;flex-direction:column}
+#backup-history-dialog .dialog-head{flex:none;margin-bottom:8px}
+#backup-history-status{margin:0 0 8px}
+#backup-entries{display:grid;padding:0;margin:0;list-style:none;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.backup-history-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;padding:10px 4px;border-top:1px solid var(--line);overflow-wrap:anywhere}
+.backup-history-row small{display:block;margin-top:4px;color:var(--muted);line-height:1.45}
+.backup-history-actions{display:flex;flex-wrap:wrap;gap:6px}
+.backup-history-actions button{padding:5px 9px}
+@media(max-width:520px){.backup-history-row{grid-template-columns:1fr}}
 .library-search-field input{width:100%;padding-inline-end:44px}
 #library-search-toggle{position:absolute;inset-inline-end:4px;top:50%;transform:translateY(-50%);width:36px;height:34px;color:var(--muted)}
 #library-search-history{position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:2;background:var(--bg);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 25px #0003;padding:6px}

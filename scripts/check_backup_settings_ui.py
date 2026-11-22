@@ -6,9 +6,13 @@ from secretary.server import Service,handler
 from secretary import browser_reader,library_location
 from secretary.local_http import LocalHTTPServer
 from playwright.sync_api import sync_playwright,expect
+
+class BackupTestServer(LocalHTTPServer):
+ request_queue_size=32
+
 with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'preference_file', side_effect=lambda: Path(temp)/'settings'/'location.json'):
  service=Service(Path(temp)/'data');service.archive.configure('codex',False);service.archive.add('Original','Backup fixture')
- server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=BackupTestServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None))
@@ -104,15 +108,36 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     assert not library_location.read().get('target')
     page.locator('#backup-create').click()
     expect(page.locator('#backup-create-result')).to_contain_text('备份已写入并通过验证：'+str(service.backups.folder))
+    expect(page.locator('#backup-history-dialog')).to_be_hidden()
+    expect(page.locator('#settings-dialog #backup-entries')).to_have_count(0)
+    page.locator('#backup-list').click()
+    expect(page.locator('#backup-history-dialog')).to_be_visible()
     expect(page.locator('#backup-entries').get_by_role('button',name='恢复此备份',exact=True)).to_have_count(2,timeout=15000)
-    expect(page.locator('#backup-status')).to_contain_text('0.2 GB')
+    expect(page.locator('#backup-history-status')).to_have_text('2 份备份')
     expect(page.locator('#backup-entries')).to_contain_text('数据库与原件已验证')
+    expect(page.locator('#backup-entries')).to_contain_text('旧备份目录')
     snapshot=next(entry for entry in service.backups.entries() if entry['folder']==str(service.backups.folder))
     assert snapshot['verification']['state']=='verified'
     assert (service.backups.folder/(snapshot['id']+'.zip')).is_file()
     assert (configured_backup/(old_snapshot['id']+'.zip')).is_file()
     page.locator('[data-backup-verify="'+snapshot['id']+'"]').click()
     expect(page.locator('#toast')).to_contain_text('备份验证通过')
+    page.locator('#backup-history-dialog .dialog-head button').click()
+    expect(page.locator('#backup-history-dialog')).to_be_hidden()
+    expect(page.locator('#settings-dialog')).to_be_visible()
+    expect(page.locator('#backup-status')).to_contain_text('0.2 GB')
+    history_fixture=page.request.get(base+'/api/backups').json()
+    history_fixture['items']=[{**history_fixture['items'][0],'id':f'{i:032x}'} for i in range(24)]
+    page.set_viewport_size({'width':500,'height':620})
+    page.route('**/api/backups',lambda route:route.fulfill(json=history_fixture))
+    try:
+     page.locator('#backup-list').click()
+     expect(page.locator('#backup-history-status')).to_have_text('24 份备份')
+     assert page.locator('#backup-entries').evaluate('el=>el.scrollHeight>el.clientHeight && el.scrollWidth<=el.clientWidth')
+     page.locator('#backup-history-dialog .dialog-head button').click()
+    finally:
+     page.unroute('**/api/backups')
+     page.set_viewport_size({'width':1300,'height':1000})
     service.backups.error='Synthetic backup failure';service.backups._save_state(state='error',last_error=service.backups.error,last_attempt='fixture')
     page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
     page.locator('#settings-dialog .dialog-head button').click()
@@ -135,6 +160,16 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     page.reload()
     expect(page.locator('#library-migration-message')).to_have_text('记忆已迁移到：'+str(service.archive.root),timeout=12000)
     expect(page.locator('#library-migration-notice')).to_be_hidden()
-    print('PASS: backup folder status and verification, migration preflight, restart guard, startup result and folder action')
+    original=service.archive.list()[0]
+    service.archive.update(original['id'],title='Changed after backup')
+    page.locator('#settings-open').click()
+    page.locator('#backup-list').click()
+    old_row=page.locator('.backup-history-row').filter(has_text='旧备份目录')
+    page.once('dialog',lambda confirmation:confirmation.accept())
+    with page.expect_response(lambda response:response.url.endswith('/api/backups/restore')) as restored:
+     old_row.get_by_role('button',name='恢复此备份',exact=True).click()
+    assert restored.value.ok
+    assert service.archive.get(original['id'])['title']=='Original'
+    print('PASS: compact independently scrolling history, create/verify and restore from a previous folder')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()
