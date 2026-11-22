@@ -65,6 +65,11 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .directory-field input{flex:1;min-width:0}
 .directory-field button{flex:none}
 .library-search-field{position:relative;display:flex;flex:1;min-width:0}
+.library-result-summary,#library-result-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.library-result-summary{flex:none;min-height:2rem}
+.library-result-summary #result-count{margin:0}
+#library-result-filters{font-size:.85rem}
+#library-clear-result-filters{padding:3px 8px}
 .library-search-field input{width:100%;padding-inline-end:44px}
 #library-search-toggle{position:absolute;inset-inline-end:4px;top:50%;transform:translateY(-50%);width:36px;height:34px;color:var(--muted)}
 #library-search-history{position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:2;background:var(--bg);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 25px #0003;padding:6px}

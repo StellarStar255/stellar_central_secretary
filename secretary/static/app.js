@@ -556,14 +556,16 @@ async function renderLibrary(){
  const items=data.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));libraryResults=items;
  const cats=libraryCategories;$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(category=>`<option value="${esc(category)}" ${category===filters.category?'selected':''}>${esc(displayCategory(category))}</option>`).join('');
  $('#result-count').textContent=StellarI18n.count(data.total,'份资料','item','items');$('#empty').hidden=items.length>0;
+ const activeFacets=Object.entries(libraryFacets).filter(([name])=>Boolean(filters[name]));
+ const resultFilters=$('#library-result-filters');
+ resultFilters.hidden=!items.length||!activeFacets.length;
+ if(!resultFilters.hidden)$('#library-filter-count').textContent=StellarI18n.count(activeFacets.length,'项筛选','active filter','active filters');
  if(!items.length){
-  const active=[];
-  for(const [name,select] of Object.entries(libraryFacets)){
-   if(filters[name])active.push(name==='category'?displayCategory(filters.category):select.selectedOptions[0].textContent);
-  }
-  $('#library-empty-default').hidden=active.length>0;
-  $('#library-empty-filters').hidden=active.length===0;
-  $('#library-active-filters').textContent=active.join(' · ');
+  $('#library-empty-default').hidden=activeFacets.length>0;
+  $('#library-empty-filters').hidden=activeFacets.length===0;
+  $('#library-active-filters').textContent=activeFacets.map(([name,select])=>
+   name==='category'?displayCategory(filters.category):select.selectedOptions[0].textContent
+  ).join(' · ');
  }
  $('#library-pager').hidden=data.total<=100;$('#library-prev').disabled=offset===0;$('#library-next').disabled=offset+items.length>=data.total;$('#library-page').textContent=(Math.floor(offset/100)+1)+' / '+Math.max(1,Math.ceil(data.total/100));
  const listScroll=$('#library-list-scroll'),scroll=key===lastRenderedLibraryKey&&offset===lastRenderedLibraryOffset?listScroll.scrollTop:0,focused=document.activeElement?.closest?.('#items .library-row')?.dataset.id;
@@ -573,7 +575,7 @@ async function renderLibrary(){
 $('#library-prev').onclick=()=>{libraryOffset=Math.max(0,libraryOffset-100);void renderLibrary().catch(error=>toast(error.message))};
 $('#library-next').onclick=()=>{libraryOffset+=100;void renderLibrary().catch(error=>toast(error.message))};
 for(const select of [...Object.values(libraryFacets),$('#sort-filter')])select.onchange=()=>renderLibrary().catch(error=>toast(error.message));
-$('#library-clear-filters').onclick=()=>{
+$('#library-clear-filters').onclick=$('#library-clear-result-filters').onclick=()=>{
  clearTimeout(searchTimer);
  for(const select of Object.values(libraryFacets))select.value='';
  $('#result-count').focus({preventScroll:true});
