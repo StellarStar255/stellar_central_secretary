@@ -426,11 +426,106 @@ function libraryPresentation(item){
 function highlightMatches(value){const text=String(value||''),words=[...new Set($('#search').value.trim().split(/\s+/).filter(Boolean))].slice(0,20).sort((a,b)=>b.length-a.length);if(!words.length)return esc(text);const pattern=new RegExp(words.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'giu');let html='',end=0;for(const match of text.matchAll(pattern)){html+=esc(text.slice(end,match.index))+'<mark>'+esc(match[0])+'</mark>';end=match.index+match[0].length}return html+esc(text.slice(end))}
 function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${highlightMatches(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${highlightMatches(item.search_snippet||view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button><div class="source-matches">${(item.source_matches||[]).map(hit=>`<button type="button" class="secondary" data-origin-item="${item.id}" data-origin="${esc(JSON.stringify(hit.origin))}">${esc(hit.origin.name)}${hit.origin.page?' · p.'+hit.origin.page:''}</button>`).join('')}</div><div class="library-flags">${['favorite','pinned'].map(flag=>`<button class="secondary" data-flag="${flag}" data-item="${item.id}" data-active="${Boolean(item[flag])}" aria-pressed="${Boolean(item[flag])}" title="${t(flag==='favorite'?(item[flag]?'取消收藏':'收藏'):(item[flag]?'取消置顶':'置顶'))}">${t(flag==='favorite'?(item[flag]?'★ 已收藏':'☆ 收藏'):(item[flag]?'已置顶':'置顶'))}</button>`).join('')}</div>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
 let libraryRequestRevision=0;let lastLibraryMarkup='',libraryOffset=0,libraryQueryKey='',libraryResults=[],lastRenderedLibraryKey='',lastRenderedLibraryOffset=0;
+const librarySearchHistory=$('#library-search-history')?.replaceChildren?bindLibrarySearchHistory():null;
+function bindLibrarySearchHistory(){
+ const input=$('#search'),field=$('#library-search-field'),menu=$('#library-search-history'),
+       options=$('#library-search-options'),toggle=$('#library-search-toggle'),storage='stellar.library-search-history';
+ const normalize=value=>value.trim().replace(/\s+/g,' ').toLowerCase();
+ let recent=[],active=-1,draft=false,submit=false,lastResult='';
+ try{
+  const saved=JSON.parse(localStorage.getItem(storage)||'[]');
+  if(Array.isArray(saved))recent=saved.filter(value=>typeof value==='string'&&value.trim()&&value.length<=300).slice(0,20);
+ }catch{}
+ function persist(){try{localStorage.setItem(storage,JSON.stringify(recent))}catch{}toggle.hidden=recent.length===0}
+ function remember(value){
+  draft=submit=false;
+  if(!value||value.length>300)return;
+  recent=[value,...recent.filter(entry=>normalize(entry)!==normalize(value))].slice(0,20);
+  persist();
+ }
+ function commit(){if(draft&&input.value.trim()===lastResult)remember(lastResult)}
+ function expanded(value){
+  menu.hidden=!value;
+  for(const node of [input,toggle])node.setAttribute('aria-expanded',String(value));
+  active=-1;
+  input.removeAttribute('aria-activedescendant');
+ }
+ function searchNow(){
+  clearTimeout(searchTimer);
+  void renderLibrary().catch(error=>toast(error.message));
+ }
+ function choose(value){
+  input.focus();
+  input.value=value;
+  expanded(false);
+  draft=submit=true;
+  searchNow();
+ }
+ function show(all=false){
+  const query=normalize(input.value);
+  const matches=recent.filter(value=>{
+   const term=normalize(value);
+   return all||!query||term!==query&&term.includes(query);
+  }).slice(0,5);
+  options.replaceChildren();
+  for(const [index,value] of matches.entries()){
+   const option=document.createElement('div');
+   option.id='library-search-option-'+index;
+   option.setAttribute('role','option');
+   option.setAttribute('aria-selected','false');
+   option.textContent=value;
+   option.title=value;
+   option.addEventListener('pointerdown',event=>event.preventDefault());
+   option.onclick=()=>choose(value);
+   options.append(option);
+  }
+  expanded(matches.length>0);
+ }
+ toggle.hidden=recent.length===0;
+ toggle.onclick=()=>{if(!menu.hidden){expanded(false);return}input.focus();show(true)};
+ $('#library-search-clear').onclick=()=>{
+  recent=[];draft=submit=false;persist();input.focus();expanded(false);
+ };
+ input.addEventListener('focus',()=>{if(!input.value.trim())show()});
+ input.addEventListener('click',()=>{if(menu.hidden&&!input.value.trim())show()});
+ function changed(){
+  draft=true;submit=false;show();
+ }
+ input.addEventListener('input',event=>{if(!event.isComposing)changed()});
+ input.addEventListener('compositionend',changed);
+ input.addEventListener('blur',commit);
+ field.addEventListener('focusout',event=>{if(!field.contains(event.relatedTarget))expanded(false)});
+ $('#library-dialog').addEventListener('close',()=>{commit();expanded(false)});
+ input.addEventListener('keydown',event=>{
+  if(event.isComposing||event.keyCode===229){event.stopPropagation();return}
+  if(event.metaKey||event.ctrlKey||event.altKey)return;
+  if(event.key==='Enter'&&active>=0&&!menu.hidden)choose(options.children[active].textContent);
+  else if(event.key==='Enter'){
+   expanded(false);
+   if(!draft||input.value.trim()===lastResult){commit();return}
+   submit=true;searchNow();
+  }else if(event.key==='Escape'&&!menu.hidden)expanded(false);
+  else if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!menu.hidden){
+   const size=options.children.length,step=event.key==='ArrowDown'?1:-1;
+   active=active<0?(step>0?0:size-1):(active+step+size)%size;
+   for(const [index,option] of [...options.children].entries())option.setAttribute('aria-selected',String(index===active));
+   const selected=options.children[active];
+   input.setAttribute('aria-activedescendant',selected.id);
+   selected.scrollIntoView({block:'nearest'});
+  }else return;
+  event.preventDefault();event.stopPropagation();
+ });
+ return {accept(query){
+  lastResult=query;
+  if(submit||document.activeElement!==input)commit();
+ }};
+}
 async function renderLibrary(){
  const filters={q:$('#search').value.trim(),kind:$('#kind-filter').value,category:$('#category-filter').value,state:$('#state-filter').value,days:$('#date-filter').value,sort:$('#sort-filter').value,favorite:$('#favorite-filter').value};
  const key=JSON.stringify(filters);if(key!==libraryQueryKey){libraryQueryKey=key;libraryOffset=0}
  const revision=++libraryRequestRevision,offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
  if(revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
+ librarySearchHistory?.accept(filters.q);
  if(data.total&&offset>=data.total){libraryOffset=Math.floor((data.total-1)/100)*100;return renderLibrary()}
  const items=data.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));libraryResults=items;
  const cats=libraryCategories;$('#category-filter').innerHTML=t('<option value="">全部主题</option>')+cats.map(category=>`<option value="${esc(category)}" ${category===filters.category?'selected':''}>${esc(displayCategory(category))}</option>`).join('');
@@ -453,7 +548,11 @@ async function toggleLibrary(){
  }else await openLibrary();
 }
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
-$('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>renderLibrary().catch(e=>toast(e.message)),180)};
+function queueLibrarySearch(event){
+ if(event.isComposing)return;
+ clearTimeout(searchTimer);searchTimer=setTimeout(()=>renderLibrary().catch(e=>toast(e.message)),180);
+}
+$('#search').oninput=$('#search').oncompositionend=queueLibrarySearch;
 $('#kind-filter').onchange=$('#category-filter').onchange=()=>renderLibrary().catch(e=>toast(e.message));
 $('#new-chat').onclick=newChat;
 $('#sidebar-toggle').onclick=()=>{if(window.innerWidth<=700)document.body.classList.toggle('mobile-sidebar');else{document.body.classList.toggle('sidebar-hidden');$('#workspace').classList.toggle('sidebar-hidden')}};

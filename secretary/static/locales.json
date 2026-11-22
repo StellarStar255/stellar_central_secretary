@@ -1470,5 +1470,8 @@
   "打开新目录": "Open new folder",
   "关闭提示": "Dismiss",
   "当前目录已更改，请刷新页面。": "The current folder has changed. Refresh the page.",
-  "目标记忆目录不可用，请检查硬盘连接后重试。": "The destination library folder is unavailable. Check the drive connection and try again."
+  "目标记忆目录不可用，请检查硬盘连接后重试。": "The destination library folder is unavailable. Check the drive connection and try again.",
+  "近期搜索": "Recent searches",
+  "显示近期搜索": "Show recent searches",
+  "清空历史": "Clear history"
 }

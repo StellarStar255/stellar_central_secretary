@@ -64,6 +64,16 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .directory-field{display:flex;align-items:stretch;gap:8px}
 .directory-field input{flex:1;min-width:0}
 .directory-field button{flex:none}
+.library-search-field{position:relative;display:flex;flex:1;min-width:0}
+.library-search-field input{width:100%;padding-inline-end:44px}
+#library-search-toggle{position:absolute;inset-inline-end:4px;top:50%;transform:translateY(-50%);width:36px;height:34px;color:var(--muted)}
+#library-search-history{position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:2;background:var(--bg);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 25px #0003;padding:6px}
+.search-history-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;color:var(--muted);font-size:.85rem}
+#library-search-clear{padding:3px 8px}
+#library-search-options{max-height:40vh;overflow:auto}
+#library-search-options [role=option]{border-radius:6px;padding:7px 10px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#library-search-options [role=option]:hover,#library-search-options [aria-selected=true]{background:var(--hover)}
+@media(max-width:700px){.library-search-field{flex-basis:100%}}
 .library-directory{align-items:center;justify-content:space-between;flex-wrap:wrap}
 .library-directory p{flex:1;min-width:min(100%,14rem);margin:0;overflow-wrap:anywhere}
 #library-migration-notice{padding:10px 20px;border-bottom:1px solid var(--line);flex:none}
