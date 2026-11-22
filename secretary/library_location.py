@@ -81,7 +81,14 @@ def lease(root):
 def status(root):
     value = read()
     if value.get('source') == str(root):
-        return {'pending': value.get('target', ''), 'error': value.get('error', '')}
+        error = value.get('error', '')
+        result = {'pending': value.get('target', ''), 'error': error}
+        if error:
+            result['result'] = {'id': value.get('failure_id', value.get('migration')),
+                                'state': 'failed', 'folder': str(root), 'error': error}
+        return result
+    if value.get('active') == str(root) and value.get('completed_migration'):
+        return {'result': {'id': value['completed_migration'], 'state': 'completed', 'folder': str(root)}}
     return {}
 
 
@@ -170,13 +177,14 @@ def schedule(root, requested, backup_folder):
     if not isinstance(requested, str):
         raise ValueError('请输入记忆目录的完整路径。')
     if not requested.strip():
-        value = {key: val for key, val in value.items() if key in ('active', 'previous')}
+        value = {key: val for key, val in value.items() if key in ('active', 'previous', 'completed_migration')}
     else:
         target = _target_path(root, requested, backup_folder)
         if error := _check_destination(target, _estimate_bytes(root)).get('error'):
             raise ValueError(error)
         value.update(source=str(root), target=str(target), migration=uuid.uuid4().hex)
         value.pop('error', None)
+        value.pop('failure_id', None)
     write(value)
     return status(root)
 
@@ -207,6 +215,8 @@ def migrate(root, value):
     marker = target/'.stellar-migration'
     stage = None
     try:
+        if not target.is_dir():
+            raise ValueError('目标记忆目录不可用，请检查硬盘连接后重试。')
         if not (marker.is_file() and marker.read_text() == value['migration']):
             if error := _check_destination(target, _estimate_bytes(root)).get('error'):
                 raise ValueError(error)
@@ -223,10 +233,12 @@ def migrate(root, value):
                     target.mkdir(exist_ok=True)
                 raise
     except (OSError, ValueError, sqlite3.Error) as error:
-        write({**value, 'error': str(error)})
+        write({**value, 'error': str(error), 'failure_id': uuid.uuid4().hex})
         return root
     finally:
-        if stage and stage.exists():
-            shutil.rmtree(stage)
-    write({'active': str(target), 'previous': list(dict.fromkeys([*value.get('previous', []), str(root)]))})
+        if stage:
+            # A disconnected destination may prevent cleanup. The source can still open.
+            shutil.rmtree(stage, ignore_errors=True)
+    write({'active': str(target), 'previous': list(dict.fromkeys([*value.get('previous', []), str(root)])),
+           'completed_migration': value['migration']})
     return target

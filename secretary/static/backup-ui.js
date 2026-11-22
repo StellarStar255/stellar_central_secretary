@@ -2,6 +2,8 @@
 (()=>{
  const $=s=>document.querySelector(s),t=s=>StellarI18n.t(s);let api,toast,dirty=new Set(),lastWarning='',configRevision=-1,stateRevision=-1,saving=false;
  let backupFolder='',creating=false,locationTimer,locationRevision=0,locationReady=false,pendingFolder='';
+ let migrationResult,dismissedMigration;
+ try{dismissedMigration=localStorage.getItem('stellar-library-migration-dismissed')}catch{}
  function backupButtons(){
   $('#backup-configure').disabled=saving||creating;
   $('#backup-create').disabled=saving||creating||!backupFolder||dirty.has('backup-folder');
@@ -19,7 +21,15 @@
   if(!location||!line)return;
   pendingFolder=location.pending||'';
   $('#library-restart-actions').hidden=!pendingFolder;
-  line.textContent=location.error?t('记忆迁移失败，仍在使用原目录：')+t(location.error):location.pending?t('重启后将迁移记忆至：')+location.pending:'';
+  migrationResult=location.result;
+  const migrated=migrationResult?.state==='completed';
+  const resultText=migrated?t('记忆已迁移到：')+migrationResult.folder:
+   migrationResult?.state==='failed'?t('记忆迁移失败。当前仍在使用：')+migrationResult.folder+' · '+t(migrationResult.error):'';
+  line.textContent=resultText||(location.error?t('记忆迁移失败，仍在使用原目录：')+t(location.error):location.pending?t('重启后将迁移记忆至：')+location.pending:'');
+  $('#library-migration-notice').hidden=!resultText||migrationResult.id===dismissedMigration;
+  $('#library-migration-open').hidden=!migrated;
+  const message=$('#library-migration-message');
+  if(message.textContent!==resultText)message.textContent=resultText;
  }
  function size(bytes){
   if(bytes==null)return t('无法检查');
@@ -129,9 +139,9 @@
   }catch(error){line.textContent=error.message}
   finally{for(const id of controls)$('#'+id).disabled=false}
  }
- async function openFolder(purpose,button){
+ async function openFolder(purpose,button,folder){
   button.disabled=true;
-  try{await api('/api/data-directory/open',{purpose})}
+  try{await api('/api/data-directory/open',{purpose,folder})}
   catch(error){toast(error.message)}
   finally{
    if(purpose==='backup')backupButtons();
@@ -156,6 +166,13 @@
    const button=$('#'+purpose+'-folder-open');
    button.onclick=()=>void openFolder(purpose,button);
   }
+  const openMigrated=$('#library-migration-open');
+  openMigrated.onclick=()=>void openFolder('library',openMigrated,migrationResult.folder);
+  $('#library-migration-dismiss').onclick=()=>{
+   dismissedMigration=migrationResult.id;
+   $('#library-migration-notice').hidden=true;
+   try{localStorage.setItem('stellar-library-migration-dismissed',dismissedMigration)}catch{}
+  };
   const result=$('#backup-create-result');
   for(const id of ['backup-folder','backup-limit','backup-daily-keep','backup-other-keep'])$('#'+id).addEventListener('input',()=>{
    dirty.add(id);

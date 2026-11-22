@@ -13,7 +13,9 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
   with sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None))
    try:
-    page=browser.new_page(viewport={'width':1300,'height':1000});page.goto(base);stale=page.request.get(base+'/api/status').json()['backup'];page.locator('#settings-open').click()
+    page=browser.new_page(viewport={'width':1300,'height':1000})
+    page.on('pageerror',lambda error:print('PAGE ERROR:',error,flush=True))
+    page.goto(base);stale=page.request.get(base+'/api/status').json()['backup'];page.locator('#settings-open').click()
     page.locator('#capture-proxy-mode').select_option('direct')
     with patch.object(browser_reader,'test_chatgpt_connection',return_value={'mode':'direct','route':'direct','stage':'blocked','status':403}) as probe:
      page.locator('#capture-connection-test').click()
@@ -113,6 +115,26 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     expect(page.locator('#toast')).to_contain_text('备份验证通过')
     service.backups.error='Synthetic backup failure';service.backups._save_state(state='error',last_error=service.backups.error,last_attempt='fixture')
     page.evaluate('refresh()');expect(page.locator('#settings-open')).to_have_attribute('data-backup-warning','true');expect(page.locator('#backup-error')).to_contain_text('Synthetic backup failure');assert service.backups.entries()
-    print('PASS: capture probe and English controls, migration preflight and cancellation, verified snapshot in the new backup folder, previous snapshot retained')
+    page.locator('#settings-dialog .dialog-head button').click()
+    library_location.write({'source':str(service.archive.root),'target':str(destination),
+                            'migration':'move-failed','error':'目标磁盘可用空间不足。'})
+    page.reload()
+    expect(page.locator('#library-migration-message')).to_contain_text('当前仍在使用：'+str(service.archive.root))
+    expect(page.locator('#library-migration-message')).to_contain_text('目标磁盘可用空间不足。')
+    expect(page.locator('#library-migration-open')).to_be_hidden()
+    library_location.write({'active':str(service.archive.root),'completed_migration':'move-complete'})
+    page.reload()
+    expect(page.locator('#library-migration-message')).to_have_text('记忆已迁移到：'+str(service.archive.root))
+    with patch('secretary.attachment_editor.launch') as launch:
+     with page.expect_response(lambda response:response.url.endswith('/api/data-directory/open')) as opened:
+      page.locator('#library-migration-open').click()
+     assert opened.value.ok
+     launch.assert_called_once_with(service.archive.root)
+    page.locator('#library-migration-dismiss').click()
+    expect(page.locator('#library-migration-notice')).to_be_hidden()
+    page.reload()
+    expect(page.locator('#library-migration-message')).to_have_text('记忆已迁移到：'+str(service.archive.root),timeout=12000)
+    expect(page.locator('#library-migration-notice')).to_be_hidden()
+    print('PASS: backup folder status and verification, migration preflight, restart guard, startup result and folder action')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

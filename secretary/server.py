@@ -1497,6 +1497,8 @@ def handler(service):
                     if purpose=='library':folder=service.archive.root
                     elif purpose=='backup':folder=service.backups.folder
                     else:raise ValueError('无效的文件夹类型')
+                    if body.get('folder') is not None and body['folder']!=str(folder):
+                        raise ValueError('当前目录已更改，请刷新页面。')
                     try:
                         if not folder.is_dir():
                             raise ValueError('目录不可用，请检查硬盘连接。')

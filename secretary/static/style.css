@@ -66,6 +66,8 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .directory-field button{flex:none}
 .library-directory{align-items:center;justify-content:space-between;flex-wrap:wrap}
 .library-directory p{flex:1;min-width:min(100%,14rem);margin:0;overflow-wrap:anywhere}
+#library-migration-notice{padding:10px 20px;border-bottom:1px solid var(--line);flex:none}
+#library-migration-message{margin:0 0 8px;overflow-wrap:anywhere}
 #data-dir-label{margin:.8em 0 .4em;font-weight:500}
 #library-location-status:empty,#library-location-preflight:empty{margin:0}
 #first-run-tutorial{width:min(1130px,94vw);height:90vh;max-height:90vh;padding:0;overflow:hidden}

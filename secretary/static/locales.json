@@ -1464,5 +1464,11 @@
   "待迁移目录已更改，请刷新设置。": "The destination folder has changed. Refresh Settings.",
   "程序正在重启，请稍后重试。": "The app is restarting. Try again shortly.",
   "正在重启并迁移记忆…": "Restarting and moving the library…",
-  "仍在等待程序启动。迁移完成后请重新打开窗口。": "Still waiting for the app to start. Reopen the window when the move finishes."
+  "仍在等待程序启动。迁移完成后请重新打开窗口。": "Still waiting for the app to start. Reopen the window when the move finishes.",
+  "记忆已迁移到：": "Library moved to: ",
+  "记忆迁移失败。当前仍在使用：": "Could not move the library. Still using: ",
+  "打开新目录": "Open new folder",
+  "关闭提示": "Dismiss",
+  "当前目录已更改，请刷新页面。": "The current folder has changed. Refresh the page.",
+  "目标记忆目录不可用，请检查硬盘连接后重试。": "The destination library folder is unavailable. Check the drive connection and try again."
 }
