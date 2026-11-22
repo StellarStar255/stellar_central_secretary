@@ -72,8 +72,15 @@ function makePdf(){
  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];let pdf='%PDF-1.4\n';const offsets=[0];objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});const xref=pdf.length;pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`+offsets.slice(1).map(offset=>String(offset).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;return pdf;
 }
 $('#previous').onclick=()=>{if(current>0)go(current-1);};$('#next').onclick=()=>{if(!done.has(current))return;if(current<5)go(current+1);else showResult();};$('#reset').onclick=reset;$('#library').onclick=showSearch;$('#new-note').onclick=showHome;$('#recent-file').onclick=showDetail;$('#settings').onclick=showSettings;$('#backup').onclick=showBackup;
+const memoryGuideLink = $('#tutorial-memory-guide-link');
+const chineseMemoryGuide = memoryGuideLink.getAttribute('href');
+const englishMemoryGuide = new URL('README.md#memory-mcp', memoryGuideLink.href).href;
+function updateMemoryGuideLink(){
+ memoryGuideLink.href = StellarI18n.language === 'en' ? englishMemoryGuide : chineseMemoryGuide;
+}
 $('#tutorial-language').value=StellarI18n.language;
-$('#tutorial-language').onchange=()=>{const oldDefault=t('科学月刊 · 2026年6月');const isDefault=renamedTitle===oldDefault;StellarI18n.setLanguage($('#tutorial-language').value,{persist:false});if(isDefault)renamedTitle=t('科学月刊 · 2026年6月');if(imported)ensureFile();$('#mode-badge').textContent=mode==='desktop'?t('桌面练习'):t('网页练习');go(current)};
+updateMemoryGuideLink();
+$('#tutorial-language').onchange=()=>{const oldDefault=t('科学月刊 · 2026年6月');const isDefault=renamedTitle===oldDefault;StellarI18n.setLanguage($('#tutorial-language').value,{persist:false});updateMemoryGuideLink();if(isDefault)renamedTitle=t('科学月刊 · 2026年6月');if(imported)ensureFile();$('#mode-badge').textContent=mode==='desktop'?t('桌面练习'):t('网页练习');go(current)};
 $('#return-app').href=location.protocol==='file:'?'http://127.0.0.1:8768/':location.origin+'/';
 if(embedded){
  const close=()=>window.parent.postMessage('stellar-tutorial-close',location.origin);

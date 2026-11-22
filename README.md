@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Version **v0.1.141** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.141.md)
+Version **v0.1.142** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.142.md)
 
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
@@ -53,7 +53,22 @@ A small in-memory cache can reuse recent source-backed answers. It expires withi
 
 ## Memory MCP
 
-Connect a local MCP client to search and read your library. See [Memory MCP setup](docs/memory-mcp.md).
+Codex CLI, Claude Code, Gemini CLI, and other MCP clients can search and read your archived records. This source feature is off by default and provides read-only access from the same computer.
+
+1. In the project directory, create `.venv` with `python3 -m venv .venv` if needed, then install the optional dependencies. Quit any running instance before starting from source and use the library folder shown under **Models & settings → Data & backup**.
+
+   ```sh
+   .venv/bin/python -m pip install -r requirements-mcp.txt
+   .venv/bin/python -m secretary.launcher --data-dir "/path/to/your/library" --memory-mcp
+   ```
+
+   On Windows, create the environment with `py -m venv .venv` if needed and use `.venv\Scripts\python.exe` for the two commands above. Keep Stellar Secretary running while you use the interface.
+
+2. Register `secretary/memory_mcp.py` as a stdio MCP server in your client. Use absolute paths to the same Python interpreter and the script. If you use a custom port, pass the same `--port` to the app and the script. [Codex and Claude commands and Gemini configuration](docs/memory-mcp.md#配置客户端)
+
+3. Ask your client to “use `stellar-memory` to find my notes on the last project review, read the relevant records, and cite the sources.” The client uses `search_memory` to find records and `read_memory` to retrieve their text or summaries.
+
+Company mode blocks access. Your MCP client may send retrieved text to its configured model as context.
 
 ## Local semantic search
 
