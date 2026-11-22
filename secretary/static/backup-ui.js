@@ -22,7 +22,23 @@
   }catch(error){line.textContent=error.message}
   finally{save.disabled=cancel.disabled=false}
  }
+ async function browse(purpose,button){
+  button.disabled=true;
+  try{
+   const {folder}=await api('/api/directory-picker',{purpose});
+   if(folder){
+    const id=purpose+'-folder';
+    $('#'+id).value=folder;
+    if(purpose==='backup')dirty.add(id);
+   }
+  }catch(error){toast(error.message)}
+  finally{button.disabled=false}
+ }
  function bind(options){({api,toast}=options);
+  for(const purpose of ['library','backup']){
+   const button=$('#'+purpose+'-folder-browse');
+   if(button)button.onclick=()=>void browse(purpose,button);
+  }
   if($('#library-location-save')){
    $('#library-location-save').onclick=()=>{
     const folder=$('#library-folder').value.trim();

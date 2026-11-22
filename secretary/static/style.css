@@ -61,6 +61,9 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 #settings-dialog>.dialog-head{margin:0;padding:16px 26px;border-bottom:1px solid var(--line)}
 .settings-scroll{min-width:0;min-height:0;padding:20px 26px;overflow-y:auto;overscroll-behavior:contain;contain:paint;isolation:isolate;transform:translateZ(0)}
 .settings-actions{flex:none;display:flex;justify-content:flex-end;align-items:center;border-top:1px solid var(--line);padding:12px 26px;background:var(--bg)}
+.directory-field{display:flex;align-items:stretch;gap:8px}
+.directory-field input{flex:1;min-width:0}
+.directory-field button{flex:none}
 #first-run-tutorial{width:min(1130px,94vw);height:90vh;max-height:90vh;padding:0;overflow:hidden}
 #first-run-tutorial[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}
 #first-run-tutorial .dialog-head{margin:0;padding:12px 20px;border-bottom:1px solid var(--line)}

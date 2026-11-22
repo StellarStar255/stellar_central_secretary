@@ -7,6 +7,8 @@ if __name__ == '__main__':
         from secretary.capture_worker import main
     elif '--model-api-worker' in sys.argv:
         from secretary.model_api import main
+    elif '--choose-directory' in sys.argv:
+        from secretary.directory_picker import main
     else:
         from secretary.launcher import main
     main()

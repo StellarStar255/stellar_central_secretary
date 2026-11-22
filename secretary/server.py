@@ -1431,6 +1431,14 @@ def handler(service):
                         if updater.status().get('phase') in ('downloading','verifying','installing'):
                             raise ValueError('请等待升级完成后再更改记忆目录。')
                         return self.send(200,library_location.schedule(service.archive.root,body.get('folder'),service.backups.folder))
+                if path=='/api/directory-picker':
+                    from .directory_picker import choose
+                    from .i18n import translate
+                    purpose=body.get('purpose')
+                    if purpose=='library':title,initial='选择记忆保存目录',service.archive.root
+                    elif purpose=='backup':title,initial='选择记忆备份目录',service.backups.folder
+                    else:raise ValueError('无效的文件夹类型')
+                    return self.send(200,{'folder':choose(translate(title,service.archive.settings()['ui_language']),initial)})
                 if path=='/api/backups/configure':
                     with service.location_lock:
                         pending=library_location.status(service.archive.root).get('pending')
