@@ -23,14 +23,19 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     page.locator('#ui-language').select_option('en')
     expect(page.locator('#capture-connection-test')).to_have_text('Test ChatGPT connection')
     expect(page.locator('#backup-create')).to_have_text('Back up and verify now')
+    expect(page.locator('#library-location-change')).to_have_text('Change folder…')
     page.locator('#ui-language').select_option('zh')
+    expect(page.locator('#data-dir')).to_have_text(str(service.archive.root))
+    expect(page.locator('#library-location-change')).to_have_attribute('aria-expanded','false')
+    expect(page.locator('#library-location-editor')).to_be_hidden()
+    expect(page.locator('#library-location-save')).to_be_hidden()
     backup=(Path(temp)/'Chosen 备份').resolve();backup.mkdir()
     destination=(Path(temp)/'New Library 记忆').resolve();destination.mkdir()
     configured_backup=service.backups.folder
     old_snapshot=service.backups.create()
     existing=destination/'existing'
     existing.touch()
-    with patch('secretary.directory_picker.choose',side_effect=[str(backup),None,str(destination)]) as choose:
+    with patch('secretary.directory_picker.choose',side_effect=[str(backup),None,None,str(destination)]) as choose:
      page.locator('#backup-folder-browse').click()
      expect(page.locator('#backup-folder')).to_have_value(str(backup))
      expect(page.locator('#backup-create')).to_be_disabled()
@@ -41,12 +46,19 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
      expect(page.locator('#backup-folder')).to_have_value(str(backup))
      page.evaluate('status=>StellarBackups.sync(status)',stale)
      expect(page.locator('#backup-folder')).to_have_value(str(backup))
-     page.locator('#library-folder-browse').click()
+     with page.expect_response(lambda response:response.url.endswith('/api/directory-picker')):
+      page.locator('#library-location-change').click()
+     expect(page.locator('#library-location-editor')).to_be_visible()
+     expect(page.locator('#library-location-change')).to_have_attribute('aria-expanded','true')
+     expect(page.locator('#library-location-save')).to_be_hidden()
+     page.locator('#library-location-discard').click()
+     expect(page.locator('#library-location-editor')).to_be_hidden()
+     page.locator('#library-location-change').click()
      expect(page.locator('#library-folder')).to_have_value(str(destination))
      expect(page.locator('#library-location-preflight')).to_contain_text('目标文件夹非空')
      expect(page.locator('#library-location-save')).to_be_disabled()
      assert not library_location.read().get('target')
-     assert [call.args[1] for call in choose.call_args_list]==[configured_backup,configured_backup,service.archive.root]
+     assert [call.args[1] for call in choose.call_args_list]==[configured_backup,configured_backup,service.archive.root,service.archive.root]
     existing.unlink()
     page.locator('#library-folder').fill('')
     page.locator('#library-folder').fill(str(destination))
@@ -65,11 +77,13 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     expect(page.locator('#backup-create-result')).to_contain_text('已保存备份目录')
     page.locator('#library-location-save').click()
     expect(page.locator('#library-location-status')).to_contain_text(str(destination))
+    expect(page.locator('#library-location-editor')).to_be_hidden()
     expect(page.locator('#data-dir')).to_contain_text(str(service.archive.root))
     assert library_location.read()['target']==str(destination)
     assert service.backups.folder==backup/'Stellar Secretary Backups'
     page.locator('#library-location-cancel').click()
     expect(page.locator('#library-location-cancel')).to_be_hidden()
+    expect(page.locator('#library-location-status')).to_be_empty()
     assert not library_location.read().get('target')
     page.locator('#backup-create').click()
     expect(page.locator('#backup-create-result')).to_contain_text('备份已写入并通过验证：'+str(service.backups.folder))

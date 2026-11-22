@@ -1,7 +1,7 @@
 /* Local backup state, settings and nonmodal failure notices. */
 (()=>{
  const $=s=>document.querySelector(s),t=s=>StellarI18n.t(s);let api,toast,dirty=new Set(),lastWarning='',configRevision=-1,stateRevision=-1,saving=false;
- let backupFolder='',creating=false,locationTimer,locationRevision=0,savingLocation=false,locationReady=false;
+ let backupFolder='',creating=false,locationTimer,locationRevision=0,locationReady=false;
  function backupButtons(){
   $('#backup-configure').disabled=saving||creating;
   $('#backup-create').disabled=saving||creating||!backupFolder||dirty.has('backup-folder');
@@ -32,6 +32,7 @@
   const folder=field.value.trim(),save=$('#library-location-save');
   locationReady=false;
   save.disabled=true;
+  save.hidden=!folder;
   line.textContent=folder?t('正在检查迁移目录…'):'';
   if(!folder)return;
   locationTimer=setTimeout(async()=>{
@@ -42,23 +43,40 @@
     const writable=result.writable==null?'无法检查':result.writable?'目标文件夹可写':'目标文件夹不可写。';
     line.textContent=[t('预计迁移大小：')+size(result.estimated_bytes),t('目标磁盘可用：')+size(result.free_bytes),...new Set([t(empty),t(writable),result.error?t(result.error):t('目录检查通过，可以保存。')])].join(' · ');
     locationReady=!result.error;
-    save.disabled=savingLocation||!locationReady;
+    save.disabled=field.disabled||!locationReady;
    }catch(error){
     if(revision===locationRevision)line.textContent=error.message;
    }
   },delay);
  }
+ function showLocationEditor(open){
+  const change=$('#library-location-change'),field=$('#library-folder');
+  $('#library-location-editor').hidden=!open;
+  change.setAttribute('aria-expanded',String(open));
+  if(open)field.focus();
+  else{
+   field.value='';
+   queueLocationCheck(0);
+   change.focus();
+  }
+ }
  async function saveLocation(folder){
-  const save=$('#library-location-save'),cancel=$('#library-location-cancel'),field=$('#library-folder'),line=$('#library-location-status');
-  savingLocation=true;
-  save.disabled=cancel.disabled=field.disabled=$('#library-folder-browse').disabled=true;
+  const save=$('#library-location-save');
+  const controls=['library-location-change','library-location-cancel','library-location-discard','library-folder','library-folder-browse'];
+  save.disabled=true;
+  for(const id of controls)$('#'+id).disabled=true;
   try{
    const location=await api('/api/library-location',{folder});
-   field.value='';queueLocationCheck(0);syncLocation(location);
-  }catch(error){line.textContent=error.message}
+   syncLocation(location);
+   if(folder)showLocationEditor(false);
+  }catch(error){
+   if(folder)$('#library-location-preflight').textContent=error.message;
+   else toast(error.message);
+  }
   finally{
-   savingLocation=false;cancel.disabled=field.disabled=$('#library-folder-browse').disabled=false;
+   for(const id of controls)$('#'+id).disabled=false;
    save.disabled=!locationReady;
+   if($('#library-location-editor').hidden)$('#library-location-change').focus();
   }
  }
  async function browse(purpose,button){
@@ -74,16 +92,31 @@
   }catch(error){toast(error.message)}
   finally{button.disabled=false}
  }
+ async function browseLibrary(){
+  const browseButton=$('#library-folder-browse'),field=$('#library-folder'),
+        save=$('#library-location-save'),cancel=$('#library-location-cancel'),
+        change=$('#library-location-change'),discard=$('#library-location-discard');
+  change.disabled=discard.disabled=cancel.disabled=field.disabled=save.disabled=true;
+  try{await browse('library',browseButton)}
+  finally{
+   change.disabled=discard.disabled=cancel.disabled=field.disabled=false;
+   save.disabled=!locationReady;
+   if($('#settings-dialog').open)field.focus();
+  }
+ }
  function bind(options){({api,toast}=options);
-  for(const purpose of ['library','backup']){
-   const button=$('#'+purpose+'-folder-browse');
-   if(button)button.onclick=()=>void browse(purpose,button);
-  }
-  if($('#library-location-save')){
-   $('#library-folder').addEventListener('input',()=>queueLocationCheck(400));
-   $('#library-location-save').onclick=()=>void saveLocation($('#library-folder').value.trim());
-   $('#library-location-cancel').onclick=()=>void saveLocation('');
-  }
+  const backupBrowse=$('#backup-folder-browse');
+  backupBrowse.onclick=()=>void browse('backup',backupBrowse);
+  $('#library-location-change').onclick=()=>{
+   if(!$('#library-location-editor').hidden){showLocationEditor(false);return}
+   showLocationEditor(true);
+   void browseLibrary();
+  };
+  $('#library-folder-browse').onclick=()=>void browseLibrary();
+  $('#library-location-discard').onclick=()=>showLocationEditor(false);
+  $('#library-folder').addEventListener('input',()=>queueLocationCheck(400));
+  $('#library-location-save').onclick=()=>void saveLocation($('#library-folder').value.trim());
+  $('#library-location-cancel').onclick=()=>void saveLocation('');
   const result=$('#backup-create-result');
   for(const id of ['backup-folder','backup-limit','backup-daily-keep','backup-other-keep'])$('#'+id).addEventListener('input',()=>{
    dirty.add(id);
