@@ -105,6 +105,7 @@
   "无法打开更新日志。": "The update log could not be opened.",
   "当前正在运行恢复副本，请先修复原安装。": "Stellar Secretary is running from a recovery copy. Repair the original installation first.",
   "检查更新": "Check for updates",
+  "无法验证更新服务器证书。请检查系统证书或代理设置。": "Could not verify the update server certificate. Check your system certificates or proxy settings.",
   "一键升级并重启": "Update & restart",
   "数据与备份": "Data & backup",
   "下载包含原件、数据库和 JSON 的完整备份": "Download a full backup with originals, database, and JSON",

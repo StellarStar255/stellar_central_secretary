@@ -1177,7 +1177,7 @@ function renderUpdate(s){
  location.textContent=recovery?.original_install_dir?t('原安装目录')+' · '+recovery.original_install_dir:'';
  $('#update-open-log').hidden=!recovery?.has_log;
  const labels={checking:t('正在检查更新…'),downloading:t('正在下载 ')+s.progress+'%',verifying:t('正在校验安装包…'),installing:t('正在升级，程序即将重启，请稍后刷新页面。'),manual:t('安装包已打开，请完成安装。')};
- $('#update-status').textContent=t('当前版本 ')+s.current+' · '+(s.error||labels[s.phase]||(s.available?t('发现新版本 ')+s.latest:s.supported?t('已是最新版本或尚未检查'):t('源码运行；安装版支持一键升级')));
+ $('#update-status').textContent=t('当前版本 ')+s.current+' · '+(t(s.error)||labels[s.phase]||(s.available?t('发现新版本 ')+s.latest:s.supported?t('已是最新版本或尚未检查'):t('源码运行；安装版支持一键升级')));
  const active=['checking','downloading','verifying','installing'].includes(s.phase);
  $('#update-check').disabled=active;
  $('#update-install').hidden=repair||!s.supported||!s.available;
@@ -1185,7 +1185,7 @@ function renderUpdate(s){
  $('#update-download').hidden=repair||!(s.available&&!s.supported||s.phase==='manual');
  if(s.available&&!s.supported&&!active)$('#update-status').textContent+=' · '+t('此版本不支持自动安装，请下载安装包升级；本机资料会保留。');
 }
-async function checkForUpdates(){renderUpdate({...lastUpdateState,phase:'checking',error:null});try{const result=await api('/api/update/check',{});renderUpdate(result);toast(result.error||t(result.available?'已检查，发现新版本':'检查完成，当前没有可安装的新版本'));return result}catch(error){renderUpdate({...lastUpdateState,phase:'error',error:error.message});throw error}}
+async function checkForUpdates(){renderUpdate({...lastUpdateState,phase:'checking',error:null});try{const result=await api('/api/update/check',{});renderUpdate(result);if(!result.error)toast(t(result.available?'已检查，发现新版本':'检查完成，当前没有可安装的新版本'));return result}catch(error){renderUpdate({...lastUpdateState,phase:'error',error:error.message});throw error}}
 $('#update-check').onclick=()=>busy($('#update-check'),checkForUpdates,t('正在检查更新…'));
 $('#update-open-log').onclick=()=>busy($('#update-open-log'),()=>api('/api/update/open-log',{}));
 $('#update-install').onclick=()=>busy($('#update-install'),async()=>{

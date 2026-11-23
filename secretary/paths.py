@@ -1,5 +1,6 @@
 """Keep installed application data outside the replaceable application bundle."""
 import os
+import ssl
 import sys
 from pathlib import Path
 
@@ -98,8 +99,14 @@ def inside_program(directory):
 
 
 def configure_tls():
-    """Frozen OpenSSL cannot use the build machine's CA path on another Mac."""
-    if FROZEN and sys.platform == 'darwin' and 'SSL_CERT_FILE' not in os.environ:
+    """Use system roots when the runtime's default CA location is unavailable."""
+    if 'SSL_CERT_FILE' in os.environ:
+        return
+    if sys.platform == 'darwin':
+        if not FROZEN:
+            defaults = ssl.get_default_verify_paths()
+            if defaults.cafile or defaults.capath:
+                return
         system_roots = Path('/etc/ssl/cert.pem')
         if system_roots.is_file():
             os.environ['SSL_CERT_FILE'] = str(system_roots)

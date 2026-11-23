@@ -19,6 +19,7 @@ import os
 import platform
 import re
 import shlex
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -155,7 +156,13 @@ def check():
              installer_name=next((n for n in assets if pattern.search(n)), None),
              checked_at=time.time(), phase="idle")
     except Exception as e:
-        _set(phase="idle", available=False, error=f"检查更新失败：{e}", checked_at=time.time())
+        reason = getattr(e, 'reason', e)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            print('Update certificate validation failed:', e, file=sys.stderr, flush=True)
+            message = '无法验证更新服务器证书。请检查系统证书或代理设置。'
+        else:
+            message = f"检查更新失败：{e}"
+        _set(phase="idle", available=False, error=message, checked_at=time.time())
     finally:
         _operation.release()
     return status()

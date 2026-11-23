@@ -1703,6 +1703,7 @@ def handler(service):
 
 
 def main(desktop=False, recover_library=None):
+    paths.configure_tls()
     parser = argparse.ArgumentParser(description='Stellar Secretary · 知识秘书')
     parser.add_argument('--port', type=int, default=8768)
     parser.add_argument('--data-dir')

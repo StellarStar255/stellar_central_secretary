@@ -1,11 +1,13 @@
 import io
 import os
 import json
+import ssl
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import tempfile
 import threading
 import unittest
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 from unittest.mock import Mock, patch
 from secretary import paths, updater
@@ -17,6 +19,17 @@ class InlineThread:
 
 
 class UpdateTest(unittest.TestCase):
+    def test_mac_source_uses_system_ca_only_when_python_has_no_defaults(self):
+        with patch.object(paths, 'FROZEN', False), patch.object(paths.sys, 'platform', 'darwin'), \
+             patch.object(Path, 'is_file', return_value=True), patch.dict(os.environ, {}, clear=True), \
+             patch.object(paths.ssl, 'get_default_verify_paths') as defaults:
+            defaults.return_value = Mock(cafile='/python/cert.pem', capath=None)
+            paths.configure_tls()
+            self.assertNotIn('SSL_CERT_FILE', os.environ)
+            defaults.return_value = Mock(cafile=None, capath=None)
+            paths.configure_tls()
+            self.assertEqual(os.environ['SSL_CERT_FILE'], '/etc/ssl/cert.pem')
+
     def test_frozen_mac_uses_system_ca_and_preserves_explicit_trust(self):
         with patch.object(paths,'FROZEN',True), patch.object(paths.sys,'platform','darwin'), patch.object(Path,'is_file',return_value=True):
             with patch.dict(os.environ,{},clear=True):
@@ -47,6 +60,14 @@ class UpdateTest(unittest.TestCase):
                 self.assertFalse(updater.check()['available'])
             with patch.object(updater, '_get', return_value=self.release(prerelease=True)):
                 self.assertFalse(updater.check()['available'])
+
+    def test_certificate_failure_remains_a_failed_check_with_actionable_status(self):
+        error = URLError(ssl.SSLCertVerificationError('untrusted fixture'))
+        with patch.object(updater, '_get', side_effect=error), patch('sys.stderr', new_callable=io.StringIO) as log:
+            status = updater.check()
+        self.assertFalse(status['available'])
+        self.assertEqual(status['error'], '无法验证更新服务器证书。请检查系统证书或代理设置。')
+        self.assertIn('untrusted fixture', log.getvalue())
 
     def test_missing_checksum_and_mismatch_never_install_or_quit(self):
         for checksum in (None, '0'*64):
