@@ -28,7 +28,7 @@ class UpdateTest(unittest.TestCase):
             self.assertNotIn('SSL_CERT_FILE', os.environ)
             defaults.return_value = Mock(cafile=None, capath=None)
             paths.configure_tls()
-            self.assertEqual(os.environ['SSL_CERT_FILE'], '/etc/ssl/cert.pem')
+            self.assertEqual(os.environ['SSL_CERT_FILE'], str(Path('/etc/ssl/cert.pem')))
 
     def test_frozen_mac_uses_system_ca_and_preserves_explicit_trust(self):
         with patch.object(paths,'FROZEN',True), patch.object(paths.sys,'platform','darwin'), patch.object(Path,'is_file',return_value=True):
