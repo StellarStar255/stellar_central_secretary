@@ -75,12 +75,28 @@ $('#previous').onclick=()=>{if(current>0)go(current-1);};$('#next').onclick=()=>
 const memoryGuideLink = $('#tutorial-memory-guide-link');
 const chineseMemoryGuide = memoryGuideLink.getAttribute('href');
 const englishMemoryGuide = new URL('README.md#memory-mcp', memoryGuideLink.href).href;
+const recoveryFeedback = {
+ retry: '重新连上原来的硬盘后，点「重试原目录」继续启动。',
+ existing: '如果搬过资料，选择包含 archive.sqlite3 的文件夹。程序验证成功后会记住新位置。',
+ temporary: '临时库单独保存。退出后，下次启动仍会尝试原来的目录。'
+};
+const recoveryPractice = $('#recovery-practice');
+function renderRecoveryPractice(){
+ $('#recovery-practice-feedback').textContent=t(recoveryFeedback[recoveryPractice.dataset.selection]||'');
+}
+recoveryPractice.addEventListener('click', event=>{
+ const button=event.target.closest('button[data-recovery]');
+ if(button){
+  recoveryPractice.dataset.selection=button.dataset.recovery;
+  renderRecoveryPractice();
+ }
+});
 function updateMemoryGuideLink(){
  memoryGuideLink.href = StellarI18n.language === 'en' ? englishMemoryGuide : chineseMemoryGuide;
 }
 $('#tutorial-language').value=StellarI18n.language;
 updateMemoryGuideLink();
-$('#tutorial-language').onchange=()=>{const oldDefault=t('科学月刊 · 2026年6月');const isDefault=renamedTitle===oldDefault;StellarI18n.setLanguage($('#tutorial-language').value,{persist:false});updateMemoryGuideLink();if(isDefault)renamedTitle=t('科学月刊 · 2026年6月');if(imported)ensureFile();$('#mode-badge').textContent=mode==='desktop'?t('桌面练习'):t('网页练习');go(current)};
+$('#tutorial-language').onchange=()=>{const oldDefault=t('科学月刊 · 2026年6月');const isDefault=renamedTitle===oldDefault;StellarI18n.setLanguage($('#tutorial-language').value,{persist:false});updateMemoryGuideLink();renderRecoveryPractice();if(isDefault)renamedTitle=t('科学月刊 · 2026年6月');if(imported)ensureFile();$('#mode-badge').textContent=mode==='desktop'?t('桌面练习'):t('网页练习');go(current)};
 $('#return-app').href=location.protocol==='file:'?'http://127.0.0.1:8768/':location.origin+'/';
 if(embedded){
  const close=()=>window.parent.postMessage('stellar-tutorial-close',location.origin);

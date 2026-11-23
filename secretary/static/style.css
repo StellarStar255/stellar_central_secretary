@@ -64,6 +64,9 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .directory-field{display:flex;align-items:stretch;gap:8px}
 .directory-field input{flex:1;min-width:0}
 .directory-field button{flex:none}
+.backup-actions{margin:12px 0 0}
+#backup-create-result:empty{margin:0}
+@media(max-width:520px){.directory-field-with-open{flex-wrap:wrap}.directory-field-with-open input{flex-basis:100%}}
 .library-search-field{position:relative;display:flex;flex:1;min-width:0}
 .library-result-summary,#library-result-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .library-result-summary{flex:none;min-height:2rem}
@@ -94,12 +97,13 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 @media(hover:none){.search-history-remove{visibility:visible}}
 #library-search-options [role=option]:hover,#library-search-options [aria-selected=true]{background:var(--hover)}
 @media(max-width:700px){.library-search-field{flex-basis:100%}}
-.library-directory{align-items:center;justify-content:space-between;flex-wrap:wrap}
-.library-directory p{flex:1;min-width:min(100%,14rem);margin:0;overflow-wrap:anywhere}
 #library-migration-notice{padding:10px 20px;border-bottom:1px solid var(--line);flex:none}
 #temporary-library-notice{padding:10px 20px;border-bottom:1px solid var(--line);flex:none}
+#tutorial-update-notice{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:4px 20px;border-bottom:1px solid var(--line);flex:none}
+#tutorial-update-notice strong{font-weight:550}
+#tutorial-update-open{text-decoration:underline;text-underline-offset:3px}
+#tutorial-update-dismiss{margin-inline-start:auto}
 #library-migration-message{margin:0 0 8px;overflow-wrap:anywhere}
-#data-dir-label{margin:.8em 0 .4em;font-weight:500}
 #library-location-status:empty,#library-location-preflight:empty{margin:0}
 #first-run-tutorial{width:min(1130px,94vw);height:90vh;max-height:90vh;padding:0;overflow:hidden}
 #first-run-tutorial[open]{display:grid;grid-template-rows:auto minmax(0,1fr)}

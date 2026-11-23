@@ -25,6 +25,7 @@ def check_first_run(browser, directory):
         page.goto(base)
         popup=page.locator('#first-run-tutorial')
         expect(popup).to_be_visible()
+        expect(page.locator('#tutorial-update-notice')).to_be_hidden()
         iframe=page.frame_locator('#first-run-tutorial-frame')
         expect(iframe.locator('h1')).to_have_text('Learn by trying it yourself.')
         memory_guide=iframe.locator('#tutorial-memory-mcp')
@@ -87,8 +88,9 @@ def check_first_run(browser, directory):
 
 
 def check_skipped_or_upgraded(browser, directory):
-    for legacy in (False,True):
-        root=Path(directory)/('upgrade' if legacy else 'skipped')
+    for scenario in ('skipped','upgrade','dismissed'):
+        legacy=scenario!='skipped'
+        root=Path(directory)/scenario
         if legacy:
             old=Service(root)
             old.close()
@@ -107,9 +109,48 @@ def check_skipped_or_upgraded(browser, directory):
             expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
             expect(popup).to_be_hidden()
             assert not service.tutorial_pending
+            notice=page.locator('#tutorial-update-notice')
+            if scenario=='dismissed':
+                expect(notice).to_be_visible()
+                notice.get_by_role('button',name='关闭新功能提示').click()
+                expect(notice).to_be_hidden()
+            elif legacy:
+                expect(notice).to_be_visible()
+                open_guide=notice.get_by_role('link')
+                expect(open_guide).to_have_attribute('href','/tutorial?lang=zh#whats-new')
+                with page.expect_popup() as opened:
+                    open_guide.click()
+                guide=opened.value
+                expect(guide.locator('#whats-new-title')).to_have_text('本版新功能')
+                guide.get_by_text('Windows 启动时找不到记忆目录',exact=True).click()
+                guide.locator('[data-recovery="existing"]').click()
+                expect(guide.locator('#recovery-practice-feedback')).to_contain_text('archive.sqlite3')
+                guide.locator('#tutorial-language').select_option('en')
+                expect(guide.locator('#recovery-practice-feedback')).to_contain_text('If you moved your library')
+                guide.locator('[data-recovery="temporary"]').click()
+                expect(guide.locator('#recovery-practice-feedback')).to_contain_text('stored separately')
+                guide.close()
+                expect(notice).to_be_hidden()
+                page.reload()
+                expect(page.locator('#model-label')).to_have_text('ChatGPT · Codex')
+                expect(notice).to_be_hidden()
+                page.locator('#settings-open').click()
+                expect(page.locator('#tutorial-whats-new')).to_be_visible()
+                with page.expect_popup() as reopened:
+                    page.locator('#tutorial-whats-new').click()
+                expect(reopened.value.locator('#whats-new-title')).to_be_visible()
+                reopened.value.close()
+            else:
+                expect(notice).to_be_hidden()
         finally:
             page.close()
             server.shutdown();server.server_close();service.close()
+        if legacy:
+            restarted=Service(root,first_run_tutorial=True)
+            try:
+                assert restarted.tutorial_update is None
+            finally:
+                restarted.close()
 
 with tempfile.TemporaryDirectory() as temp:
     service=Service(temp);service.archive.configure('codex',False)

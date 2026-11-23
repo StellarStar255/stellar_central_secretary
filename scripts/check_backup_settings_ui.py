@@ -1,4 +1,5 @@
 import os,sys,tempfile,threading
+from zipfile import ZipFile
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT))
@@ -30,9 +31,23 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     page.locator('#ui-language').select_option('en')
     expect(page.locator('#capture-connection-test')).to_have_text('Test ChatGPT connection')
     expect(page.locator('#backup-create')).to_have_text('Back up and verify now')
-    expect(page.locator('#library-location-change')).to_have_text('Change folder…')
+    expect(page.locator('#library-location-change')).to_have_text('Browse…')
+    download=page.locator('#backup-download')
+    expect(download).to_have_text('Download full backup')
+    expect(download).to_have_attribute('title','Download a full backup with originals, database, and JSON')
+    expect(page.locator('#data-dir')).to_have_attribute('readonly','')
+    expect(page.locator('#data-dir')).to_have_attribute('title',str(service.archive.root))
+    for width in (1300, 390):
+     page.set_viewport_size({'width':width,'height':1000})
+     for selector in ('.directory-field-with-open','.backup-actions'):
+      assert page.locator(selector).evaluate_all('rows=>rows.every(row=>row.scrollWidth<=row.clientWidth)')
+     for button in ('#library-location-change','#backup-folder-browse'):
+      assert page.locator(button).evaluate('(el,narrow)=>{const row=el.parentElement;const path=row.firstElementChild.getBoundingClientRect();return narrow?el.getBoundingClientRect().top>path.bottom:el.getBoundingClientRect().top===path.top}',width<520)
+    page.set_viewport_size({'width':1300,'height':1000})
+    assert download.evaluate("link=>link.getBoundingClientRect().left>document.querySelector('#storage-open').getBoundingClientRect().right")
     page.locator('#ui-language').select_option('zh')
-    expect(page.locator('#data-dir')).to_have_text(str(service.archive.root))
+    expect(page.locator('#data-dir')).to_have_value(str(service.archive.root))
+    expect(download).to_have_text('下载完整备份')
     expect(page.locator('#library-location-restart')).to_be_hidden()
     expect(page.locator('#library-location-change')).to_have_attribute('aria-expanded','false')
     expect(page.locator('#library-location-editor')).to_be_hidden()
@@ -95,7 +110,7 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     expect(page.locator('#library-location-status')).to_contain_text(str(destination))
     expect(page.locator('#library-location-restart')).to_be_visible()
     expect(page.locator('#library-location-editor')).to_be_hidden()
-    expect(page.locator('#data-dir')).to_contain_text(str(service.archive.root))
+    expect(page.locator('#data-dir')).to_have_value(str(service.archive.root))
     assert library_location.read()['target']==str(destination)
     service.restart_supported=True
     with patch.object(service,'runtime',return_value={'processing':1,'reading':0,'answering':0}):
@@ -174,6 +189,12 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
      old_row.get_by_role('button',name='恢复此备份',exact=True).click()
     assert restored.value.ok
     assert service.archive.get(original['id'])['title']=='Original'
-    print('PASS: compact independently scrolling history, create/verify and restore from a previous folder')
+    expect(page.locator('#settings-dialog')).to_be_hidden()
+    page.locator('#settings-open').click()
+    with page.expect_download() as exported:
+     download.click()
+    with ZipFile(exported.value.path()) as backup_zip:
+     assert {'archive.sqlite3','archive.json'} <= set(backup_zip.namelist())
+    print('PASS: bilingual directory and backup action layout, full ZIP download, create/verify and restore from a previous folder')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()

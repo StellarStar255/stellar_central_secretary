@@ -19,6 +19,7 @@
   backupFolder=status.folder;backupButtons();
   if(line&&status.last_verification){const check=status.last_verification;line.textContent+=' · '+t(check.state==='verified'?'最近验证通过：':check.state==='checking'?'正在验证备份…':'最近验证失败：')+(check.state==='checking'?'':new Date(check.checked_at).toLocaleString())}
   for(const [id,value] of Object.entries({'backup-folder':status.folder,'backup-limit':(status.max_bytes/1073741824).toFixed(1),'backup-daily-keep':status.daily_keep,'backup-other-keep':status.other_keep}))if(!dirty.has(id)&&$('#'+id))$('#'+id).value=value;
+  $('#backup-folder').title=$('#backup-folder').value;
   const verificationError=status.last_verification?.state==='failed'?status.last_verification.error:'';const failed=status.state==='error'&&status.last_error||verificationError;$('#settings-open')?.setAttribute('data-backup-warning',String(Boolean(failed)));showBackupError(status.last_error||verificationError||status.warning);
   const warning=failed?(verificationError?status.last_verification.checked_at+verificationError:status.last_attempt+status.last_error):'';if(warning&&warning!==lastWarning){lastWarning=warning;try{if(localStorage.getItem('stellar-backup-notice')===warning)return;localStorage.setItem('stellar-backup-notice',warning)}catch{}toast?.(t(verificationError?'备份检查失败，当前资料未修改：':'备份失败，已有备份保留：')+(verificationError||status.last_error))}
  }
@@ -105,7 +106,7 @@
    if(folder){
     const id=purpose+'-folder';
     $('#'+id).value=folder;
-    if(purpose==='backup'){dirty.add(id);backupButtons();$('#backup-create-result').textContent=t('请先保存新的备份目录。')}
+    if(purpose==='backup'){$('#'+id).title=folder;dirty.add(id);backupButtons();$('#backup-create-result').textContent=t('请先保存新的备份目录。')}
     else queueLocationCheck(0);
    }
   }catch(error){toast(error.message)}
@@ -182,7 +183,7 @@
   const result=$('#backup-create-result');
   for(const id of ['backup-folder','backup-limit','backup-daily-keep','backup-other-keep'])$('#'+id).addEventListener('input',()=>{
    dirty.add(id);
-   if(id==='backup-folder'){backupButtons();result.textContent=t('请先保存新的备份目录。')}
+   if(id==='backup-folder'){$('#'+id).title=$('#'+id).value;backupButtons();result.textContent=t('请先保存新的备份目录。')}
   });
   $('#backup-configure').onclick=async()=>{
    const folder=$('#backup-folder').value, fields=['backup-folder','backup-folder-browse','backup-limit','backup-daily-keep','backup-other-keep'];

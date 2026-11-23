@@ -34,6 +34,8 @@ from .chat_cleanup import clean_chats
 
 STATIC = Path(__file__).parent / 'static'
 MAX_UPLOAD = 50 * 1024 * 1024
+# Change this when the interactive tutorial adds a new set of practical guides.
+TUTORIAL_EDITION = 'windows-library-recovery'
 
 
 def validate_url(url):
@@ -89,17 +91,23 @@ def service_pdf_material(archive,item,source,scope):
 
 
 class Service:
-    def __init__(self, root, first_run_tutorial=False, memory_mcp=False):
-        new_library = first_run_tutorial and not (Path(root)/'archive.sqlite3').exists()
+    def __init__(self, root, first_run_tutorial=False, memory_mcp=False, tutorial_updates=False):
+        new_library = not (Path(root)/'archive.sqlite3').exists()
         self.archive = Archive(root); self.pool = ThreadPoolExecutor(max_workers=2)
         self.memory_mcp = memory_mcp
         self.tutorial_pending = False
-        if first_run_tutorial:
+        self.tutorial_update = None
+        if first_run_tutorial or tutorial_updates:
             with self.archive.db() as db:
-                if new_library:
+                if first_run_tutorial and new_library:
                     db.execute("INSERT OR IGNORE INTO settings VALUES ('first_run_tutorial','pending')")
                 entry = db.execute("SELECT value FROM settings WHERE key='first_run_tutorial'").fetchone()
-                self.tutorial_pending = bool(entry and entry[0]=='pending')
+                self.tutorial_pending = bool(first_run_tutorial and entry and entry[0]=='pending')
+                if new_library or entry and entry[0]=='pending':
+                    db.execute("INSERT OR REPLACE INTO settings VALUES ('tutorial_edition', ?)", (TUTORIAL_EDITION,))
+                seen = db.execute("SELECT value FROM settings WHERE key='tutorial_edition'").fetchone()
+                if not seen or seen[0] != TUTORIAL_EDITION:
+                    self.tutorial_update = TUTORIAL_EDITION
         self.quick_pool=ThreadPoolExecutor(max_workers=1);self.summary_jobs=summary_jobs.SummaryJobs()
         self.capture_pool = ThreadPoolExecutor(max_workers=4)
         self.captures = {}
@@ -1248,7 +1256,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'temporary_library':service.unavailable_library is not None, 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'tutorial_pending':service.tutorial_pending, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'temporary_library':service.unavailable_library is not None, 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1539,6 +1547,14 @@ def handler(service):
                             updated=db.execute("UPDATE settings SET value='shown' WHERE key='first_run_tutorial' AND value='pending'").rowcount
                         service.tutorial_pending=False
                     return self.send(200,{'show':updated==1})
+                if path=='/api/tutorial/acknowledge':
+                    with service.lock:
+                        if service.tutorial_update and body.get('edition') == service.tutorial_update:
+                            with service.archive.db() as db:
+                                db.execute("INSERT OR REPLACE INTO settings VALUES ('tutorial_edition', ?)",
+                                           (service.tutorial_update,))
+                            service.tutorial_update = None
+                        return self.send(200, {'edition': service.tutorial_update})
                 if path=='/api/update/check': return self.send(200, updater.check())
                 if path=='/api/update/open-log': return self.send(200, updater.open_windows_update_log())
                 if path=='/api/update/install':
@@ -1720,7 +1736,8 @@ def main(desktop=False, recover_library=None):
         if paths.FROZEN:
             log = open(destination/'app.log','a',encoding='utf-8',buffering=1)
             sys.stdout = sys.stderr = log
-        service = Service(destination, first_run_tutorial=paths.FROZEN, memory_mcp=args.memory_mcp)
+        service = Service(destination, first_run_tutorial=paths.FROZEN, memory_mcp=args.memory_mcp,
+                          tutorial_updates=unavailable is None)
         service.unavailable_library = unavailable
         service.restart_supported = unavailable is None
         stack.callback(service.close)
