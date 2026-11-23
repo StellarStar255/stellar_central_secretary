@@ -106,7 +106,7 @@ def main():
                 print('Last desktop state:', last_desktop, flush=True)
                 print('Recovery dialog still visible:', bool(recovery_window(process)), flush=True)
                 raise
-            assert Path(status['data_dir']) == library and not status['temporary_library']
+            assert Path(status['data_dir']) == library
             assert any(row['id'] == item for row in request('/api/items'))
             assert preference.read_bytes() == saved
             request('/api/shutdown', {}, status['token'])

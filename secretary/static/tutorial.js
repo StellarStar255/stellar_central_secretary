@@ -78,7 +78,7 @@ const englishMemoryGuide = new URL('README.md#memory-mcp', memoryGuideLink.href)
 const recoveryFeedback = {
  retry: '重新连上原来的硬盘后，点「重试原目录」继续启动。',
  existing: '如果搬过资料，选择包含 archive.sqlite3 的文件夹。程序验证成功后会记住新位置。',
- temporary: '临时库单独保存。退出后，下次启动仍会尝试原来的目录。'
+ new: '选择空文件夹创建新知识库。以后启动会直接打开新库，原目录里的文件会保留。',
 };
 const recoveryPractice = $('#recovery-practice');
 function renderRecoveryPractice(){

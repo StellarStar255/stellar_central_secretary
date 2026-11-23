@@ -6,7 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import uuid
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from . import paths
@@ -81,35 +81,62 @@ def _check_existing(root):
         raise Unavailable(root, '无法读取或写入记忆数据库。请检查文件权限或数据库是否损坏。') from error
 
 
+def _check_empty_library_folder(root):
+    if not root.is_dir() or root.is_mount():
+        raise Unavailable(root, '请选择一个已存在的空文件夹作为记忆目录。')
+    for entry in root.iterdir():
+        if entry.name != '.stellar-library.lock' or entry.is_symlink() or not entry.is_file():
+            raise Unavailable(root, '请选择一个已存在的空文件夹作为记忆目录。')
+
+
+def _remember_recovery_location(root, original, value):
+    previous = dict.fromkeys([*value.get('previous', []), str(original)])
+    previous.pop(str(root), None)
+    write({'active': str(root), 'previous': list(previous)})
+
+
+def _create_library(stack, root, original, value):
+    from .core import Archive
+
+    settings = preference_file().parent.resolve()
+    if paths.inside_program(root) or root.is_relative_to(settings) or settings.is_relative_to(root):
+        raise Unavailable(root, '请在程序和设置目录之外选择新知识库的文件夹。')
+    _check_empty_library_folder(root)
+    with ExitStack() as attempt:
+        try:
+            attempt.enter_context(lease(root))
+        except ValueError as error:
+            raise Unavailable(root, str(error)) from error
+        _check_empty_library_folder(root)
+        Archive(root, recover=False)
+        _check_existing(root)
+        _remember_recovery_location(root, original, value)
+        stack.enter_context(attempt.pop_all())
+
+
 def startup_directory(stack, override, recover=None):
     """Lease the current library, or an explicitly chosen recovery directory."""
     action, choice = 'retry', None
     while True:
         value = read()
         original = selected(value, override)
-        temporary = action == 'temporary'
         root = original
-        if action == 'existing':
+        if action in ('existing', 'new'):
             root = Path(choice).expanduser().resolve()
-        elif temporary:
-            root = paths._windows_metadata().with_name('Stellar Secretary Temporary Library').resolve()
         try:
+            if action == 'new':
+                _create_library(stack, root, original, value)
+                return root
             remembered = paths.remembered_windows_data_dir() if sys.platform == 'win32' and paths.FROZEN else None
             if action == 'existing' and paths.inside_program(root):
                 raise Unavailable(root, '记忆目录不能位于程序安装目录中。')
-            if temporary:
-                if (root.is_relative_to(original) or original.is_relative_to(root) or paths.inside_program(root)):
-                    raise Unavailable(root, '临时知识库与当前记忆目录或程序目录重叠。')
-                root.mkdir(parents=True, exist_ok=True)
-                if any(path.name != '.stellar-library.lock' for path in root.iterdir()):
-                    _check_existing(root)
-            elif (action == 'existing' or str(root) in (value.get('active'), value.get('source')) or
+            if (action == 'existing' or str(root) in (value.get('active'), value.get('source')) or
                   remembered is not None and root == remembered.resolve()):
                 _check_existing(root)
             else:
                 root.mkdir(parents=True, exist_ok=True)
             stack.enter_context(lease(root))
-        except OSError as error:
+        except (OSError, sqlite3.Error) as error:
             problem = Unavailable(root, '无法打开记忆目录。请检查硬盘和访问权限。')
             if recover is None:
                 raise problem from error
@@ -118,19 +145,16 @@ def startup_directory(stack, override, recover=None):
                 raise
             problem = error
         else:
-            if temporary:
-                return root, original
             if action == 'existing' and root != original:
-                previous = list(dict.fromkeys([*value.get('previous', []), str(original)]))
-                write({'active': str(root), 'previous': [path for path in previous if path != str(root)]})
-                return root, None
+                _remember_recovery_location(root, original, value)
+                return root
             destination = migrate(root, value)
             if destination != root:
                 stack.enter_context(lease(destination))
-            return destination, None
+            return destination
         response = recover(problem)
         if response is None:
-            return None, None
+            return None
         action, choice = response
 
 

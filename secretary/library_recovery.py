@@ -27,10 +27,10 @@ def choose(problem):
         box.setWindowTitle(tr('恢复记忆目录'))
         box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(tr(problem.reason) + '\n' + str(problem.root))
-        box.setInformativeText(tr('重新连接硬盘后可重试，也可以选择包含 archive.sqlite3 的文件夹。临时知识库单独保存；下次启动仍会尝试原来的目录。'))
+        box.setInformativeText(tr('可重试原目录或选择已有知识库。也可以选择空文件夹新建知识库，今后直接打开新库。'))
         retry = box.addButton(tr('重试原目录'), QMessageBox.ButtonRole.AcceptRole)
         locate = box.addButton(tr('选择已有知识库…'), QMessageBox.ButtonRole.ActionRole)
-        temporary = box.addButton(tr('打开临时知识库'), QMessageBox.ButtonRole.ActionRole)
+        create = box.addButton(tr('新建知识库…'), QMessageBox.ButtonRole.ActionRole)
         cancel = box.addButton(tr('退出程序'), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(retry)
         box.setEscapeButton(cancel)
@@ -38,10 +38,10 @@ def choose(problem):
         selected = box.clickedButton()
         if selected == retry:
             return 'retry', None
-        if selected == temporary:
-            return 'temporary', None
-        if selected != locate:
+        if selected not in (locate, create):
             return None
-        folder = QFileDialog.getExistingDirectory(None, tr('选择已有知识库…'), str(Path.home()))
+        creating = selected == create
+        title = tr('为新知识库选择空文件夹' if creating else '选择已有知识库…')
+        folder = QFileDialog.getExistingDirectory(None, title, str(Path.home()))
         if folder:
-            return 'existing', folder
+            return ('new' if creating else 'existing'), folder
