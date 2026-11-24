@@ -1,10 +1,10 @@
 """Disk-streamed local snapshots, bounded retention, and transactional local recovery."""
-import hashlib,json,logging,re,shutil,sqlite3,tempfile,threading,uuid,zipfile
+import hashlib,json,logging,re,shutil,sqlite3,threading,uuid,zipfile
 from contextlib import closing
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import sys
-from . import backup_index, paths, restore_transaction
+from . import backup_index, backup_workspace, paths, restore_transaction
 
 class Backups:
     def __init__(self,archive):
@@ -33,13 +33,14 @@ class Backups:
         if live.get('state')=='checking' and live.get('folder')==str(folder):
             verification=live
         current=state.get('state_folder',str(self.default))==str(folder)
+        temporary_size=backup_workspace.temporary_bytes(folder)
         return {'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
                 'state':state.get('state','ready') if current else 'ready',
                 'last_error':self.error if current else '',
                 'daily_retry':state.get('daily_retry') if (state.get('daily_retry') or {}).get('folder')==str(folder) else None,
                 'last_attempt':state.get('last_attempt') if current else None,
                 'warning':state.get('warning','') if current else '',
-                'used_bytes':sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
+                'temporary_bytes':temporary_size,'used_bytes':temporary_size+sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
                 'index_issue_count':sum('index_issue' in e for e in entries),
                 'last_success':max((entry['created'] for entry in verified),default=None),
                 'last_verification':verification,
@@ -153,32 +154,35 @@ class Backups:
             if expected_folder is not None and expected_folder!=str(self.folder):
                 raise ValueError('备份目录已更改，请刷新设置后重试。')
             self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
-            key=uuid.uuid4().hex;target=self.folder/(key+'.zip');temporary=target.with_suffix('.part')
+            key=uuid.uuid4().hex;target=self.folder/(key+'.zip')
             snapshot_info={'id':key,'reason':reason,'created':datetime.now(timezone.utc).isoformat()}
             try:
                 if not self.folder.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
-                with self.archive.lock,tempfile.TemporaryDirectory(dir=self.folder) as temp:
-                    snapshot=Path(temp)/'archive.sqlite3'
-                    with closing(sqlite3.connect(snapshot)) as dst,self.archive.db() as src:src.backup(dst)
-                    with closing(sqlite3.connect(snapshot)) as db:record_count=db.execute('SELECT count(*) FROM items').fetchone()[0]
-                    with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as output:
-                        manifest={}
-                        def write_file(path,name):
-                            hasher=hashlib.sha256();size=0
-                            with path.open('rb') as src,output.open(name,'w',force_zip64=True) as dst:
-                                while chunk:=src.read(1024*1024):hasher.update(chunk);size+=len(chunk);dst.write(chunk)
-                            manifest[name]={'sha256':hasher.hexdigest(),'size':size}
-                        def write_bytes(name,value):
-                            raw=value.encode();output.writestr(name,raw);manifest[name]={'sha256':hashlib.sha256(raw).hexdigest(),'size':len(raw)}
-                        write_file(snapshot,'archive.sqlite3');write_bytes('archive.json',json.dumps(self.archive.export(),ensure_ascii=False))
-                        for source in (self.archive.root/'files').iterdir():
-                            if source.is_file():write_file(source,'files/'+source.name)
-                        chats=self.archive.root/'conversations.json'
-                        if chats.exists():write_file(chats,'conversations.json')
-                        output.writestr('manifest.json',json.dumps({'version':1,'records':record_count,'files':manifest,'snapshot':snapshot_info}))
-                with temporary.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-                if temporary.stat().st_size>self.limit:raise ValueError('单份备份超过容量上限，请提高备份容量；已有备份保留。')
-                temporary.replace(target)
+                with backup_workspace.workspace(self.folder,self.archive.root) as work:
+                    temporary=work/backup_workspace.PART
+                    snapshot=work/backup_workspace.DATABASE
+                    with self.archive.lock:
+                        with closing(sqlite3.connect(snapshot)) as dst,self.archive.db() as src:src.backup(dst)
+                        with closing(sqlite3.connect(snapshot)) as db:record_count=db.execute('SELECT count(*) FROM items').fetchone()[0]
+                        with zipfile.ZipFile(temporary,'w',zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as output:
+                            manifest={}
+                            def write_file(path,name):
+                                hasher=hashlib.sha256();size=0
+                                with path.open('rb') as src,output.open(name,'w',force_zip64=True) as dst:
+                                    while chunk:=src.read(1024*1024):hasher.update(chunk);size+=len(chunk);dst.write(chunk)
+                                manifest[name]={'sha256':hasher.hexdigest(),'size':size}
+                            def write_bytes(name,value):
+                                raw=value.encode();output.writestr(name,raw);manifest[name]={'sha256':hashlib.sha256(raw).hexdigest(),'size':len(raw)}
+                            write_file(snapshot,'archive.sqlite3');write_bytes('archive.json',json.dumps(self.archive.export(),ensure_ascii=False))
+                            for source in (self.archive.root/'files').iterdir():
+                                if source.is_file():write_file(source,'files/'+source.name)
+                            chats=self.archive.root/'conversations.json'
+                            if chats.exists():write_file(chats,'conversations.json')
+                            output.writestr('manifest.json',json.dumps({'version':1,'records':record_count,'files':manifest,'snapshot':snapshot_info}))
+                    snapshot.unlink()
+                    with temporary.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+                    if temporary.stat().st_size>self.limit:raise ValueError('单份备份超过容量上限，请提高备份容量；已有备份保留。')
+                    temporary.replace(target)
                 value={**snapshot_info,'size':target.stat().st_size,'sha256':digest}
                 meta=self.folder/(key+'.json')
                 backup_index.save(meta,value)
@@ -194,7 +198,6 @@ class Backups:
                 self._save_state(state='ready',last_error='',daily_retry=None)
                 self.error='';return {**value,'folder':str(self.folder)}
             except Exception as error:
-                if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
                 self.error=str(error);self._save_state(state='error',last_error=self.error);raise
     def _find_entry(self,key):
         matches=[entry for entry in self.entries() if entry['id']==key]
@@ -247,6 +250,8 @@ class Backups:
                 raise
     def start(self):
         def loop():
+            for folder in {self.folder,self.default,*map(Path,self.config.get('previous_folders',[]))}:
+                backup_workspace.recover(folder,self.archive.root)
             self.repair_indexes()
             while not self.stop.is_set():
                 try:self.due()
