@@ -51,15 +51,17 @@ class RestoreTransactionTest(unittest.TestCase):
     def test_process_exit_before_and_after_commit_and_during_rollback(self):
         for point in ('previous-files', 'files', 'chats', 'committed'):
             with self.subTest(point=point), tempfile.TemporaryDirectory() as folder:
-                root = Path(folder)
+                root = Path(folder).resolve()
                 archive = Archive(root)
                 first, _ = archive.add('Snapshot', 'body', filename='first.txt', data=b'first')
                 chats = root/'conversations.json'
                 chats.write_text('["snapshot"]')
-                snapshot = Backups(archive).create()
+                backups = Backups(archive)
+                backups.configure({'other_keep': 1})
+                snapshot = backups.create('before-restore')
                 latest, _ = archive.add('Live', 'other', filename='latest.txt', data=b'latest')
                 chats.write_text('["live"]')
-                args = [sys.executable, '-c', INTERRUPT, folder, snapshot['id']]
+                args = [sys.executable, '-c', INTERRUPT, str(root), snapshot['id']]
                 self.assertEqual(subprocess.run([*args, point], timeout=30).returncode, 73)
                 if point == 'chats':
                     self.assertEqual(subprocess.run([*args, 'discarded-files'], timeout=30).returncode, 73)
@@ -75,6 +77,22 @@ class RestoreTransactionTest(unittest.TestCase):
                     self.assertEqual(reopened.get(latest)['title'], 'Live')
                     self.assertEqual((root/'files'/latest).read_bytes(), b'latest')
                     self.assertEqual(chats.read_text(), '["live"]')
+                from threading import Event
+                started = Event()
+                backups = Backups(reopened)
+                backups.due = started.set
+                backups.start()
+                try:
+                    self.assertTrue(started.wait(5))
+                finally:
+                    backups.close()
+                entries = backups.entries()
+                if point == 'committed':
+                    self.assertEqual(len(entries), 1)
+                    self.assertFalse(backups.restore_protected())
+                else:
+                    self.assertEqual(len(entries), 2)
+                    self.assertEqual(backups.restore_protected(), {entry['id'] for entry in entries})
                 self.assertFalse((root/JOURNAL).exists())
                 self.assertFalse(list(root.glob('.stellar-restore-*')))
 

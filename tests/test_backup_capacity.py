@@ -151,3 +151,39 @@ class BackupCapacityTest(unittest.TestCase):
     self.assertEqual([e['id'] for e in backups.entries()],[verified['id']])
     self.assertEqual(backups.verify(verified['id'])['verification']['state'],'verified')
    finally:service.close()
+
+ def test_failed_restore_keeps_both_snapshots_until_successful_retry(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(Path(temp).resolve())
+   try:
+    backups=service.backups
+    backups.configure({'other_keep':1})
+    archive=service.archive
+    item,_=archive.add('Selected version','body')
+    chats=archive.root/'conversations.json'
+    chats.write_text('["selected"]')
+    selected=backups.create('before-restore')
+    archive.update(item,title='Before attempt')
+    chats.write_text('["current"]')
+    with patch('secretary.restore_transaction.shutil.copyfile',side_effect=PermissionError('locked chats')):
+     with self.assertRaisesRegex(PermissionError,'locked chats'):
+      backups.restore(selected['id'])
+    self.assertEqual(archive.get(item)['title'],'Before attempt')
+    self.assertEqual(chats.read_text(),'["current"]')
+    rollback,=[e for e in backups.entries() if e['id']!=selected['id']]
+    for entry in (selected,rollback):
+     self.assertEqual(backups.verify(entry['id'])['verification']['state'],'verified')
+    self.assertFalse(service.storage.preview()['items'])
+    backups=Backups(archive)
+    backups.limit=max(selected['size'],rollback['size'])*2
+    backups.due()
+    self.assertEqual(backups.restore_protected(),{selected['id'],rollback['id']})
+    self.assertTrue(backups.restore(selected['id'])['ok'])
+    self.assertEqual(archive.get(item)['title'],'Selected version')
+    self.assertEqual(chats.read_text(),'["selected"]')
+    self.assertFalse(backups.restore_protected())
+    latest,=[e for e in backups.entries() if e['reason']=='before-restore']
+    self.assertTrue(backups.restore(latest['id'])['ok'])
+    self.assertEqual(archive.get(item)['title'],'Before attempt')
+    self.assertEqual(chats.read_text(),'["current"]')
+   finally:service.close()

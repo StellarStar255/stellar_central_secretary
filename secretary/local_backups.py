@@ -133,20 +133,28 @@ class Backups:
                             # Leave the original files intact and continue checking other snapshots.
                             logging.getLogger(__name__).warning('Backup index %s: %s',entry['id'],error)
 
+    def restore_protected(self):
+        return set(self.state.get('restore_protected', []))
+
     def _prune(self,keep):
+        protected=self.restore_protected() | {keep}
         active=[value for value in self.entries() if Path(value['folder'])==self.folder and self.owns(value)]
         remove=set()
         for kind in ('daily','upgrade','manual','before-restore'):
             remove.update(value['id'] for value in [entry for entry in active if not entry.get('index_issue') and entry['reason']==kind][self.daily_keep if kind=='daily' else self.other_keep:])
+        remove.difference_update(protected)
         total=sum(value['size'] for value in active if value['id'] not in remove)
         for value in reversed(active):
             if total<=self.limit:break
-            if value.get('index_issue') or value['id']==keep or value['id'] in remove:continue
+            if value.get('index_issue') or value['id'] in protected or value['id'] in remove:continue
             remove.add(value['id']);total-=value['size']
         for key in remove:
             try:(self.folder/(key+'.zip')).unlink(missing_ok=True);(self.folder/(key+'.json')).unlink(missing_ok=True)
             except OSError:continue  # An open Windows download may temporarily hold an old backup.
         used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder and self.owns(value))
+        if used>self.limit and self.restore_protected():
+            self._save_state(warning='为保留恢复所需的备份，暂时超过容量上限。')
+            return
         self._save_state(warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
     def _limit_failed_snapshots(self, newest):
         # Rotate diagnostics across automatic, manual and pre-upgrade attempts.
@@ -170,14 +178,17 @@ class Backups:
             payload.unlink()
             payload.with_suffix('.json').unlink()
 
-    def create(self,reason='manual',*,expected_folder=None):
+    def create(self,reason='manual',*,expected_folder=None,restore_source=None,transaction=None):
         with self.lock:
             if expected_folder is not None and expected_folder!=str(self.folder):
                 raise ValueError('备份目录已更改，请刷新设置后重试。')
             if self.library_id is None:
                 self._save_config(dict(self.config))
-            self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
             key=uuid.uuid4().hex;target=self.folder/(key+'.zip')
+            previous=self.restore_protected()
+            protection={'restore_protected':sorted(previous | {restore_source,key}),
+                        'restore_transaction':transaction} if restore_source else {}
+            self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason,**protection)
             snapshot_info={'library_id':self.library_id,'id':key,'reason':reason,'created':datetime.now(timezone.utc).isoformat()}
             try:
                 if not self.folder.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
@@ -214,13 +225,18 @@ class Backups:
                 except Exception:
                     self._limit_failed_snapshots(key)
                     raise
+                if restore_source:
+                    self._save_state(restore_protected=[restore_source,key])
                 if value['verification']['state']!='verified':
                     self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
                     return value
-                self._prune(key)
+                if not restore_source:
+                    self._prune(key)
                 self._save_state(state='ready',last_error='',daily_retry=None)
                 self.error='';return {**value,'folder':str(self.folder)}
             except Exception as error:
+                if restore_source:
+                    self._save_state(restore_protected=sorted(previous | {restore_source}))
                 self.error=str(error);self._save_state(state='error',last_error=self.error);raise
     def _find_entry(self,key):
         matches=[entry for entry in self.entries() if entry['id']==key]
@@ -271,11 +287,31 @@ class Backups:
                 self._save_state(daily_retry={'folder':str(self.folder),'attempts':count,
                                               'next_attempt':(now+delay).isoformat(),'error':str(error)})
                 raise
+    def _finish_restore_retention(self):
+        protected=self.state.get('restore_protected',[])
+        if len(protected)!=2:
+            return
+        rollback=self._find_entry(protected[1])
+        self._save_state(restore_protected=[],restore_transaction=None)
+        if (rollback['folder']==str(self.folder)
+                and rollback.get('verification',{}).get('state')=='verified'):
+            self._prune(rollback['id'])
+
     def start(self):
         def loop():
             for folder in {self.folder,self.default,*map(Path,self.config.get('previous_folders',[]))}:
                 backup_workspace.recover(folder,self.archive.root)
             self.repair_indexes()
+            with self.lock:
+                transaction=self.state.get('restore_transaction')
+                if transaction:
+                    with self.archive.db() as db:
+                        committed=db.execute('SELECT value FROM settings WHERE key=?',
+                                             (restore_transaction.COMMIT_KEY,)).fetchone()
+                    if committed and committed[0]==transaction:
+                        try:self._finish_restore_retention()
+                        except (ValueError,OSError):
+                            logging.getLogger(__name__).warning('Post-restore backup cleanup deferred',exc_info=True)
             while not self.stop.is_set():
                 try:self.due()
                 except Exception as error:self.error=str(error)
@@ -311,6 +347,9 @@ class Backups:
                 # Upgrade the staged database, never the user's live library, before replacement.
                 from .core import Archive
                 Archive(stage,recover=False)
-                self.create('before-restore')
+                self.create('before-restore',restore_source=key,transaction=transaction)
                 restore_transaction.install(self.archive.root,stage,transaction)
+                try:self._finish_restore_retention()
+                except (ValueError,OSError):
+                    logging.getLogger(__name__).warning('Post-restore backup cleanup deferred',exc_info=True)
             return {'ok':True,'restored':key}

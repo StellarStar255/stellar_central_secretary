@@ -1149,6 +1149,7 @@
   "备份目录不能放在原件或工作文件目录内": "The backup folder cannot be inside the originals or working-files folders",
   "备份目录不可写": "The backup folder is not writable",
   "单份备份超过容量上限，请提高备份容量；已有备份保留。": "One backup exceeds the storage limit. Increase the limit; existing backups are retained.",
+  "为保留恢复所需的备份，暂时超过容量上限。": "Storage temporarily exceeds the limit to retain the backups needed for recovery.",
   "部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。": "Some old backups are in use and storage temporarily exceeds the limit. Close those files and back up again.",
   "上传暂存已过期，请重新开始": "The staged upload expired. Restart the upload.",
   "上传暂存不完整，请重新开始": "The staged upload is incomplete. Restart the upload.",

@@ -60,7 +60,8 @@ class Storage:
                 value=json.loads(meta.read_text());directory=meta.parent.parent
                 if value.get('kind')=='attachment-deletion' and re.fullmatch('[a-f0-9]{32}',str(value.get('item_id',''))):add('deleted_attachments',str(value['attachment']['name'])[:300],files(directory),directory)
             except (OSError,ValueError,KeyError):continue
-        entries=[entry for entry in service.backups.entries() if service.backups.owns(entry)];protected=set()
+        entries=[entry for entry in service.backups.entries() if service.backups.owns(entry)]
+        protected=service.backups.restore_protected()
         for folder in self.folders():
             values=[entry for entry in entries if Path(entry['folder'])==folder]
             if values:protected.add(values[0]['id'])
