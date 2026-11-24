@@ -12,11 +12,22 @@ class Backups:
         self.lock=threading.RLock();self.stop=threading.Event();self.config_path=archive.root/'backup-settings.json';self.state_path=archive.root/'backup-status.json'
         try:self.config=json.loads(self.config_path.read_text())
         except (OSError,ValueError):self.config={}
+        self.library_id=self.config.get('library_id')
+        if not isinstance(self.library_id,str) or not re.fullmatch('[0-9a-f]{32}',self.library_id):
+            self.library_id=None
         self.folder=Path(self.config.get('folder',str(self.default)));self.limit=int(self.config.get('max_bytes',10*1024**3));self.daily_keep=int(self.config.get('daily_keep',7));self.other_keep=int(self.config.get('other_keep',3))
         try:self.state=json.loads(self.state_path.read_text())
         except (OSError,ValueError):self.state={}
         self.error=self.state.get('last_error','')
         if self.state.get('state')=='creating':self.error='上次备份未完成，请重新备份。';self.state.update(state='error',last_error=self.error)
+    def _save_config(self,value):
+        value['library_id']=self.library_id or uuid.uuid4().hex
+        temporary=self.config_path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(value))
+        temporary.replace(self.config_path)
+        self.config=value
+        self.library_id=value['library_id']
+
     def _save_state(self,**values):
         if 'state' in values:
             values['state_folder']=str(self.folder)
@@ -26,21 +37,22 @@ class Backups:
         entries=self._entries(folder)
         try:available=folder.is_dir()
         except OSError:available=False
-        verified=[entry for entry in entries if entry.get('verification',{}).get('state')=='verified']
-        verification=max((entry['verification'] for entry in entries if entry.get('verification')),
+        owned=[entry for entry in entries if self.owns(entry)]
+        verified=[entry for entry in owned if entry.get('verification',{}).get('state')=='verified']
+        verification=max((entry['verification'] for entry in owned if entry.get('verification')),
                          key=lambda check:check.get('checked_at',''),default=None)
         live=state.get('last_verification') or {}
         if live.get('state')=='checking' and live.get('folder')==str(folder):
             verification=live
         current=state.get('state_folder',str(self.default))==str(folder)
         temporary_size=backup_workspace.temporary_bytes(folder)
-        return {'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
+        return {'library_id':self.library_id,'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
                 'state':state.get('state','ready') if current else 'ready',
                 'last_error':self.error if current else '',
                 'daily_retry':state.get('daily_retry') if (state.get('daily_retry') or {}).get('folder')==str(folder) else None,
                 'last_attempt':state.get('last_attempt') if current else None,
                 'warning':state.get('warning','') if current else '',
-                'temporary_bytes':temporary_size,'used_bytes':temporary_size+sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
+                'owned_bytes':sum(entry['size'] for entry in owned),'temporary_bytes':temporary_size,'used_bytes':temporary_size+sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
                 'index_issue_count':sum('index_issue' in e for e in entries),
                 'last_success':max((entry['created'] for entry in verified),default=None),
                 'last_verification':verification,
@@ -68,13 +80,16 @@ class Backups:
             except OSError as error:raise ValueError('备份目录不可写') from error
             known=list(dict.fromkeys([*self.config.get('previous_folders',[]),str(self.folder)]))[-5:]
             value={'revision':self.config.get('revision',0)+1,'folder':str(folder),'max_bytes':limit,'daily_keep':daily,'other_keep':other,'previous_folders':known}
-            temporary=self.config_path.with_suffix('.tmp');temporary.write_text(json.dumps(value));temporary.replace(self.config_path)
-            self.config=value;self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
+            self._save_config(value)
+            self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
             return self.status()
     def entries(self):
         folders=list(dict.fromkeys([str(self.folder),str(self.default),*self.config.get('previous_folders',[])]))
         result=[entry for location in folders for entry in self._entries(Path(location))]
         return sorted(result,key=lambda value:value['created'],reverse=True)
+    def owns(self,entry):
+        return self.library_id is not None and entry.get('library_id')==self.library_id
+
     _entries = staticmethod(backup_index.entries)
 
     def _repair_index(self, entry):
@@ -90,8 +105,12 @@ class Backups:
         snapshot=check.pop('snapshot',None)
         checked=datetime.now(timezone.utc).isoformat()
         value={k:v for k,v in entry.items() if k not in ('folder','index_issue')}
+        value.pop('library_id',None)
         if (isinstance(snapshot,dict) and snapshot.get('id')==entry['id']
                 and snapshot.get('reason') in backup_index.REASONS and backup_index.valid_date(snapshot.get('created'))):
+            owner=snapshot.get('library_id')
+            if isinstance(owner,str) and re.fullmatch('[0-9a-f]{32}',owner):
+                value['library_id']=owner
             value.update(created=snapshot['created'],reason=snapshot['reason'])
         value.update(sha256=digest,verification={**check,'id':entry['id'],'checked_at':checked})
         backup_index.save(source.with_suffix('.json'),value)
@@ -113,7 +132,7 @@ class Backups:
                             logging.getLogger(__name__).warning('Backup index %s: %s',entry['id'],error)
 
     def _prune(self,keep):
-        active=[value for value in self.entries() if Path(value['folder'])==self.folder]
+        active=[value for value in self.entries() if Path(value['folder'])==self.folder and self.owns(value)]
         remove=set()
         for kind in ('daily','upgrade','manual','before-restore'):
             remove.update(value['id'] for value in [entry for entry in active if not entry.get('index_issue') and entry['reason']==kind][self.daily_keep if kind=='daily' else self.other_keep:])
@@ -125,11 +144,11 @@ class Backups:
         for key in remove:
             try:(self.folder/(key+'.zip')).unlink(missing_ok=True);(self.folder/(key+'.json')).unlink(missing_ok=True)
             except OSError:continue  # An open Windows download may temporarily hold an old backup.
-        used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder)
+        used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder and self.owns(value))
         self._save_state(warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
     def _limit_failed_snapshots(self, newest):
         # Rotate diagnostics across automatic, manual and pre-upgrade attempts.
-        entries=self._entries(self.folder)
+        entries=[entry for entry in self._entries(self.folder) if self.owns(entry)]
         current=next((entry for entry in entries if entry['id']==newest),None)
         if not current or current.get('verification',{}).get('state')!='failed':
             return
@@ -153,9 +172,11 @@ class Backups:
         with self.lock:
             if expected_folder is not None and expected_folder!=str(self.folder):
                 raise ValueError('备份目录已更改，请刷新设置后重试。')
+            if self.library_id is None:
+                self._save_config(dict(self.config))
             self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
             key=uuid.uuid4().hex;target=self.folder/(key+'.zip')
-            snapshot_info={'id':key,'reason':reason,'created':datetime.now(timezone.utc).isoformat()}
+            snapshot_info={'library_id':self.library_id,'id':key,'reason':reason,'created':datetime.now(timezone.utc).isoformat()}
             try:
                 if not self.folder.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
                 with backup_workspace.workspace(self.folder,self.archive.root) as work:
@@ -237,7 +258,7 @@ class Backups:
                 retry={}
             if retry and now.isoformat()<retry['next_attempt']:
                 return
-            if any(value['reason']=='daily' and value.get('verification',{}).get('state')=='verified'
+            if any(self.owns(value) and value['reason']=='daily' and value.get('verification',{}).get('state')=='verified'
                    and value['created'][:10]==now.date().isoformat() for value in self._entries(self.folder)):
                 return
             try:

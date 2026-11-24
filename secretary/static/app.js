@@ -1277,6 +1277,7 @@ async function localBackupList(){
   const verificationLabel=verificationState==='verified'&&verification.mode==='legacy'
     ?'完整性已验证（旧版无逐文件清单）':verificationNames[verificationState]||'尚未验证';
   metadata.textContent=[(entry.size/1048576).toFixed(1)+' MB',t(issueNames[entry.index_issue]||verificationLabel),
+    !entry.library_id?t('来源知识库未知'):entry.library_id!==result.status?.library_id?t('其他知识库'):'',
     entry.folder&&entry.folder!==result.status?.folder?t('旧备份目录'):''].filter(Boolean).join(' · ');
   if(verification?.checked_at)metadata.title=t('最近验证：')+format(verification.checked_at);
   details.append(title,metadata);

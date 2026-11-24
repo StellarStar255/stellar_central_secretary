@@ -1,6 +1,7 @@
 """Enumerate managed snapshots independently of the health of their sidecar files."""
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 
 REASONS = ('manual', 'upgrade', 'before-restore', 'daily', 'recovered')
@@ -68,6 +69,8 @@ def read_entry(folder, key):
     entry = {'id': key, 'folder': str(folder), 'size': stat.st_size if present else 0,
              'created': created if valid_date(created) else datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
              'reason': reason if reason in REASONS else 'recovered'}
+    if isinstance(index.get('library_id'), str) and re.fullmatch(r'[0-9a-f]{32}', index['library_id']):
+        entry['library_id'] = index['library_id']
     if has_digest:
         entry['sha256'] = digest
     if issue:
@@ -78,6 +81,9 @@ def read_entry(folder, key):
 
 
 def save(meta, value):
-    temporary = meta.with_suffix('.index-part')
-    temporary.write_text(json.dumps(value), encoding='utf-8')
-    temporary.replace(meta)
+    temporary = meta.with_suffix('.'+uuid.uuid4().hex+'.index-part')
+    try:
+        temporary.write_text(json.dumps(value), encoding='utf-8')
+        temporary.replace(meta)
+    finally:
+        temporary.unlink(missing_ok=True)
