@@ -9,7 +9,7 @@ import uuid
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
-from . import backup_identity, paths
+from . import backup_identity, backup_index, paths
 
 
 class Unavailable(ValueError):
@@ -288,7 +288,7 @@ def schedule(root, requested, backup_folder):
     return status(root)
 
 
-def _copy(root, stage):
+def _copy(root, stage, target):
     # Keep the previous default backups discoverable without duplicating their ZIP files.
     shutil.copytree(root, stage, symlinks=True,
                     ignore=lambda directory, names: _copy_ignore(root, Path(directory), names),
@@ -302,7 +302,13 @@ def _copy(root, stage):
     previous = root/'local-backups'
     if previous.is_dir():
         settings = json.loads(config.read_text()) if config.is_file() else {}
-        settings['previous_folders'] = list(dict.fromkeys([*settings.get('previous_folders', []), str(previous)]))
+        default = target/'local-backups'
+        current = Path(settings.get('folder', str(previous)))
+        if backup_index.directory_key(current) == backup_index.directory_key(previous):
+            settings.pop('folder', None)
+            current = default
+        settings['previous_folders'] = backup_index.previous_folders(
+            settings.get('previous_folders', []), previous, current=current, default=default)
         config.write_text(json.dumps(settings))
 
 
@@ -320,7 +326,7 @@ def migrate(root, value):
             if error := _check_destination(target, _estimate_bytes(root)).get('error'):
                 raise ValueError(error)
             stage = Path(tempfile.mkdtemp(prefix='.stellar-move-', dir=target.parent))
-            _copy(root, stage)
+            _copy(root, stage, target)
             (stage/marker.name).write_text(value['migration'])
             # Keep the staging directory on the destination disk so publication is atomic.
             if sys.platform == 'win32':

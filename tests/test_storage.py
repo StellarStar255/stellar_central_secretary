@@ -77,3 +77,24 @@ class StorageTest(unittest.TestCase):
     self.assertEqual([e['id'] for e in backups.entries()],[latest['id']])
     self.assertEqual(backups.verify(latest['id'])['verification']['state'],'verified')
    finally:service.close()
+
+ def test_latest_copy_in_old_folder_does_not_protect_extra_copy_elsewhere(self):
+  from shutil import copyfile
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp).resolve()
+   service=Service(root/'data')
+   try:
+    backups=service.backups
+    old=backups.folder
+    snapshot=backups.create()
+    backups.configure({'folder':str(root/'external')})
+    for suffix in ('.zip','.json'):
+     name=snapshot['id']+suffix
+     copyfile(old/name,backups.folder/name)
+    backups.create()
+    plan=service.storage.preview()
+    candidate,=plan['items']
+    self.assertEqual(candidate['backup_folder'],str(backups.folder))
+    service.storage.clean({'token':plan['token'],'ids':[candidate['id']],'confirmed':True})
+    self.assertTrue(backups.restore(snapshot['id'],folder=str(old))['ok'])
+   finally:service.close()

@@ -73,15 +73,16 @@ class Storage:
             except (OSError,ValueError,KeyError):continue
         entries=[entry for entry in service.backups.entries() if service.backups.owns(entry)]
         copies=Counter(entry['id'] for entry in entries)
-        protected=service.backups.restore_protected()
+        restore_protected=service.backups.restore_protected()
+        protected=set()
         for folder in backup_folders:
             values=[entry for entry in entries if Path(entry['folder'])==folder]
-            if values:protected.add(values[0]['id'])
+            if values:protected.add((folder,values[0]['id']))
             verified=next((entry for entry in values if entry.get('verification',{}).get('state')=='verified'),None)
-            if verified:protected.add(verified['id'])
+            if verified:protected.add((folder,verified['id']))
         for entry in entries:
-            if not entry.get('index_issue') and entry['id'] not in protected:
-                folder=Path(entry['folder'])
+            folder=Path(entry['folder'])
+            if not entry.get('index_issue') and entry['id'] not in restore_protected and (folder,entry['id']) not in protected:
                 item=add('backups',entry['created'],[folder/(entry['id']+'.zip'),folder/(entry['id']+'.json')])
                 if item and copies[entry['id']]>1:
                     item.update(backup_folder=str(folder),current_folder=folder==service.backups.folder)

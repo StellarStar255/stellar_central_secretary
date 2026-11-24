@@ -44,14 +44,14 @@ class Backups:
         verification=max((entry['verification'] for entry in owned if entry.get('verification')),
                          key=lambda check:check.get('checked_at',''),default=None)
         live=state.get('last_verification') or {}
-        if live.get('state')=='checking' and live.get('folder')==str(folder):
+        if live.get('state')=='checking' and backup_index.same_folder(live.get('folder'),folder):
             verification=live
-        current=state.get('state_folder',str(self.default))==str(folder)
+        current=backup_index.same_folder(state.get('state_folder',str(self.default)),folder)
         temporary_size=backup_workspace.temporary_bytes(folder)
         return {'library_id':self.library_id,'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
                 'state':state.get('state','ready') if current else 'ready',
                 'last_error':self.error if current else '',
-                'daily_retry':state.get('daily_retry') if (state.get('daily_retry') or {}).get('folder')==str(folder) else None,
+                'daily_retry':state.get('daily_retry') if backup_index.same_folder((state.get('daily_retry') or {}).get('folder'),folder) else None,
                 'last_attempt':state.get('last_attempt') if current else None,
                 'warning':state.get('warning','') if current else '',
                 'owned_bytes':sum(entry['size'] for entry in owned),'temporary_bytes':temporary_size,'used_bytes':temporary_size+sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
@@ -80,7 +80,8 @@ class Backups:
             probe=folder/('.write-test-'+uuid.uuid4().hex)
             try:folder.mkdir(parents=True,exist_ok=True);probe.write_bytes(b'');probe.unlink()
             except OSError as error:raise ValueError('备份目录不可写') from error
-            known=list(dict.fromkeys([*self.config.get('previous_folders',[]),str(self.folder)]))[-5:]
+            known=backup_index.previous_folders(self.config.get('previous_folders',[]),self.folder,
+                                                current=folder,default=self.default)
             value={'revision':self.config.get('revision',0)+1,'folder':str(folder),'max_bytes':limit,'daily_keep':daily,'other_keep':other,'previous_folders':known}
             self._save_config(value)
             self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
@@ -278,7 +279,7 @@ class Backups:
             if self.stop.is_set():return
             now=datetime.now(timezone.utc)
             retry=self.state.get('daily_retry') or {}
-            if retry.get('folder')!=str(self.folder):
+            if not backup_index.same_folder(retry.get('folder'),self.folder):
                 retry={}
             if retry and now.isoformat()<retry['next_attempt']:
                 return
@@ -296,7 +297,7 @@ class Backups:
     def _finish_restore_retention(self):
         protected=self.state.get('restore_protected',[])
         self._save_state(restore_protected=[],restore_transaction=None)
-        if len(protected)!=2 or self.state.get('state_folder')!=str(self.folder):
+        if len(protected)!=2 or not backup_index.same_folder(self.state.get('state_folder'),self.folder):
             return
         # Once the restore has committed, missing files must not keep it pending.
         owned=[entry for entry in self.entries()

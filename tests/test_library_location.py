@@ -127,6 +127,20 @@ class LibraryLocationTest(unittest.TestCase):
         moved_backups.restore(old['id'])
         self.assertEqual(moved.get(item)['title'], 'Memory')
 
+    def test_move_rebinds_explicit_default_and_caps_old_locations(self):
+        self.backups.configure({'folder':str(self.backups.default)})
+        saved = self.backups.create()
+        previous = [str(self.root.parent/str(i)) for i in range(6)]
+        self.backups._save_config({**self.backups.config,'previous_folders':previous})
+        library_location.schedule(self.root, str(self.target), self.backups.folder)
+        with library_location.lease(self.root):
+            self.assertEqual(library_location.migrate(self.root, library_location.read()), self.target)
+        moved = Backups(Archive(self.target))
+        self.assertEqual(moved.folder, self.target/'local-backups')
+        self.assertEqual(moved.config['previous_folders'],[*previous[-4:],str(self.backups.default)])
+        moved.restore(saved['id'], folder=str(self.backups.default))
+        self.assertTrue(any(moved.folder.glob('*.zip')))
+
     def test_unavailable_destination_keeps_original_and_can_cancel(self):
         library_location.schedule(self.root, str(self.target), self.backups.folder)
         self.target.rmdir()

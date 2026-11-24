@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 REASONS = ('manual', 'upgrade', 'before-restore', 'daily', 'recovered')
 
@@ -17,6 +18,29 @@ def directory_key(path):
         pass
     # Keep disconnected drives and paths on filesystems without file IDs usable.
     return os.path.normcase(os.path.realpath(path))
+
+
+def same_folder(saved, folder):
+    if saved == str(folder):
+        return True
+    return (isinstance(saved, str) and Path(saved).is_absolute()
+            and directory_key(Path(saved)) == directory_key(folder))
+
+
+def previous_folders(history, departed, *, current, default):
+    """Keep the last five distinct old folders, oldest first on disk."""
+    seen = {directory_key(current), directory_key(default)}
+    recent = []
+    for value in reversed([*history, str(departed)]):
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            continue
+        key = directory_key(Path(value))
+        if key not in seen:
+            recent.append(value)
+            seen.add(key)
+            if len(recent) == 5:
+                break
+    return recent[::-1]
 
 
 def valid_date(value):

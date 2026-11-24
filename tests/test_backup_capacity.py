@@ -187,3 +187,50 @@ class BackupCapacityTest(unittest.TestCase):
     self.assertEqual(archive.get(item)['title'],'Before attempt')
     self.assertEqual(chats.read_text(),'["current"]')
    finally:service.close()
+
+ def test_recent_folder_history_survives_revisit_resave_and_restart(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp).resolve()
+   service=Service(root/'library')
+   try:
+    backups=service.backups
+    item,_=service.archive.add('Before','memory')
+    for name in 'ABCDEAFG':
+     backups.configure({'folder':str(root/name)})
+     if name=='A':
+      saved=backups.create()
+    expected=[str(root/name/'Stellar Secretary Backups') for name in 'CDEAF']
+    backups.configure({'other_keep':2})
+    self.assertEqual(backups.config['previous_folders'],expected)
+    offline=root/'D'
+    offline.rename(root/'disconnected')
+    reopened=Backups(service.archive)
+    reopened.configure({'daily_keep':2})
+    self.assertEqual(reopened.config['previous_folders'],expected)
+    service.archive.update(item,title='After')
+    reopened.restore(saved['id'],folder=expected[-2])
+    self.assertEqual(service.archive.get(item)['title'],'Before')
+   finally:service.close()
+
+ def test_alias_history_and_retry_share_one_physical_directory(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp).resolve()
+   service=Service(root/'library')
+   try:
+    backups=service.backups
+    backups.configure({'folder':str(root/'A')})
+    folder=backups.folder
+    alias=root/'alias'
+    try:alias.symlink_to(folder,target_is_directory=True)
+    except OSError:self.skipTest('directory symlinks unavailable')
+    retry={'folder':str(alias),'next_attempt':'2999-01-01','attempts':1}
+    backups._save_config({**backups.config,'previous_folders':[str(alias)]})
+    backups._save_state(state='error',daily_retry=retry)
+    backups._save_state(state_folder=str(alias))
+    self.assertEqual(backups.status()['state'],'error')
+    self.assertEqual(backups.status()['daily_retry'],retry)
+    backups.due()
+    self.assertFalse(backups.entries())
+    backups.configure({'folder':str(root/'B')})
+    self.assertEqual(backups.config['previous_folders'],[str(folder)])
+   finally:service.close()
