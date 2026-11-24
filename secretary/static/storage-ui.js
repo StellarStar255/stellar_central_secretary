@@ -1,6 +1,6 @@
 /* A preview is mandatory; no cleanup target is selected automatically. */
 (()=>{
- let api,toast,dialog,plan,busy=false;const t=s=>StellarI18n.t(s),names={originals:'原件',backups:'本机备份',deleted_attachments:'已删附件恢复副本',uploads:'上传暂存',working_files:'编辑工作文件',video_cache:'视频缓存',database:'数据库',other:'其他本机文件'};
+ let api,dialog,confirmation,plan,pendingCleanup,busy=false;const t=s=>StellarI18n.t(s),names={originals:'原件',backups:'本机备份',deleted_attachments:'已删附件恢复副本',uploads:'上传暂存',working_files:'编辑工作文件',video_cache:'视频缓存',database:'数据库',other:'其他本机文件'};
  const field=selector=>dialog.querySelector(selector);
  const size=bytes=>(bytes/1048576).toFixed(2)+' MB';
  function create(){
@@ -13,10 +13,27 @@
    <button type="button" class="secondary" data-storage-select-all aria-controls="storage-candidates" hidden>${t('全选')}</button>
    <div id="storage-candidates" data-storage-items></div><p data-storage-selected></p>
    <button type="button" class="secondary" data-storage-refresh>${t('重新扫描')}</button>
-   <button type="button" class="danger" data-storage-clean disabled>${t('清理所选项目')}</button>`;
-  document.body.append(dialog);
+   <button type="button" class="secondary" data-storage-clean disabled>${t('清理所选项目')}</button>
+   <p role="status" data-storage-result hidden></p>`;
+  confirmation=document.createElement('dialog');
+  confirmation.id='storage-confirm-dialog';
+  confirmation.setAttribute('aria-labelledby','storage-confirm-title');
+  confirmation.setAttribute('aria-describedby','storage-confirm-details');
+  confirmation.innerHTML=`<h2 id="storage-confirm-title">${t('确认清理')}</h2>
+   <p data-storage-confirm-selection></p>
+   <p id="storage-confirm-details">${t('所选项目将被永久移除。')}</p>
+   <form method="dialog">
+    <button class="secondary" value="cancel" autofocus>${t('取消')}</button>
+    <button class="danger-button" value="clean">${t('确认清理')}</button>
+   </form>`;
+  document.body.append(dialog,confirmation);
+  confirmation.addEventListener('close',()=>{
+   const request=pendingCleanup;
+   pendingCleanup=null;
+   if(confirmation.returnValue==='clean'&&request&&dialog.open)void clean(request);
+  });
   field('[data-storage-refresh]').onclick=load;
-  field('[data-storage-clean]').onclick=clean;
+  field('[data-storage-clean]').onclick=confirmCleanup;
   field('[data-storage-items]').onchange=selection;
   field('[data-storage-select-all]').onclick=()=>{
    const boxes=dialog.querySelectorAll('[data-storage-id]');
@@ -63,21 +80,32 @@
  async function load(){
   if(busy)return;
   busy=true;
+  field('[data-storage-result]').hidden=true;
   try{await scan()}
   catch(error){field('[data-storage-status]').textContent=error.message}
   finally{busy=false;selection()}
  }
- async function clean(){
-  if(busy)return;
+ function confirmCleanup(){
+  if(busy||!plan||pendingCleanup)return;
   const ids=selection();
-  if(!ids.length||!confirm(t('确定清理所选项目？选中的恢复副本和旧备份将被永久移除。')))return;
+  if(!ids.length)return;
+  pendingCleanup={token:plan.token,ids,confirmed:true};
+  confirmation.querySelector('[data-storage-confirm-selection]').textContent=field('[data-storage-selected]').textContent;
+  confirmation.returnValue='';
+  confirmation.showModal();
+ }
+ async function clean(request){
   busy=true;selection();
+  const feedback=field('[data-storage-result]');
+  feedback.hidden=false;
+  feedback.textContent=t('正在清理所选项目…');
   try{
-   const result=await api('/api/storage/clean',{token:plan.token,ids,confirmed:true});
-   toast(t('已清理项目：')+result.removed.length+(result.failed.length?' · '+t('部分文件被占用，未能清理：')+result.failed.join(', '):''));
-   await scan();
-  }catch(error){field('[data-storage-status]').textContent=error.message}
+   const result=await api('/api/storage/clean',request);
+   feedback.textContent=t('已清理项目：')+result.removed.length+(result.failed.length?' · '+t('部分文件被占用，未能清理：')+result.failed.join(', '):'');
+   try{await scan()}
+   catch(error){field('[data-storage-status]').textContent=error.message}
+  }catch(error){feedback.textContent=error.message}
   finally{busy=false;selection()}
  }
- globalThis.StellarStorage={bind(options){({api,toast}=options);document.querySelector('#storage-open').onclick=()=>{create();dialog.showModal();void load()}}};
+ globalThis.StellarStorage={bind(options){({api}=options);document.querySelector('#storage-open').onclick=()=>{create();dialog.showModal();void load()}}};
 })();

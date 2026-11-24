@@ -1333,7 +1333,7 @@ if(globalThis.StellarBackups)StellarBackups.bind({api,toast,localBackupList,prep
  return StellarDrafts.flush();
 }});
 
-globalThis.StellarStorage?.bind({api,toast});
+globalThis.StellarStorage?.bind({api});
 
 // Native desktop downloads report into the dialog that initiated them.
 const desktopDownloadContexts=new Map();
