@@ -1,5 +1,6 @@
 """Bounded access to archived records for the local MCP adapter."""
 import re
+from urllib.parse import urlencode
 
 from . import library
 from .rich_text import searchable_text
@@ -15,7 +16,7 @@ def _record(item):
     return {key: item[key] for key in ('id', 'title', 'kind', 'url', 'updated')}
 
 
-def read_memory(archive, request):
+def read_memory(archive, request, *, port=8768):
     if not isinstance(request, dict):
         raise ValueError('Expected a memory request object.')
     if archive.settings()['company_mode']:
@@ -28,8 +29,20 @@ def read_memory(archive, request):
         limit = _number(request.get('limit', 8), 1, 20, 'Limit')
         offset = _number(request.get('offset', 0), 0, 100_000, 'Offset')
         results = library.query(archive, q=query.strip(), limit=limit, offset=offset)
-        items = [{**_record(item), 'snippet': item.get('search_snippet') or item['summary'][:240]}
-                 for item in results['items']]
+        items = []
+        for item in results['items']:
+            citations = []
+            for match in item.get('source_matches', []):
+                origin = match['origin']
+                params = {'item': item['id'], 'source': '1'}
+                for key in ('batch_id', 'attachment_id', 'page'):
+                    if origin.get(key):
+                        params[key] = origin[key]
+                citations.append({'filename': origin.get('name', ''), 'page': origin.get('page'),
+                                  'excerpt': match['text'],
+                                  'url': f'http://127.0.0.1:{port}/?'+urlencode(params)})
+            items.append({**_record(item), 'snippet': item.get('search_snippet') or item['summary'][:240],
+                          'citations': citations})
         following = offset + len(items)
         return {'items': items, 'total': results['total'],
                 'next_offset': following if following < results['total'] else None}

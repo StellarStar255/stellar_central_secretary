@@ -43,7 +43,7 @@ def build_server(port):
 
     @server.tool(annotations={'readOnlyHint': True, 'openWorldHint': False})
     def search_memory(query: str, limit: int = 8, offset: int = 0) -> dict[str, Any]:
-        """Search local archived memory. Use relevant record IDs to read and cite sources."""
+        """Search local archived memory. Use citations for matching excerpts, attachment names, known PDF pages and local links."""
         return memory(action='search', query=query, limit=limit, offset=offset)
 
     @server.tool(annotations={'readOnlyHint': True, 'openWorldHint': False})
@@ -54,19 +54,45 @@ def build_server(port):
     return server
 
 
+async def check_connection(port):
+    import asyncio
+    from pathlib import Path
+    import sys
+    import uuid
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    args = [] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
+    params = StdioServerParameters(command=sys.executable, args=[*args, '--port', str(port)])
+    async with asyncio.timeout(28), stdio_client(params) as (reader, writer):
+        async with ClientSession(reader, writer) as session:
+            await session.initialize()
+            result = await session.call_tool('search_memory', {'query': uuid.uuid4().hex, 'limit': 1})
+            if result.isError:
+                # Return the service error after closing the SDK task groups normally.
+                return result.content[0].text if result.content else 'Memory read failed.'
+    return ''
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8768, help='Stellar Secretary local port')
+    parser.add_argument('--check', action='store_true', help='Test read-only access to the running library')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('Port must be between 1 and 65535.')
     try:
-        server = build_server(args.port)
+        if args.check:
+            import asyncio
+            error = asyncio.run(check_connection(args.port))
+            if error:
+                parser.exit(1, error+'\n')
+        else:
+            build_server(args.port).run(transport='stdio')
     except ModuleNotFoundError as exc:
         if exc.name == 'mcp':
             parser.exit(1, 'Install the optional MCP dependency with pip install -r requirements-mcp.txt.\n')
         raise
-    server.run(transport='stdio')
 
 
 if __name__ == '__main__':

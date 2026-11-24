@@ -142,7 +142,7 @@ $('#interface-toggle').onclick=()=>busy($('#interface-toggle'),()=>switchInterfa
 
 function toast(message){const host=[...document.querySelectorAll('dialog[open]')].at(-1)||document.body;host.append($('#toast'));$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.remove('show'),4200)}
 async function api(path,body,retry=true,companyRetry=true){
- const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/semantic/test','/api/model-api/test','/api/model-connection/test','/api/capture-connection/test','/api/library-location/check','/api/library-location','/api/update/check','/api/directory-picker'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/storage/')||path.startsWith('/api/backups/')||path.endsWith('/pdf-read')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),['/api/ask','/api/memory/test','/api/semantic/test','/api/model-api/test','/api/model-connection/test','/api/capture-connection/test','/api/library-location/check','/api/library-location','/api/update/check','/api/directory-picker'].includes(path)?300000:path==='/api/ingest'||path.startsWith('/api/storage/')||path.startsWith('/api/backups/')||path.endsWith('/pdf-read')||path.endsWith('/additions')||path==='/api/update/install'?300000:12000);
  let response;
  try{response=await fetch(path,body===undefined?{signal:controller.signal}:{method:'POST',headers:{'Content-Type':'application/json','X-Knowledge-Token':token},body:JSON.stringify(body),signal:controller.signal})}
  catch(e){throw Error(e.name==='AbortError'?t('本地服务响应超时，请检查程序是否仍在运行。'):e instanceof TypeError||/Failed to fetch|NetworkError|Load failed/i.test(e.message)?t('本地服务连接中断，请重新启动程序后再试；若刚才正在保存，请先检查知识库，避免重复归档。'):e.message)}
@@ -1138,7 +1138,7 @@ function renderModelReadiness(data){
  target.querySelector('[data-readiness-status]').textContent=t(found?(apiMode?'已保存 API 配置；连接状态需测试。':'已找到所选 CLI；登录和网络状态需测试。'):(apiMode?'尚未配置模型 API。':'尚未找到所选 CLI。'));
  target.querySelector('[data-readiness-next]').textContent=t(found?'点击下方「测试模型连接」，用简短请求检查当前配置。':'可安装并登录所选 CLI 后重启应用，或选择自定义模型 API。桌面聊天软件的登录不等于 CLI 已登录。');
 }
-async function loadStatus(){const companyRevision=globalThis.StellarCompanyAI?.revision();const proxyRevision=globalThis.StellarModelProxy?.revision();const currentBackendRevision=backendRevision;const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;syncTutorialUpdate(data.tutorial_update);globalThis.StellarBackups?.sync(data.backup);consumeCompletionEvents(data);globalThis.StellarCompanyAI?.sync(data.company_model,companyRevision);syncContentFontScale(data.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(data.settings.ui_font_size||14);if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');globalThis.StellarBackups?.syncLocation(data.library_location);$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsWebCapture=data.capabilities?.generic_page_capture===true;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;if(currentBackendRevision===backendRevision)$('#backend').value=data.settings.backend;globalThis.StellarModelAPI?.sync(data.model_api);globalThis.StellarModelProxy?.sync(data.settings.model_proxy,data.settings.capture_proxy,proxyRevision);$('#auto-ai').checked=data.settings.auto_ai;if($('#summary-language'))$('#summary-language').value=data.settings.summary_language||'auto';$('#completion-notifications').checked=data.settings.completion_notifications===true;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=data.settings.backend==='api'?t(data.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').value=$('#data-dir').title=data.data_dir;updateModelLabel();renderModelReadiness(data)}
+async function loadStatus(){const companyRevision=globalThis.StellarCompanyAI?.revision();const proxyRevision=globalThis.StellarModelProxy?.revision();const currentBackendRevision=backendRevision;const contentRevision=contentFontChanging?-1:contentFontRevision,fontRevision=fontSizeChanging?-1:fontSizeRevision,revision=uiLanguageRevision;const data=await api('/api/status');token=data.token;latestStatus=data;syncMemoryAccess(data);syncTutorialUpdate(data.tutorial_update);globalThis.StellarBackups?.sync(data.backup);consumeCompletionEvents(data);globalThis.StellarCompanyAI?.sync(data.company_model,companyRevision);syncContentFontScale(data.settings,contentRevision);if(!fontSizeChanging&&fontRevision===fontSizeRevision)applyUIFontSize(data.settings.ui_font_size||14);if(!languageChanging&&revision===uiLanguageRevision)await applyUILanguage(data.settings.ui_language||'zh');globalThis.StellarBackups?.syncLocation(data.library_location);$('#interface-toggle').hidden=!data.desktop?.supports_window;$('#interface-settings').hidden=$('#interface-toggle').hidden;$('#interface-toggle').textContent=(globalThis.__stellarDesktop===true||(globalThis.location?.search||'').includes('desktop=1'))?t('切到网页模式'):t('切到桌面模式');if(data.update)renderUpdate(data.update);supportsWebCapture=data.capabilities?.generic_page_capture===true;supportsCapture=data.capabilities?.conversation_capture===true&&data.capabilities?.manual_browser_login===true&&data.capabilities?.in_place_browser_read===true;$('#service-alert').hidden=supportsCapture;if(currentBackendRevision===backendRevision)$('#backend').value=data.settings.backend;globalThis.StellarModelAPI?.sync(data.model_api);globalThis.StellarModelProxy?.sync(data.settings.model_proxy,data.settings.capture_proxy,proxyRevision);$('#auto-ai').checked=data.settings.auto_ai;if($('#summary-language'))$('#summary-language').value=data.settings.summary_language||'auto';$('#completion-notifications').checked=data.settings.completion_notifications===true;$('#capture-background').checked=data.settings.capture_background!==false;$('#capture-scope').value=data.settings.capture_scope||'recent';$('#capture-close-tabs').checked=data.settings.capture_close_tabs!==false;$('#backend-status').textContent=data.settings.backend==='api'?t(data.model_api?.configured?'API 配置已保存，可测试连接':'请先配置模型 API'):Object.entries(data.backends).map(([k,v])=>k+': '+(v?t('已找到 CLI（登录状态需调用验证）'):t('未找到'))).join('　');$('#data-dir').value=$('#data-dir').title=data.data_dir;updateModelLabel();renderModelReadiness(data)}
 $('#close-capture-browsers').onclick=()=>busy($('#close-capture-browsers'),async()=>{await api('/api/browser/close',{});toast(t('专用浏览器已关闭，登录资料已保留'))});
 $('#settings-save').onclick=()=>busy($('#settings-save'),async()=>{await api('/api/settings',{backend:$('#backend').value,auto_ai:$('#auto-ai').checked,summary_language:$('#summary-language')?.value || 'auto',completion_notifications:$('#completion-notifications').checked,capture_background:$('#capture-background').checked,capture_close_tabs:$('#capture-close-tabs').checked,capture_scope:$('#capture-scope').value});$('#settings-dialog').close();toast(t('设置已保存；等待中的资料可手动重新整理'))});
 $('#model-open').onclick=()=>{$('#settings-dialog').showModal();loadStatus().catch(e=>toast(e.message))};
@@ -1182,7 +1182,7 @@ window.addEventListener('message',event=>{
  $('#first-run-tutorial').close();
 });
 document.addEventListener('visibilitychange',()=>void openFirstRunTutorial().catch(()=>{}));
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));await openFirstRunTutorial();const linkedItem=new URLSearchParams(globalThis.location?.search||'').get('item');if(/^[a-f0-9]{32}$/.test(linkedItem||''))await detail(linkedItem,true);scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));await openFirstRunTutorial();await openLinkedMemory();scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){
@@ -1365,3 +1365,61 @@ globalThis.StellarSessionRecovery={gaps:0,lastGapSeconds:0,check(now=Date.now())
 setInterval(()=>StellarSessionRecovery.check(),3000);
 
 globalThis.StellarMobile?.bind({api,toast});
+
+
+async function openLinkedMemory(){
+ const query=new URLSearchParams(globalThis.location?.search||'');
+ const item=query.get('item'),validId=value=>/^[a-f0-9]{32}$/.test(value||'');
+ if(!validId(item))return;
+ await detail(item,true);
+ const batch=query.get('batch_id'),attachment=query.get('attachment_id'),page=Number(query.get('page'));
+ if((batch&&!validId(batch))||(attachment&&!validId(attachment)))return;
+ const card=$('#detail-attachments')?.querySelector('[data-attachment="'+(attachment||'original')+'"][data-batch="'+(batch||'')+'"]');
+ if(Number.isSafeInteger(page)&&page>0){
+  const path='/api/items/'+item+(batch?'/additions/'+batch:'')+(attachment?'/attachments/'+attachment:'');
+  StellarPDF.open(path,card?.querySelector('strong')?.textContent||'PDF',page);
+ }else if(card&&(attachment||query.has('source'))){
+  card.tabIndex=-1;card.focus();card.scrollIntoView({block:'nearest'});
+ }
+}
+
+function syncMemoryAccess(status){
+ const toggle=$('#memory-access');
+ if(!toggle)return;
+ toggle.checked=!!status.memory_mcp;
+ toggle.disabled=!!status.settings.company_mode&&!toggle.checked;
+ $('#memory-test').disabled=$('#memory-test').dataset.testing==='true'||!toggle.checked||!!status.settings.company_mode;
+}
+const memoryClients={codex:'~/.codex/config.toml',claude:'.mcp.json',gemini:'~/.gemini/settings.json'};
+async function showMemoryConfig(){
+ const client=$('#memory-client').value;
+ $('#memory-config').value='';
+ $('#memory-copy').disabled=true;
+ try{
+  const {config}=await api('/api/memory/config',{client});
+  if($('#memory-client').value!==client)return;
+  $('#memory-config').value=config;
+  $('#memory-copy').disabled=false;
+  $('#memory-config-path').textContent=memoryClients[client];
+ }catch(error){toast(error.message)}
+}
+$('#memory-setup').ontoggle=()=>{if($('#memory-setup').open)void showMemoryConfig()};
+$('#memory-client').onchange=showMemoryConfig;
+$('#memory-access').onchange=async event=>{
+ const enabled=event.target.checked;
+ try{await api('/api/memory/enable',{enabled})}catch(error){toast(error.message)}
+ await loadStatus();
+};
+$('#memory-copy').onclick=async()=>{
+ const field=$('#memory-config');
+ if(!field.value)return;
+ try{await navigator.clipboard.writeText(field.value);toast(t('配置已复制'))}
+ catch{field.focus();field.select()}
+};
+$('#memory-test').onclick=async event=>{
+ const button=event.currentTarget,line=$('#memory-result');
+ button.dataset.testing='true';button.disabled=true;line.textContent=t('正在测试连接…');
+ try{await api('/api/memory/test',{});line.textContent=t('已通过本机记忆接口读取测试')}
+ catch(error){line.textContent=error.message}
+ finally{delete button.dataset.testing;syncMemoryAccess(latestStatus)}
+};

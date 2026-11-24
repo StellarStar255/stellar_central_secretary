@@ -1513,5 +1513,20 @@
   "近期搜索": "Recent searches",
   "显示近期搜索": "Show recent searches",
   "清空历史": "Clear history",
-  "删除此条搜索记录（Shift + Delete）": "Remove this search (Shift + Delete)"
+  "删除此条搜索记录（Shift + Delete）": "Remove this search (Shift + Delete)",
+  "在「模型与设置 → 连接 AI 助手」开启只读访问。": "Open Models & settings → Connect AI assistants and enable read-only access.",
+  "选择客户端，复制配置并合并到提示的配置文件。": "Choose your client, copy the configuration and merge it into the indicated file.",
+  "测试连接，重新打开客户端，让它搜索资料并引用附件或 PDF 页码。": "Test the connection, reopen your client and ask it to find records and cite attachments or PDF pages.",
+  "连接 AI 助手": "Connect AI assistants",
+  "允许本机客户端搜索和读取归档。客户端可能将结果发送给所用的模型。公司模式会阻止访问。": "Allow local clients to search and read archives. Clients may send results to their model. Company Mode blocks access.",
+  "启用只读记忆接口": "Enable read-only memory access",
+  "选择客户端": "Choose a client",
+  "将配置合并到客户端配置文件，然后重新打开客户端。": "Merge this configuration into the client configuration file, then reopen the client.",
+  "复制配置": "Copy configuration",
+  "配置已复制": "Configuration copied",
+  "测试连接": "Test connection",
+  "正在测试连接…": "Testing connection…",
+  "已通过本机记忆接口读取测试": "Successfully tested read access to the local library",
+  "连续失败次数": "Consecutive failures",
+  "下次自动重试": "Next automatic retry"
 }

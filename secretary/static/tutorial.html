@@ -46,9 +46,9 @@
 <summary>把知识库接到其他 AI（MCP）</summary>
 <p>Codex CLI、Claude Code 和 Gemini CLI 都能按需查找并读取已归档资料。接口默认关闭，开启后仅供本机只读访问。</p>
 <ol>
-<li>在项目目录安装 requirements-mcp.txt 中的依赖。</li>
-<li>退出旧实例，加上 --memory-mcp 启动源码版，使用当前资料目录并保持程序运行。</li>
-<li>在你的客户端添加 stellar-memory，再请它搜索一份已归档的资料。</li>
+<li>在「模型与设置 → 连接 AI 助手」开启只读访问。</li>
+<li>选择客户端，复制配置并合并到提示的配置文件。</li>
+<li>测试连接，重新打开客户端，让它搜索资料并引用附件或 PDF 页码。</li>
 </ol>
 <p>客户端可能将读取的资料作为上下文发送给它使用的模型。</p>
 <a id="tutorial-memory-guide-link" href="https://github.com/StellarStar255/stellar_central_secretary/blob/main/README.zh-CN.md#记忆-mcp-接口" target="_blank" rel="noopener noreferrer">查看启用命令和客户端配置 ↗</a>

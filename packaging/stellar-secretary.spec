@@ -27,7 +27,7 @@ if MAC:
     extra_binaries.append((str(build(ROOT)), 'native'))
 a = Analysis([str(ROOT/'packaging/entry_gui.py')], pathex=[str(ROOT)],
              binaries=extra_binaries+[(str(node), 'playwright/driver')]+collect_dynamic_libs('pillow_heif'), datas=datas,
-             hiddenimports=collect_submodules('qrcode') + collect_submodules('zeroconf') + collect_submodules('ifaddr') + collect_submodules('secretary') + collect_submodules('pypdf')
+             hiddenimports=collect_submodules('qrcode') + collect_submodules('zeroconf') + collect_submodules('ifaddr') + collect_submodules('secretary', filter=lambda name: name != 'secretary.memory_mcp') + collect_submodules('pypdf')
                            + collect_submodules('pillow_heif') + ['_pillow_heif','cryptography.hazmat.primitives.ciphers', 'fontTools.t1Lib'],
              excludes=['tkinter', 'matplotlib', 'numpy', 'IPython']+(['PySide6'] if not QT_DESKTOP else []))
 if WINDOWS:
@@ -39,7 +39,12 @@ if WINDOWS:
 exe = EXE(PYZ(a.pure), a.scripts, [('X utf8', None, 'OPTION')],
           name=APP, exclude_binaries=True, console=False,
           icon=str(ROOT/'secretary/static/icons'/('app.icns' if MAC else 'app.ico')))
-coll = COLLECT(exe, a.binaries, a.datas, name=APP)
+# Keep a console entry point for inherited stdio pipes, including on Windows.
+bridge = Analysis([str(ROOT/'packaging/entry_memory.py')], pathex=[str(ROOT)],
+                  datas=copy_metadata('mcp'), excludes=['tkinter', 'IPython', 'numpy', 'matplotlib'])
+bridge_exe = EXE(PYZ(bridge.pure), bridge.scripts, [('X utf8', None, 'OPTION')],
+                 name='stellar-memory', exclude_binaries=True, console=True)
+coll = COLLECT(exe, bridge_exe, a.binaries, bridge.binaries, a.datas, bridge.datas, name=APP)
 if MAC:
     app = BUNDLE(coll, name=APP+'.app', version=__version__,
                  icon=str(ROOT/'secretary/static/icons/app.icns'),

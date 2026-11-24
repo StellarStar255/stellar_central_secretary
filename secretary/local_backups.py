@@ -1,7 +1,7 @@
 """Disk-streamed local snapshots, bounded retention, and transactional local recovery."""
 import hashlib,json,re,shutil,sqlite3,tempfile,threading,uuid,zipfile
 from contextlib import closing
-from datetime import datetime,timezone
+from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import sys
 from . import paths
@@ -36,6 +36,7 @@ class Backups:
         return {'folder':str(folder),'folder_available':available,'max_bytes':self.limit,'daily_keep':self.daily_keep,'other_keep':self.other_keep,
                 'state':state.get('state','ready') if current else 'ready',
                 'last_error':self.error if current else '',
+                'daily_retry':state.get('daily_retry') if (state.get('daily_retry') or {}).get('folder')==str(folder) else None,
                 'last_attempt':state.get('last_attempt') if current else None,
                 'warning':state.get('warning','') if current else '',
                 'used_bytes':sum(entry['size'] for entry in entries),'snapshot_count':len(entries),
@@ -131,13 +132,35 @@ class Backups:
                 if temporary.stat().st_size>self.limit:raise ValueError('单份备份超过容量上限，请提高备份容量；已有备份保留。')
                 temporary.replace(target)
                 value={'id':key,'created':datetime.now(timezone.utc).isoformat(),'reason':reason,'size':target.stat().st_size,'sha256':digest}
-                meta=self.folder/(key+'.json');meta.write_text(json.dumps(value))
-                value=self.verify(key,allow_source_mismatch=reason=='before-restore')
+                meta=self.folder/(key+'.json')
+                try:
+                    meta.write_text(json.dumps(value))
+                except OSError:
+                    target.unlink(missing_ok=True)
+                    meta.unlink(missing_ok=True)
+                    raise
+                try:
+                    value=self.verify(key,allow_source_mismatch=reason=='before-restore')
+                except Exception:
+                    if reason=='daily':
+                        # Only discard older explicitly failed daily snapshots in this folder.
+                        for entry in self._entries(self.folder):
+                            if entry['id']!=key and entry['reason']=='daily' and entry.get('verification',{}).get('state')=='failed':
+                                try:
+                                    (self.folder/(entry['id']+'.zip')).unlink()
+                                    (self.folder/(entry['id']+'.json')).unlink()
+                                except OSError:
+                                    pass  # Retry after a locked file becomes available.
+                        # A diagnostic must not push verified history over the budget.
+                        if sum(entry['size'] for entry in self._entries(self.folder))>self.limit:
+                            target.unlink(missing_ok=True)
+                            meta.unlink(missing_ok=True)
+                    raise
                 if value['verification']['state']!='verified':
                     self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
                     return value
                 self._prune(key)
-                self._save_state(state='ready',last_error='')
+                self._save_state(state='ready',last_error='',daily_retry=None)
                 self.error='';return {**value,'folder':str(self.folder)}
             except Exception as error:
                 if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
@@ -164,7 +187,23 @@ class Backups:
     def due(self):
         with self.lock:
             if self.stop.is_set():return
-            if not any(value['reason']=='daily' and value.get('verification',{}).get('state')!='failed' and value['created'][:10]==datetime.now(timezone.utc).isoformat()[:10] for value in self._entries(self.folder)):self.create('daily')
+            now=datetime.now(timezone.utc)
+            retry=self.state.get('daily_retry') or {}
+            if retry.get('folder')!=str(self.folder):
+                retry={}
+            if retry and now.isoformat()<retry['next_attempt']:
+                return
+            if any(value['reason']=='daily' and value.get('verification',{}).get('state')=='verified'
+                   and value['created'][:10]==now.date().isoformat() for value in self._entries(self.folder)):
+                return
+            try:
+                self.create('daily')
+            except Exception as error:
+                count=retry.get('attempts',0)+1
+                delay=timedelta(hours=min(24,2**min(count,5)))
+                self._save_state(daily_retry={'folder':str(self.folder),'attempts':count,
+                                              'next_attempt':(now+delay).isoformat(),'error':str(error)})
+                raise
     def start(self):
         def loop():
             while not self.stop.is_set():
@@ -204,17 +243,27 @@ class Backups:
                 from .core import Archive
                 Archive(stage,recover=False)
                 self.create('before-restore')
-                old=stage/'previous-files';current=self.archive.root/'files';current.replace(old)
+                current=self.archive.root/'files'
+                # If rollback itself encounters an OS error, retain the previous files
+                # outside the temporary directory for recovery.
+                old=self.archive.root/('.restore-originals-'+uuid.uuid4().hex)
                 old_chats=self.archive.root/'conversations.json';chat_copy=old_chats.read_bytes() if old_chats.exists() else None
                 try:
+                    current.replace(old)
                     incoming.replace(current)
                     if (stage/'conversations.json').exists():shutil.copyfile(stage/'conversations.json',old_chats)
                     else:old_chats.unlink(missing_ok=True)
                     with closing(sqlite3.connect(database)) as src,closing(sqlite3.connect(self.archive.root/'archive.sqlite3')) as dst:src.backup(dst)
                 except BaseException:
+                    if not old.exists():raise
                     if current.exists():shutil.rmtree(current)
                     old.replace(current)
                     if chat_copy is not None:old_chats.write_bytes(chat_copy)
                     else:old_chats.unlink(missing_ok=True)
                     raise
+                try:
+                    shutil.rmtree(old)
+                except OSError:
+                    # The restore committed; surface leftover files separately.
+                    self._save_state(warning='恢复已完成，旧原件目录尚未清理：'+str(old))
             return {'ok':True,'restored':key}

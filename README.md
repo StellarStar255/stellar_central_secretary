@@ -53,20 +53,9 @@ A small in-memory cache can reuse recent source-backed answers. It expires withi
 
 ## Memory MCP
 
-Codex CLI, Claude Code, Gemini CLI, and other MCP clients can search and read your archived records. This source feature is off by default and provides read-only access from the same computer.
+In **Models & settings → Connect AI assistants**, enable read-only access, choose Codex CLI, Claude Code or Gemini CLI, and copy the configuration. Merge it into the indicated client configuration file. Click **Test connection**, keep Stellar Secretary running and reopen your client. The desktop installers include the bridge.
 
-1. In the project directory, create `.venv` with `python3 -m venv .venv` if needed, then install the optional dependencies. Quit any running instance before starting from source and use the library folder shown under **Models & settings → Data & backup**.
-
-   ```sh
-   .venv/bin/python -m pip install -r requirements-mcp.txt
-   .venv/bin/python -m secretary.launcher --data-dir "/path/to/your/library" --memory-mcp
-   ```
-
-   On Windows, create the environment with `py -m venv .venv` if needed and use `.venv\Scripts\python.exe` for the two commands above. Keep Stellar Secretary running while you use the interface.
-
-2. Register `secretary/memory_mcp.py` as a stdio MCP server in your client. Use absolute paths to the same Python interpreter and the script. If you use a custom port, pass the same `--port` to the app and the script. [Codex and Claude commands and Gemini configuration](docs/memory-mcp.md#配置客户端)
-
-3. Ask your client to “use `stellar-memory` to find my notes on the last project review, read the relevant records, and cite the sources.” The client uses `search_memory` to find records and `read_memory` to retrieve their text or summaries.
+Ask your client to search your notes and cite the original attachment or PDF page. Search results include local links for excerpts with a known source. [Source setup and client configuration](docs/memory-mcp.md)
 
 Company mode blocks access. Your MCP client may send retrieved text to its configured model as context.
 

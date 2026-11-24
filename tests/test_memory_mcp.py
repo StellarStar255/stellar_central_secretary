@@ -9,10 +9,34 @@ from pathlib import Path
 from secretary.core import Archive
 from secretary.local_http import LocalHTTPServer
 from secretary.memory_access import read_memory
+from secretary import memory_setup
 from secretary.server import Service, handler
 
 
 class MemoryAccessTest(unittest.TestCase):
+    def test_desktop_opt_in_survives_restart_and_can_be_revoked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = Service(folder)
+            try:
+                self.assertFalse(service.memory_mcp)
+                memory_setup.configure(service, True)
+            finally:
+                service.close()
+            service = Service(folder)
+            try:
+                self.assertTrue(service.memory_mcp)
+                service.archive.set_company_mode(True)
+                with self.assertRaisesRegex(ValueError, 'Company Mode'):
+                    memory_setup.configure(service, True)
+                memory_setup.configure(service, False)
+            finally:
+                service.close()
+            service = Service(folder)
+            try:
+                self.assertFalse(service.memory_mcp)
+            finally:
+                service.close()
+
     def test_search_and_paged_read(self):
         with tempfile.TemporaryDirectory() as folder:
             archive = Archive(folder)

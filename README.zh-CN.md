@@ -198,20 +198,9 @@ Claude 私有链接目前使用下述扩展或粘贴正文方式。
 
 ## 记忆 MCP 接口
 
-本机的 Codex CLI、Claude Code、Gemini CLI 和其他 MCP 客户端可以检索并读取已归档资料。这个源码版功能默认关闭，开启后仅供本机只读访问。
+在 **模型与设置 → 连接 AI 助手** 开启只读访问，选择 Codex CLI、Claude Code 或 Gemini CLI，复制配置并合并到界面提示的客户端配置文件。点击「测试连接」，保持知识秘书运行，重新打开客户端。桌面安装包自带连接程序。
 
-1. 在项目目录中，如果还没有 `.venv`，先运行 `python3 -m venv .venv`，再安装可选依赖。退出正在运行的实例后，从源码启动，并填写「模型与设置 → 数据与备份」中显示的资料目录。
-
-   ```sh
-   .venv/bin/python -m pip install -r requirements-mcp.txt
-   .venv/bin/python -m secretary.launcher --data-dir "/path/to/your/library" --memory-mcp
-   ```
-
-   Windows 可用 `py -m venv .venv` 创建环境，上面两条命令改用 `.venv\Scripts\python.exe`。使用期间请保持知识秘书运行。
-
-2. 在客户端中添加 stdio MCP 服务器，填写同一个 Python 解释器和 `secretary/memory_mcp.py` 的绝对路径。如果使用自定义端口，应用与脚本使用同一个 `--port`。 [Codex、Claude 和 Gemini 接入示例](docs/memory-mcp.md#配置客户端)
-
-3. 试着问客户端「用 `stellar-memory` 搜索上次项目复盘的笔记，读取相关资料并附上来源」。客户端可以用 `search_memory` 找到资料，再用 `read_memory` 读取正文或摘要。
+可以让客户端「查找上次项目评审的决定，并引用附件和 PDF 页码」。有明确出处的片段附带本机链接，点击可核对原文。[源码用法与配置示例](docs/memory-mcp.md)
 
 公司模式开启时会拒绝访问。你所用的 MCP 客户端可能将读取的文本作为上下文发送给其配置的模型。
 

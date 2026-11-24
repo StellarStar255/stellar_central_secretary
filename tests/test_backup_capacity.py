@@ -65,3 +65,66 @@ class BackupCapacityTest(unittest.TestCase):
     meta=source.with_suffix('.json');value=json.loads(meta.read_text());value.update(size=source.stat().st_size,sha256=hashlib.sha256(source.read_bytes()).hexdigest());meta.write_text(json.dumps(value))
     service.backups.restore(saved['id']);self.assertEqual(service.archive.get(ident)['title'],'Legacy');self.assertTrue(service.archive.retrieve('legacy'));self.assertEqual(service.archive.get(ident)['pdf_reads'],{})
    finally:service.close()
+
+ def test_restore_chat_read_failure_preserves_live_library(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    archive=service.archive
+    ident,_=archive.add('Original','body',filename='note.txt',data=b'original')
+    saved=service.backups.create()
+    archive.update(ident,title='Current')
+    chats=archive.root/'conversations.json'
+    chats.write_text('[]')
+    read=Path.read_bytes
+    def fail_chat_read(path):
+     if path==chats:raise PermissionError('chat file locked')
+     return read(path)
+    with patch.object(Path,'read_bytes',fail_chat_read),self.assertRaises(PermissionError):
+     service.backups.restore(saved['id'])
+    self.assertEqual((archive.root/'files'/ident).read_bytes(),b'original')
+    self.assertEqual(chats.read_text(),'[]')
+    self.assertEqual(archive.get(ident)['title'],'Current')
+   finally:service.close()
+
+ def test_restore_failure_after_file_swap_rolls_back_files_chats_and_records(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    archive=service.archive
+    archive.add('First','body')
+    chats=archive.root/'conversations.json'
+    chats.write_text('[]')
+    saved=service.backups.create()
+    ident,_=archive.add('Current','body',filename='current.txt',data=b'latest')
+    chats.write_text('["current"]')
+    with patch('secretary.local_backups.shutil.copyfile',side_effect=PermissionError('locked chats')),self.assertRaises(PermissionError):
+     service.backups.restore(saved['id'])
+    self.assertEqual((archive.root/'files'/ident).read_bytes(),b'latest')
+    self.assertEqual(chats.read_text(),'["current"]')
+    self.assertEqual(archive.get(ident)['title'],'Current')
+   finally:service.close()
+
+ def test_daily_failure_backoff_and_diagnostic_retention(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    archive=service.archive
+    ident,_=archive.add('Original','body',filename='note.txt',data=b'original')
+    backups=service.backups
+    saved=backups.create()
+    original=archive.root/'files'/ident
+    original.write_bytes(b'changed')
+    for attempt in range(1,4):
+     with self.assertRaisesRegex(ValueError,'note.txt'):backups.due()
+     retry=backups.status()['daily_retry']
+     self.assertEqual(retry['attempts'],attempt)
+     backups=Backups(archive)
+     backups.due()
+     self.assertEqual(len(backups.entries()),2)
+     self.assertTrue(any(e['id']==saved['id'] for e in backups.entries()))
+     backups._save_state(daily_retry={**retry,'next_attempt':'2000-01-01'})
+    original.write_bytes(b'original')
+    backups.due()
+    self.assertIsNone(backups.status()['daily_retry'])
+   finally:service.close()

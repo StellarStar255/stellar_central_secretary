@@ -25,7 +25,7 @@ from pathlib import Path
 from PIL import Image
 
 from .core import Archive, PageText, extract
-from . import summary_language
+from . import memory_setup, summary_language
 from . import ai, browser_reader, web_reader, capture_worker, notes, paths, updater, bundles, additions, links, model_api, summary_jobs, attachment_editor, network
 from . import image_formats, library_location, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
@@ -94,7 +94,7 @@ class Service:
     def __init__(self, root, first_run_tutorial=False, memory_mcp=False, tutorial_updates=False):
         new_library = not (Path(root)/'archive.sqlite3').exists()
         self.archive = Archive(root); self.pool = ThreadPoolExecutor(max_workers=2)
-        self.memory_mcp = memory_mcp
+        self.memory_mcp = memory_mcp or (self.archive.root/'memory-mcp-enabled').is_file()
         self.tutorial_pending = False
         self.tutorial_update = None
         if first_run_tutorial or tutorial_updates:
@@ -1255,7 +1255,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'memory_mcp':service.memory_mcp, 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1407,12 +1407,19 @@ def handler(service):
                         return self.send(200,import_backup(service.archive,source))
                 if not 0<length<72*1024*1024: raise ValueError('请求过大或为空')
                 body = json.loads(self.rfile.read(length)); path = urllib.parse.urlsplit(self.path).path
+                if path=='/api/memory/config':
+                    return self.send(200,{'config':memory_setup.client_config(self.server.server_port,body.get('client'))})
+                if path=='/api/memory/enable':
+                    memory_setup.configure(service,body.get('enabled'))
+                    return self.send(200,{'enabled':service.memory_mcp})
+                if path=='/api/memory/test':
+                    return self.send(200,memory_setup.test_connection(self.server.server_port))
                 if path=='/api/memory':
-                    if not service.memory_mcp:
-                        return self.send(403,{'error':'Start Stellar Secretary with --memory-mcp to enable access.'})
                     from .memory_access import read_memory
                     with service.archive.lock:
-                        result=read_memory(service.archive,body)
+                        if not service.memory_mcp:
+                            return self.send(403,{'error':'Enable read-only access in Settings or start Stellar Secretary with --memory-mcp.'})
+                        result=read_memory(service.archive,body,port=self.server.server_port)
                     return self.send(200,result)
                 upload_status=re.fullmatch(r'/api/uploads/([a-f0-9]{32})/status',path)
                 if upload_status:return self.send(200,service.uploads.status(upload_status[1],body.get('lease')))

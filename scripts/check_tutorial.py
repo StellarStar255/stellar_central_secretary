@@ -35,7 +35,7 @@ def check_first_run(browser, directory):
         expect(memory_guide.locator('ol')).to_be_hidden()
         summary.press('Enter')
         expect(memory_guide.locator('ol')).to_be_visible()
-        expect(memory_guide.locator('ol')).to_contain_text('--memory-mcp')
+        expect(memory_guide.locator('ol')).to_contain_text('Connect AI assistants')
         expect(setup_link).to_have_attribute('href', 'https://github.com/StellarStar255/stellar_central_secretary/blob/main/README.md#memory-mcp')
         language=iframe.locator('#tutorial-language')
         language.select_option('zh')
@@ -189,7 +189,7 @@ with tempfile.TemporaryDirectory() as temp:
                 offline.goto((ROOT/'docs/tutorial.html').as_uri());offline.locator('#import-sample').click();offline.locator('#next').click();offline.locator('#practice-search').fill('6月 科学月刊');assert offline.locator('#search-results .result').count()==1
                 offline.set_viewport_size({'width':390,'height':844})
                 offline.locator('#tutorial-memory-mcp summary').click()
-                expect(offline.locator('#tutorial-memory-mcp ol')).to_contain_text('requirements-mcp.txt')
+                expect(offline.locator('#tutorial-memory-mcp ol')).to_contain_text('连接 AI 助手')
                 assert offline.evaluate('document.documentElement.scrollWidth<=innerWidth')
                 assert not requests and not api_calls and not errors,(requests,api_calls,errors)
                 assert service.archive.export()==before and service.archive.settings()==settings

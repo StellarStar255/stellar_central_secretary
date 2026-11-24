@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as data:
         req = urllib.request.Request(f'http://127.0.0.1:{port}'+path,
                                      data=body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None,
                                      headers={'Content-Type':'application/json', 'X-Knowledge-Token':token or '',**(headers or {})})
-        with opener.open(req, timeout=60 if path.endswith('/pdf-read') else 30 if path in ('/api/update/check','/api/model-api/test','/api/ask','/api/ingest') else 3) as response:
+        with opener.open(req, timeout=60 if path.endswith('/pdf-read') else 30 if path in ('/api/update/check','/api/model-api/test','/api/memory/test','/api/ask','/api/ingest') else 3) as response:
             return response.read()
     try:
         for _ in range(60):
@@ -45,6 +45,13 @@ with tempfile.TemporaryDirectory() as data:
             except OSError: time.sleep(.5)
         else: raise RuntimeError('Frozen app did not start')
         assert status['settings']['company_mode'] is False
+        assert status['memory_mcp'] is False
+        request('/api/memory/enable',{'enabled':True},status['token'])
+        config=json.loads(json.loads(request('/api/memory/config',{'client':'gemini'},status['token']))['config'])
+        assert Path(config['mcpServers']['stellar-memory']['command']).is_file()
+        assert json.loads(request('/api/memory/test',{},status['token']))['ok']
+        request('/api/memory/enable',{'enabled':False},status['token'])
+        print('PASS: installed memory bridge configuration and local read test')
         for path in ('/', '/app.js', '/style.css', '/tutorial', '/tutorial.js', '/tutorial.css', '/i18n.js', '/i18n-data.js','/notes-ui.js','/note-attachments.js','/image-viewer.js','/extension-ui.js','/library-preview.js','/company-ai.js','/local-paths.js','/archive-actions.js','/bundle-ui.js','/attachment-order-ui.js','/additions-ui.js','/model-proxy-ui.js','/semantic-ui.js','/drafts.js','/uploads.js','/video-viewer.js'):
             assert request(path), path
         assert b'value="library"' in request('/') and b'semantic-settings' in request('/')

@@ -41,7 +41,7 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
                 if filename:
                     name='files/'+ident;refs.add(name)
                     if name not in actual:
-                        if not allow_source_mismatch:raise ValueError('备份缺少原件')
+                        if not allow_source_mismatch:raise ValueError('备份缺少原件：'+filename)
                         anomalies.append('缺少原件：'+filename)
                     elif actual[name]['sha256']!=digest:
                         if not allow_source_mismatch:raise ValueError('备份原件与数据库校验值不一致：'+filename)
@@ -53,7 +53,7 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
                         if not re.fullmatch('[a-f0-9]{32}',str(key)):raise ValueError('备份附件编号无效')
                         refs.add('files/'+key)
             if not refs<=names:
-                if not allow_source_mismatch:raise ValueError('备份缺少附件或速记图片')
+                if not allow_source_mismatch:raise ValueError('备份缺少附件或速记图片：'+', '.join(sorted(refs-names)[:3]))
                 anomalies.append('缺少附件或速记图片')
             if manifest and manifest.get('records')!=records:raise ValueError('备份资料数量与清单不一致')
         return {'state':'inconsistent' if anomalies else 'verified','anomalies':anomalies[:20],'mode':'manifest' if manifest else 'legacy','records':records,'files':len(names),'referenced_files':len(refs)}
