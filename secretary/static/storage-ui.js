@@ -73,7 +73,17 @@
    box.type='checkbox';
    box.dataset.storageId=item.id;
    label.append(box,document.createTextNode(t(names[item.kind])+' · '+item.name+' · '+size(item.bytes)));
-   target.append(label);
+   if(item.backup_folder){
+    const row=document.createElement('div'),details=document.createElement('details');
+    const summary=document.createElement('summary'),path=document.createElement('span');
+    summary.textContent=t(item.current_folder?'当前备份目录':'旧备份目录');
+    path.textContent=item.backup_folder;
+    details.className='cleanup-backup-location';
+    details.append(summary,path);
+    box.setAttribute('aria-label',label.textContent+' · '+summary.textContent+' · '+item.backup_folder);
+    row.append(label,details);
+    target.append(row);
+   }else target.append(label);
   }
   status.textContent=t(plan.items.length?'预览有效期 10 分钟；清理恢复副本后将无法撤销该附件删除。':'没有可清理的过期上传、恢复副本或旧备份。');
  }

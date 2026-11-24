@@ -206,3 +206,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 #storage-confirm-dialog h2{margin-top:0}
 #storage-confirm-dialog form{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:20px}
 [data-storage-result]{overflow-wrap:anywhere}
+
+.cleanup-backup-location{margin:0 0 .75em 1.75em;color:var(--muted);font-size:.9em;overflow-wrap:anywhere}.cleanup-backup-location summary{cursor:pointer;width:fit-content}

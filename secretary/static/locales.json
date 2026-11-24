@@ -1036,6 +1036,7 @@
   "本库备份：": "Backups for this library: ",
   "其他知识库": "Another library",
   "来源知识库未知": "Source library unknown",
+  "当前备份目录": "Current backup folder",
   "旧备份目录": "Previous backup folder",
   "最近验证：": "Last verified: ",
   "每日备份": "Daily backup",

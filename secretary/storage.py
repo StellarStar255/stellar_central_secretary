@@ -1,5 +1,6 @@
 """Read-only accounting and explicit, expiring cleanup plans for managed files."""
 import hashlib,json,os,re,shutil,threading,time,uuid
+from collections import Counter
 from pathlib import Path
 
 KINDS=('originals','backups','deleted_attachments','uploads','working_files','video_cache','database','other')
@@ -48,7 +49,9 @@ class Storage:
             try:
                 base=root if paths[0].is_relative_to(root) else next((folder for folder in self.folders() if paths[0].is_relative_to(folder)),None)
                 if base is None or any(path.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent==base or base in parent.parents) for path in paths):return
-                result.append({'id':uuid.uuid4().hex,'kind':kind,'name':name,'bytes':sum(path.stat().st_size for path in paths),'files':len(paths),'paths':paths,'directory':directory,'fingerprint':fingerprint(paths)})
+                item={'id':uuid.uuid4().hex,'kind':kind,'name':name,'bytes':sum(path.stat().st_size for path in paths),'files':len(paths),'paths':paths,'directory':directory,'fingerprint':fingerprint(paths)}
+                result.append(item)
+                return item
             except OSError:return
         for meta in service.uploads.folder.glob('*.json'):
             try:
@@ -61,6 +64,7 @@ class Storage:
                 if value.get('kind')=='attachment-deletion' and re.fullmatch('[a-f0-9]{32}',str(value.get('item_id',''))):add('deleted_attachments',str(value['attachment']['name'])[:300],files(directory),directory)
             except (OSError,ValueError,KeyError):continue
         entries=[entry for entry in service.backups.entries() if service.backups.owns(entry)]
+        copies=Counter(entry['id'] for entry in entries)
         protected=service.backups.restore_protected()
         for folder in self.folders():
             values=[entry for entry in entries if Path(entry['folder'])==folder]
@@ -69,7 +73,10 @@ class Storage:
             if verified:protected.add(verified['id'])
         for entry in entries:
             if not entry.get('index_issue') and entry['id'] not in protected:
-                folder=Path(entry['folder']);add('backups',entry['created'],[folder/(entry['id']+'.zip'),folder/(entry['id']+'.json')])
+                folder=Path(entry['folder'])
+                item=add('backups',entry['created'],[folder/(entry['id']+'.zip'),folder/(entry['id']+'.json')])
+                if item and copies[entry['id']]>1:
+                    item.update(backup_folder=str(folder),current_folder=folder==service.backups.folder)
         return result
     def preview(self):
         with self.lock:

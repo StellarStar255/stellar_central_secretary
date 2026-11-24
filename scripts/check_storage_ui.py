@@ -1,6 +1,7 @@
 """Storage cleanup requires an explicit selection and keeps active/original files."""
-import os,sys,tempfile,threading,time,json
+import os,re,sys,tempfile,threading,time,json
 from pathlib import Path
+from shutil import copyfile
 ROOT=Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT))
 from secretary.server import Service,handler
 from secretary.local_http import LocalHTTPServer
@@ -68,7 +69,36 @@ with tempfile.TemporaryDirectory() as temp:
     assert not any(service.uploads.path(upload['id']).exists() for upload in expired)
     assert service.uploads.path(active['id']).exists()
     assert (service.archive.root/'files'/ident).read_bytes()==b'KEEP'
+    backups=service.backups
+    old=backups.folder
+    snapshot=backups.create()
+    backups.create()
+    backups.configure({'folder':str(Path(temp)/'shared')})
+    for ext in ('.zip','.json'):
+     filename=snapshot['id']+ext
+     copyfile(old/filename,backups.folder/filename)
+    backups.create()
+    backups.create()  # Also expose a non-duplicate candidate.
+    page.locator('[data-storage-refresh]').click()
+    expect(boxes).to_have_count(3)
+    locations=page.locator('.cleanup-backup-location')
+    expect(locations).to_have_count(2)
+    for title,folder in [('Current backup folder',backups.folder),('Previous backup folder',old)]:
+     location=locations.filter(has_text=title)
+     location.locator('summary').click()
+     expect(location.locator('span')).to_have_text(str(folder))
+     expect(location.locator('span')).to_be_visible()
+    expect(selected).to_have_count(0)
+    page.get_by_role('checkbox',name=re.compile('Previous backup folder')).check()
+    clean.click()
+    confirmation.get_by_role('button',name='Confirm cleanup').click()
+    expect(page.locator('[data-storage-result]')).to_have_text('Removed entries: 1')
+    expect(locations).to_have_count(0)
+    assert not (old/(snapshot['id']+'.zip')).exists()
+    service.archive.update(ident,title='changed')
+    backups.restore(snapshot['id'],folder=str(backups.folder))
+    assert service.archive.get(ident)['title']=='Keep'
     assert not errors,errors
-    print('PASS: select/deselect all, reset on scan, cancel and confirm, active uploads and originals preserved')
+    print('PASS: select/deselect all, reset on scan, cancel and confirm, duplicate folder selection, restore of retained copy, active uploads and originals preserved')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()
