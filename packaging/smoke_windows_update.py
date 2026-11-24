@@ -170,8 +170,7 @@ def main():
                 except OSError:pass
 
             wait(lambda:not listening(manual_address))
-            # Use a deterministic exit-code fixture alongside the real Inno tests above.
-            # The sharing violation and the frozen worker and recovery window are native.
+            # A native directory lock must stop the worker before it starts the installer.
             failure_source=root/'InstallerFailure.cs'
             failure_source.write_text(
                 'using System.IO; class InstallerFailure {static int Main(string[] args) {'
@@ -183,7 +182,7 @@ def main():
             failure_sha=hashlib.sha256(failure_setup.read_bytes()).hexdigest()
             probe=install/'before-locked-update.txt'
             probe.write_text('unchanged previous installation')
-            from secretary.windows_update_files import image,kernel
+            from secretary.windows_update_files import kernel
             api=kernel()
             # FILE_SHARE_READ | FILE_SHARE_WRITE, with no FILE_SHARE_DELETE.
             directory_handle=api.CreateFileW(str(install),0x80000000,3,None,3,0x02000000,None)
@@ -199,24 +198,18 @@ def main():
                     info=json.loads(result.read_text(encoding='utf-8-sig'))
                     return info if info.get('phase')=='error' and info.get('version')=='99.0.1' else None
                 final=wait(locked_result,180)
-                assert '退出码 5' in final['error'] and '已从恢复副本启动旧版' in final['error'],final
+                assert '未开始安装' in final['error'],final
+                assert not (locked_work/'installer.log').exists()
                 status=wait(native_status)
                 wait(lambda:request('/api/status')['desktop'].get('window_visible') and request('/api/status')['desktop'].get('window_loaded'))
-                active_pid=request('/api/update/health')['pid']
-                active_handle=api.OpenProcess(0x1000,False,active_pid)
-                assert active_handle,active_pid
-                try:active=image(api,active_handle)
-                finally:api.CloseHandle(active_handle)
-                assert active and active.parent.name.startswith(install.name+'.restore-'),active
-                assert active.parent.parent==install.parent and (active.parent/'.stellar-recovery').is_file(),active
-                assert (active.parent/probe.name).read_bytes()==probe.read_bytes()
+                assert probe.read_text()=='unchanged previous installation'
                 assert status['version']==__version__ and Path(status['data_dir']).resolve()==data.resolve()
-                assert status['update']['recovery']=={'kind':'copy','original_install_dir':str(install.resolve()),'has_log':True},status['update']
+                assert not status['update'].get('recovery'),status['update']
                 assert Path(status['backup']['folder']).resolve()==backup_dir.resolve()
                 with archive.db() as db:after=[tuple(row) for row in db.execute('SELECT * FROM items ORDER BY id')]
                 assert before==after,'Recovery modified archived items'
                 assert request('/api/items')[0]['id']==item_id
-                print(f'PASS: native lock at {install.drive}, installer exit 5, visible recovery window, original library and custom backup path')
+                print(f'PASS: native lock at {install.drive} prevented installation, original window, library and custom backup path')
                 request('/api/shutdown',{})
                 wait(lambda:not listening(address))
             finally:

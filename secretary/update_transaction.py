@@ -111,6 +111,14 @@ def restore_windows_program(root,backup):
         (restored/'.stellar-recovery').touch()
         return restored,str(error)
 
+
+def move_windows_program(root):
+    """Set the existing tree aside before Inno Setup writes to the install path."""
+    previous=root.with_name(root.name+'.previous-'+uuid.uuid4().hex)
+    rename_windows_update_path(root,previous)
+    return previous
+
+
 def prepare(package,work,sha,version,desktop=False,kind=None,parent_pid=None,before_handoff=None):
     executable=Path(sys.executable).resolve();root=executable.parent
     kind=kind or ('mac' if sys.platform=='darwin' else 'windows' if sys.platform=='win32' else 'portable')
@@ -223,6 +231,12 @@ def run(config):
         if kind=='windows':
             from .windows_update_files import release
             release(root)
+            # A mapped resource can pass the open-file probe but still reject
+            # deletion. Start the installer with an empty destination.
+            try:
+                old_root=move_windows_program(root)
+            except OSError as error:
+                raise RuntimeError('程序目录仍被占用或无法移动，未开始安装。'+str(error)) from error
             changed=True
             process=spawn([config['package'],'/SP-','/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/LOGCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS','/RESTARTEXITCODE=3010','/DIR='+str(root),'/LOG='+str(work/'installer.log')],cwd=str(work),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             try:code=process.wait(timeout=300)
@@ -291,8 +305,14 @@ def run(config):
                     report('error',message+' 原安装目录仍不可替换，已从恢复副本启动旧版，资料保留。恢复程序：'+str(recovered)+'；原因：'+lock_error)
                     threading.Thread(target=child.wait,daemon=True).start()
                     return False
-                report('rolled_back',message+' 已恢复旧版程序，资料保留。');threading.Thread(target=child.wait,daemon=True).start();return False
-            except Exception as recovery:message+=' 恢复未完成：'+str(recovery)+'；程序备份：'+str(old_root or backup)
+                report('rolled_back',message+' 已恢复旧版程序，资料保留。')
+                if config['kind']=='windows' and old_root is not None:
+                    try:update_retention.remove_artifacts([old_root])
+                    except OSError:logging.exception('Could not clean up the previous Windows installation')
+                threading.Thread(target=child.wait,daemon=True).start();return False
+            except Exception as recovery:
+                recovery_backup=backup if config['kind']=='windows' else old_root or backup
+                message+=' 恢复未完成：'+str(recovery)+'；程序备份：'+str(recovery_backup)
         report('error',message)
         if not changed and parent_exited:
             try:

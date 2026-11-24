@@ -289,6 +289,26 @@ class Service:
                 self.desktop_peer=None;self.desktop={'enabled':False,'supports_window':False}
             return dict(self.desktop)
 
+    def update_status(self):
+        def installation_healthy():
+            from sqlite3 import Error
+            desktop = self.desktop_status()
+            if not desktop.get('supports_window'):
+                return False
+            if desktop.get('mode') == 'browser':
+                ready = desktop.get('browser_opens', 0) > 0
+            else:
+                ready = desktop.get('window_loaded') and desktop.get('window_visible')
+            if not ready:
+                return False
+            try:
+                with self.archive.db() as db:
+                    db.execute('SELECT id FROM items LIMIT 1').fetchone()
+            except Error:
+                return False
+            return True
+        return updater.status(installation_healthy)
+
     def desktop_heartbeat(self,body):
         owner=body.get('owner','')
         if not isinstance(owner,str) or not re.fullmatch('[a-f0-9]{32}',owner):raise ValueError('桌面连接标识无效')
@@ -1255,7 +1275,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':updater.status(), 'memory_mcp':service.memory_mcp, 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':service.update_status(), 'memory_mcp':service.memory_mcp, 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1319,7 +1339,7 @@ def handler(service):
                 if path=='/api/backups':return self.send(200,{'items':service.backups.entries(),'error':service.backups.error,'status':service.backups.status()})
                 if path=='/api/tasks':return self.send(200,service.task_status())
                 if path=='/api/semantic':return self.send(200,service.semantic.status())
-                if path=='/api/update': return self.send(200, updater.status())
+                if path=='/api/update': return self.send(200, service.update_status())
                 if path=='/api/library':
                     from .library import query
                     values=urllib.parse.parse_qs(parsed.query)
@@ -1559,7 +1579,9 @@ def handler(service):
                                            (service.tutorial_update,))
                             service.tutorial_update = None
                         return self.send(200, {'edition': service.tutorial_update})
-                if path=='/api/update/check': return self.send(200, updater.check())
+                if path=='/api/update/check':
+                    updater.check()
+                    return self.send(200, service.update_status())
                 if path=='/api/update/open-log': return self.send(200, updater.open_windows_update_log())
                 if path=='/api/update/install':
                     def require_idle():
@@ -1577,7 +1599,7 @@ def handler(service):
                         updater.start(lambda: threading.Thread(target=self.server.shutdown, daemon=True).start(),
                                       desktop=bool(service.desktop_status().get('enabled')),
                                       before_install=backup_before_upgrade, before_handoff=require_idle)
-                    return self.send(200, updater.status())
+                    return self.send(200, service.update_status())
                 if path=='/api/shutdown':
                     if body.get('force'):service.close()
                     self.send(200, {'ok':True})

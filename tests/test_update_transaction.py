@@ -44,18 +44,24 @@ class WindowsRollbackTest(unittest.TestCase):
             (data/'archive.sqlite3').write_bytes(b'library must stay intact')
             package=work/'setup.exe';package.write_bytes(b'installer')
             (work/'proceed').touch()
-            launches=[];attempts=0
+            launches=[];attempts=0;installer_started=False
             rename=Path.rename
             def locked_rename(source,destination):
                 nonlocal attempts
-                if source==root:
+                if source==root and installer_started:
                     attempts+=1
                     if persistent or attempts<3:
                         error=PermissionError('fixture sharing violation');error.winerror=32
                         raise error
                 return rename(source,destination)
             def spawn(command,**kwargs):
-                if command[0]==str(package):return Mock(wait=Mock(return_value=5))
+                nonlocal installer_started
+                if command[0]==str(package):
+                    self.assertFalse(root.exists(), 'Installer must start with an empty destination')
+                    installer_started=True
+                    root.mkdir()
+                    executable.write_bytes(b'partially installed')
+                    return Mock(wait=Mock(return_value=5))
                 launches.append(command)
                 return Mock(pid=12)
             config=dict(root=str(root),backup=str(backup),executable=str(executable),package=str(package),
@@ -72,6 +78,7 @@ class WindowsRollbackTest(unittest.TestCase):
             result=json.loads((data/'update-result.json').read_text())
             self.assertEqual(result['phase'],'error' if persistent else 'rolled_back')
             self.assertTrue((backup/executable.name).exists())
+            self.assertTrue(installer_started)
             if persistent:
                 self.assertEqual(attempts,25)
                 self.assertIn(str(launched.parent),result['error'])

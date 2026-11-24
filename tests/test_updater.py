@@ -19,6 +19,29 @@ class InlineThread:
 
 
 class UpdateTest(unittest.TestCase):
+    def test_windows_repair_hides_only_failures_superseded_by_healthy_install(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            exe = root / 'Stellar Secretary.exe'
+            marker = root / '.stellar-installed-version'
+            marker.write_text('0.1.149', encoding='ascii')
+            installed_at = marker.stat().st_mtime
+            failed = {'phase': 'error', 'error': 'old installer failed', 'version': '0.1.148',
+                      'updated': installed_at - 1}
+            with patch.object(updater, 'WINDOWS', True), patch.object(updater.paths, 'FROZEN', True), \
+                 patch.object(updater.sys, 'executable', str(exe)), patch.object(updater, '__version__', '0.1.149'), \
+                 patch('secretary.windows_update.last_result', return_value=failed), \
+                 patch('secretary.update_transaction.last_result', return_value=failed):
+                self.assertIn('old installer failed', updater.status(lambda: False)['error'])
+                self.assertFalse(updater.status(lambda: True)['error'])
+                failed['updated'] = installed_at + 1
+                self.assertIn('old installer failed', updater.status(lambda: True)['error'])
+                failed.update(version='0.1.150', updated=installed_at - 1)
+                self.assertIn('old installer failed', updater.status(lambda: True)['error'])
+                failed['version'] = '0.1.148'
+                (root / '.stellar-recovery').touch()
+                self.assertEqual(updater.status(lambda: True)['recovery']['kind'], 'copy')
+
     def test_mac_source_uses_system_ca_only_when_python_has_no_defaults(self):
         with patch.object(paths, 'FROZEN', False), patch.object(paths.sys, 'platform', 'darwin'), \
              patch.object(Path, 'is_file', return_value=True), patch.dict(os.environ, {}, clear=True), \

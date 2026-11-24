@@ -87,13 +87,33 @@ def open_windows_update_log():
     return {'ok': True}
 
 
-def status():
+def _repaired_installation(result, installation_healthy):
+    if not paths.FROZEN or installation_healthy is None or result.get('phase') not in ('error','rolled_back'):
+        return False
+    target = result.get('version')
+    failed_at = result.get('updated')
+    if not isinstance(target, str) or not re.fullmatch(r'\d+\.\d+\.\d+', target):
+        return False
+    if not isinstance(failed_at, (int, float)) or not 0 < failed_at or _vtuple(target) > _vtuple(__version__):
+        return False
+    marker = Path(sys.executable).resolve().parent / '.stellar-installed-version'
+    try:
+        if marker.stat().st_mtime <= failed_at or marker.read_text(encoding='ascii').strip() != __version__:
+            return False
+    except (OSError, UnicodeError):
+        return False
+    return installation_healthy()
+
+
+def status(installation_healthy=None):
     with _lock:
         value = {**_state, "supported": supported()}
     if WINDOWS:
         from .windows_update import last_result
         result = last_result()
         copy = _windows_recovery_copy()
+        if copy is None and _repaired_installation(result, installation_healthy):
+            result = {}
         if copy is not None or result.get('phase') == 'rolled_back':
             original = re.fullmatch(r'(.+)\.restore-[a-f0-9]{32}', copy.name) if copy else None
             value['recovery'] = {'kind': 'copy' if copy else 'rolled_back',
@@ -104,7 +124,8 @@ def status():
     if value['phase'] in ('idle','error') and not value['error'] and not value.get('recovery'):
         from .update_transaction import last_result
         result=last_result()
-        if result.get('phase') in ('error','rolled_back'):value['error']=str(result.get('error',''))
+        if result.get('phase') in ('error','rolled_back') and not (WINDOWS and _repaired_installation(result, installation_healthy)):
+            value['error']=str(result.get('error',''))
     return value
 
 
