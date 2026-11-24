@@ -350,7 +350,7 @@
   "练习 ": "Exercise ",
   "✓ 这一步已经完成，可以再次练习。": "✓ You have completed this step. You can practice again.",
   "存下资料，留待以后找回。": "Save it now. Find it later.",
-  "示例：一份六月月刊 PDF。教程不会请求文件权限，也不会调用模型。": "Example: a fictional June magazine PDF. No file permissions or model calls are needed.",
+  "示例：一份六月月刊 PDF。": "Example: a fictional June magazine PDF.",
   "再次导入示例 PDF": "Import sample PDF again",
   "导入示例 PDF": "Import sample PDF",
   "示例资料已归档": "Sample archived",

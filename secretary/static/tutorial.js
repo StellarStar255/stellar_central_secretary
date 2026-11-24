@@ -3,12 +3,12 @@ const {t,ui}=globalThis.StellarI18n;
 const $=selector=>document.querySelector(selector);
 const escapeHtml=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const lessons=[
- {title:'存下第一份 PDF',short:'导入资料',sub:'原件与概览',instruction:'点击练习区的「导入示例 PDF」，看看原件和摘要如何放在一起。',hint:'无需选择自己的文件。这里使用虚构月刊和预置概览。',tip:'在输入框点「＋」或拖入文件后发送。原件会保存在本机；PDF 默认只用前 5 页生成概览，需要时再生成全文摘要。'},
- {title:'空格分词，准确找回',short:'组合搜索',sub:'全部包含，顺序不限',instruction:'在搜索框输入「科学月刊 6月」，只找同时包含两个词的资料。',hint:'也可以输入「6月 科学月刊」。连续空格和全角空格都可以。',tip:'左侧「搜索知识库」支持多个关键词，按全部包含、顺序不限匹配；关键词可分布在标题、正文、摘要和标签等字段中。'},
- {title:'把标题改成你习惯的名字',short:'修改标题',sub:'保留正文与摘要',instruction:'点击资料标题或小铅笔，改个名字，再保存。',hint:'试试「我的六月阅读清单」。Enter 保存，Esc 取消。',tip:'在资料详情点击标题即可修改。单独改名直接保存，不会触发 AI 重新整理，也不会改动正文、摘要或原件。'},
- {title:'随时打开 PDF 原件',short:'阅读 PDF',sub:'浏览器或默认程序',instruction:'点击「浏览器打开 PDF」，在新标签页看一眼示例文件。',hint:'关闭 PDF 标签页即可回到教程。这里没有访问你的真实文件。',tip:'真实 PDF 详情有「浏览器打开 PDF」和「默认程序打开」。两者都使用已保存的原件；下载原文件入口也会保留。'},
- {title:'选择桌面或网页模式',short:'切换模式',sub:'在模型与设置中',instruction:'先点练习区左侧「模型与设置」，再切换使用方式。',hint:'本步骤仅模拟切换位置，不会修改你真实程序的设置。',tip:'macOS 安装版在「模型与设置 → 使用方式」切换桌面窗口或网页模式。两种模式共用知识库和对话，程序记住选择；托盘也可切换。'},
- {title:'把知识库备份带走',short:'备份资料',sub:'原件也在里面',instruction:'点击练习区左下角「导出知识库备份」，查看备份中包含什么。',hint:'这里只展示备份清单，不会下载文件，也不会导出你的资料。',tip:'真实程序的「导出知识库备份」会生成 ZIP，包含原文件、数据库和 JSON 清单。换电脑后通过「导入知识库备份」合并恢复。'}
+ {title:'存下第一份 PDF',short:'导入资料',instruction:'点击练习区的「导入示例 PDF」，看看原件和摘要如何放在一起。',hint:'无需选择自己的文件。这里使用虚构月刊和预置概览。',tip:'在输入框点「＋」或拖入文件后发送。原件会保存在本机；PDF 默认只用前 5 页生成概览，需要时再生成全文摘要。'},
+ {title:'空格分词，准确找回',short:'组合搜索',instruction:'在搜索框输入「科学月刊 6月」，只找同时包含两个词的资料。',hint:'也可以输入「6月 科学月刊」。连续空格和全角空格都可以。',tip:'左侧「搜索知识库」支持多个关键词，按全部包含、顺序不限匹配；关键词可分布在标题、正文、摘要和标签等字段中。'},
+ {title:'把标题改成你习惯的名字',short:'修改标题',instruction:'点击资料标题或小铅笔，改个名字，再保存。',hint:'试试「我的六月阅读清单」。Enter 保存，Esc 取消。',tip:'在资料详情点击标题即可修改。单独改名直接保存，不会触发 AI 重新整理，也不会改动正文、摘要或原件。'},
+ {title:'随时打开 PDF 原件',short:'阅读 PDF',instruction:'点击「浏览器打开 PDF」，在新标签页看一眼示例文件。',hint:'关闭 PDF 标签页即可回到教程。这里没有访问你的真实文件。',tip:'真实 PDF 详情有「浏览器打开 PDF」和「默认程序打开」。两者都使用已保存的原件；下载原文件入口也会保留。'},
+ {title:'选择桌面或网页模式',short:'切换模式',instruction:'先点练习区左侧「模型与设置」，再切换使用方式。',hint:'本步骤仅模拟切换位置，不会修改你真实程序的设置。',tip:'macOS 安装版在「模型与设置 → 使用方式」切换桌面窗口或网页模式。两种模式共用知识库和对话，程序记住选择；托盘也可切换。'},
+ {title:'把知识库备份带走',short:'备份资料',instruction:'点击练习区左下角「导出知识库备份」，查看备份中包含什么。',hint:'这里只展示备份清单，不会下载文件，也不会导出你的资料。',tip:'真实程序的「导出知识库备份」会生成 ZIP，包含原文件、数据库和 JSON 清单。换电脑后通过「导入知识库备份」合并恢复。'}
 ];
 const embedded = new URLSearchParams(location.search).get('embedded')==='1' && window.parent!==window;
 const samplePdfLines=['Stellar Secretary - Tutorial PDF','Fictional science magazine, June 2026.','Topics: Moon exploration, robots and clean energy.','This is a practice file. No private documents are used.'];
@@ -16,7 +16,7 @@ let current=0,done=new Set(),imported=false,renamedTitle=t('科学月刊 · 2026
 const sampleSummary='《科学月刊》2026年6月的虚构示例，介绍月球探索、机器人与能源。概览为教程预置，不代表真实模型结果。';
 function ensureFile(){imported=true;$('#recent-file').hidden=false;$('#recent-file').textContent='▧ '+renamedTitle;}
 function progress(){
- $('#steps').innerHTML=lessons.map((lesson,index)=>`<button class="step ${index===current?'active':''} ${done.has(index)?'done':''}" data-step="${index}" ${index===current?'aria-current="step"':''}><span>${done.has(index)?'✓':index+1}</span><div><strong>${t(lesson.short)}</strong><small>${t(lesson.sub)}</small></div></button>`).join('');
+ $('#steps').innerHTML=lessons.map((lesson,index)=>`<button class="step ${index===current?'active':''} ${done.has(index)?'done':''}" data-step="${index}" ${index===current?'aria-current="step"':''}><span aria-hidden="true">${done.has(index)?'✓':index+1}</span><strong>${t(lesson.short)}</strong></button>`).join('');
  $('#steps').querySelectorAll('[data-step]').forEach(button=>button.onclick=()=>go(Number(button.dataset.step)));
  $('#previous').disabled=current===0;$('#next').disabled=!done.has(current);$('#next').textContent=current===5?t('查看学习结果 →'):t('下一步 →');$('#completion').textContent=ui`已完成 ${done.size} / ${lessons.length}`;
 }
@@ -27,7 +27,7 @@ function go(index){
  if(index===1)showSearch();else if(index===2||index===3)showDetail();else showHome();progress();
 }
 function showHome(){
- $('#workspace-content').innerHTML=ui`<div class="welcome"><span class="star">✳</span><h3>存下资料，留待以后找回。</h3><p>示例：一份六月月刊 PDF。教程不会请求文件权限，也不会调用模型。</p><button class="primary" id="import-sample">${imported?t('再次导入示例 PDF'):t('导入示例 PDF')}</button></div>${imported?ui`<div class="file-card"><span class="status">示例资料已归档</span><strong>${escapeHtml(renamedTitle)}</strong><p>${t(sampleSummary)}</p><button class="secondary" id="view-sample">查看资料详情 ↗</button></div>`:''}`;
+ $('#workspace-content').innerHTML=ui`<div class="welcome"><h3>存下资料，留待以后找回。</h3><p>示例：一份六月月刊 PDF。</p><button class="primary" id="import-sample">${imported?t('再次导入示例 PDF'):t('导入示例 PDF')}</button></div>${imported?ui`<div class="file-card"><span class="status">示例资料已归档</span><strong>${escapeHtml(renamedTitle)}</strong><p>${t(sampleSummary)}</p><button class="secondary" id="view-sample">查看资料详情 ↗</button></div>`:''}`;
  $('#import-sample').onclick=()=>{ensureFile();complete(0,t('✓ 示例已归档。原件与预置概览放在同一份资料中。'));showHome();};
  if($('#view-sample'))$('#view-sample').onclick=showDetail;
 }
@@ -64,7 +64,7 @@ function showBackup(){
  $('#workspace-content').innerHTML=t('<div class="settings"><p class="settings-label">导出知识库备份</p><h3>一个 ZIP，带上原件。</h3><p>以下是虚构的备份清单预览，本练习没有下载任何文件。</p><div class="tree">知识库备份.zip\n├── archive.sqlite3  数据库\n├── archive.json     资料清单与摘要\n└── files/\n    └── 示例资料编号   PDF 原文件内容</div><p class="small">归档原件可能使用资料编号命名。通过程序下载原文件时，会恢复原文件名。</p></div>');complete(5,t('✓ 备份包括原文件。以后可通过「导入知识库备份」合并恢复资料。'));
 }
 function showResult(){
- $('#lesson-title').textContent=done.size===6?t('六个练习，都完成了。'):t('已经掌握 ')+done.size+t(' 个步骤。');$('#instruction').textContent=t('真实程序中的操作位置与练习一致。现在可以回到知识秘书，处理自己的资料。');$('#hint').textContent=t('不确定时，可以随时从「模型与设置 → 使用教程」再次打开。');$('#workspace-content').innerHTML=ui`<div class="welcome"><span class="star">✳</span><h3>${done.size} / 6 项技能已完成</h3><p>归档、组合搜索、标题修改、PDF 阅读、模式切换，以及备份。</p><button class="primary" id="restart-finish">再练习一次</button></div>`;$('#restart-finish').onclick=reset;$('#feedback').textContent=t('练习数据只存在于本页面，刷新或重置后清空。');$('#next').disabled=true;
+ $('#lesson-title').textContent=done.size===6?t('六个练习，都完成了。'):t('已经掌握 ')+done.size+t(' 个步骤。');$('#instruction').textContent=t('真实程序中的操作位置与练习一致。现在可以回到知识秘书，处理自己的资料。');$('#hint').textContent=t('不确定时，可以随时从「模型与设置 → 使用教程」再次打开。');$('#workspace-content').innerHTML=ui`<div class="welcome"><h3>${done.size} / 6 项技能已完成</h3><p>归档、组合搜索、标题修改、PDF 阅读、模式切换，以及备份。</p><button class="primary" id="restart-finish">再练习一次</button></div>`;$('#restart-finish').onclick=reset;$('#feedback').textContent=t('练习数据只存在于本页面，刷新或重置后清空。');$('#next').disabled=true;
 }
 function reset(){current=0;done=new Set();imported=false;renamedTitle=t('科学月刊 · 2026年6月');mode='browser';$('#mode-badge').textContent=t('网页练习');$('#recent-file').hidden=true;go(0);}
 function makePdf(){
