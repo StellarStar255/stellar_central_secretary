@@ -703,7 +703,7 @@ document.addEventListener('click',event=>{
 async function requestCapture(id){
  const status=await api('/api/status');token=status.token;supportsWebCapture=status.capabilities?.generic_page_capture===true;supportsCapture=status.capabilities?.conversation_capture===true&&status.capabilities?.manual_browser_login===true&&status.capabilities?.in_place_browser_read===true;
  $('#service-alert').hidden=supportsCapture;
- if(!(canReadChatGPT(allItems.find(i=>i.id===id)?.url)?supportsCapture:supportsWebCapture))throw Error(t('后台仍是旧版本，没有启动浏览器。请双击「启动知识秘书.command」重启服务，再刷新此页面。'));
+ if(!(canReadChatGPT(allItems.find(i=>i.id===id)?.url)?supportsCapture:supportsWebCapture))throw Error(t('后台仍是旧版本，没有启动浏览器。请等待当前任务完成后重启程序，再刷新此页面。'));
  const result=await api('/api/items/'+id+'/capture',{});
  if(result.capture_started!==true)throw Error(t('后台未确认读取任务，浏览器未启动。请重启知识秘书后重试。'));
  if(['needs_content','error'].includes(result.item?.state))throw Error(result.item.error||t('浏览器启动失败，请查看资料详情。'));
@@ -726,7 +726,7 @@ function archiveReply(result){const i=result.item;
  if(i.kind==='note'&&i.user_context?.startsWith('【日期解析】')&&!i.summary)return t('已归档：')+'\n\n'+i.user_context.split('\n').slice(2).join('\n');
  if(i.state==='saved')return t('已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。');
  if(i.has_group_links&&i.state==='processing'&&i.error==='正在读取本组链接…')return t('本组链接已归为一档，正在后台读取可访问的正文。');
- if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请双击项目里的「启动知识秘书.command」重启服务，再刷新此页面。');
+ if(canReadChatGPT(i.url)&&i.state==='needs_content'&&!supportsCapture)return t('链接已保存，但当前后台仍是旧版本，尚未启动浏览器读取正文。请等待当前任务完成后重启程序，再刷新此页面。');
  if(!canReadChatGPT(i.url)&&isReading(i))return t('正在准备浏览器采集。请在任务网页完成登录并展开要保存的内容，再点击「页面已打开，开始读取」。仅采集已加载内容，成功后按设置关闭本次新开的标签页。');
  if(i.state==='queued_capture')return t('读取任务已排队，可随时停止。');
  if(i.state==='opening_browser')return t('读取任务已提交，正在启动专用浏览器。窗口打开后会提示你登录。');
