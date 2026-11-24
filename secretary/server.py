@@ -1537,13 +1537,13 @@ def handler(service):
                             if folder.is_relative_to(pending) or Path(pending).is_relative_to(folder):
                                 raise ValueError('请选择独立于现有记忆和备份目录的文件夹。')
                         return self.send(200,service.backups.configure(body))
-                if path=='/api/backups/verify':return self.send(200,service.backups.verify(body.get('id')))
+                if path=='/api/backups/verify':return self.send(200,service.backups.verify(body.get('id'),folder=body.get('folder')))
                 if path=='/api/backups/create':return self.send(200,service.backups.create(expected_folder=body.get('folder')))
                 if path=='/api/backups/restore':
                     if body.get('confirmed') is not True:raise ValueError('请先确认恢复此备份')
                     with service.lock:
                         if service.busy or service.captures or service.questions:raise ValueError('请等待当前任务结束后恢复备份')
-                        return self.send(200,service.backups.restore(body.get('id')))
+                        return self.send(200,service.backups.restore(body.get('id'),folder=body.get('folder')))
                 if path=='/api/tutorial/claim':
                     with service.lock:
                         if not service.tutorial_pending:return self.send(200,{'show':False})

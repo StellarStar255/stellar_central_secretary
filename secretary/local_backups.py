@@ -238,17 +238,18 @@ class Backups:
                 if restore_source:
                     self._save_state(restore_protected=sorted(previous | {restore_source}))
                 self.error=str(error);self._save_state(state='error',last_error=self.error);raise
-    def _find_entry(self,key):
-        matches=[entry for entry in self.entries() if entry['id']==key]
+    def _find_entry(self,key,folder=None):
+        matches=[entry for entry in self.entries() if entry['id']==key
+                 and (folder is None or entry['folder']==folder)]
         if not matches:
             raise ValueError('本机备份不存在')
         # The same snapshot can also exist in a previously configured folder.
         return next((entry for entry in matches if not entry.get('index_issue')),matches[0])
 
-    def verify(self,key,allow_source_mismatch=False):
+    def verify(self,key,allow_source_mismatch=False,*,folder=None):
         from . import backup_verification
         with self.lock:
-            entry=self._find_entry(key)
+            entry=self._find_entry(key,folder)
             if entry.get('index_issue'):
                 return self._repair_index(entry)
             meta=Path(entry['folder'])/(key+'.json');checked=datetime.now(timezone.utc).isoformat()
@@ -326,10 +327,10 @@ class Backups:
     def close(self):
         self.stop.set()
         if getattr(self,'worker',None):self.worker.join()
-    def restore(self,key):
+    def restore(self,key,*,folder=None):
         with self.lock,self.archive.lock:
-            entry=self._find_entry(key)
-            checked=self.verify(key)
+            entry=self._find_entry(key,folder)
+            checked=self.verify(key,folder=entry['folder'])
             source=Path(entry['folder'])/(key+'.zip')
             with source.open('rb') as stream:
                 if hashlib.file_digest(stream,'sha256').hexdigest()!=checked['sha256']:raise ValueError('备份校验失败，未修改当前资料')

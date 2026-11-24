@@ -1264,7 +1264,7 @@ async function localBackupList(){
  const issueNames={missing_zip:'找不到备份 ZIP',missing_index:'缺少索引，验证后可重建',invalid_index:'索引损坏，验证后可重建',unreadable_index:'备份索引不可读取'};
  const reasonNames={recovered:'原类型未知的备份',daily:'每日备份',upgrade:'升级前备份',manual:'手动备份','before-restore':'恢复前备份'};
  const verificationNames={verified:'数据库与原件已验证',failed:'备份验证失败',inconsistent:'恢复前现场副本：原件与索引不一致'};
- const verifyFocus=document.activeElement?.dataset?.backupVerify;
+ const verifyFocus=document.activeElement?.dataset;
  const rows=result.items.map(entry=>{
   const row=document.createElement('li'),details=document.createElement('div'),title=document.createElement('strong'),
         metadata=document.createElement('small'),actions=document.createElement('div'),
@@ -1290,18 +1290,19 @@ async function localBackupList(){
    restore.disabled=verify.disabled=true;
    try{
     if(!await StellarDrafts.flush())return;
-    await api('/api/backups/restore',{id:entry.id,confirmed:true});
+    await api('/api/backups/restore',{id:entry.id,folder:entry.folder,confirmed:true});
     await StellarDrafts.clearAll();
     location.reload();
    }catch(error){toast(error.message)}
    finally{restore.disabled=!canRestore;verify.disabled=false}
   };
   verify.dataset.backupVerify=entry.id;
+  verify.dataset.backupFolder=entry.folder;
   verify.textContent=t('验证此备份');
   verify.onclick=async()=>{
    restore.disabled=verify.disabled=true;
    try{
-    await api('/api/backups/verify',{id:entry.id});
+    await api('/api/backups/verify',{id:entry.id,folder:entry.folder});
     toast(t('备份验证通过，当前资料未修改'));
    }catch(error){toast(error.message)}
    finally{
@@ -1315,7 +1316,9 @@ async function localBackupList(){
  });
  target.replaceChildren(...rows);
  status.textContent=rows.length?StellarI18n.count(rows.length,'份备份','backup','backups'):t('暂无本机备份。');
- if(verifyFocus)target.querySelector('[data-backup-verify="'+verifyFocus+'"]')?.focus({preventScroll:true});
+ if(verifyFocus?.backupVerify)Array.from(target.querySelectorAll('[data-backup-verify]')).find(
+  button=>button.dataset.backupVerify===verifyFocus.backupVerify&&button.dataset.backupFolder===verifyFocus.backupFolder
+ )?.focus({preventScroll:true});
 }
 $('#backup-list').onclick=async()=>{
  const dialog=$('#backup-history-dialog'),status=$('#backup-history-status');

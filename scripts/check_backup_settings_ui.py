@@ -189,9 +189,30 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     expect(page.locator('#library-migration-notice')).to_be_hidden()
     original=service.archive.list()[0]
     service.archive.update(original['id'],title='Changed after backup')
+    # The current folder has a damaged copy of the same snapshot as the old folder.
+    duplicate=service.backups.folder/old_snapshot['id']
+    duplicate.with_suffix('.zip').write_bytes(b'damaged')
+    duplicate.with_suffix('.json').write_bytes((configured_backup/(old_snapshot['id']+'.json')).read_bytes())
     page.locator('#settings-open').click()
     page.locator('#backup-list').click()
+    bad_row=page.locator('.backup-history-row').filter(has=page.locator('[data-backup-verify="'+old_snapshot['id']+'"]')).filter(has_not_text='旧备份目录')
+    page.once('dialog',lambda confirmation:confirmation.accept())
+    with page.expect_response(lambda response:response.url.endswith('/api/backups/restore')) as failed:
+     bad_row.get_by_role('button',name='恢复此备份',exact=True).click()
+    assert not failed.value.ok
+    assert service.archive.get(original['id'])['title']=='Changed after backup'
+    with page.expect_response(lambda response:response.url.endswith('/api/backups/verify')) as failed_check:
+     bad_row.get_by_role('button',name='验证此备份').click()
+    assert not failed_check.value.ok
+    expect(bad_row).to_contain_text('备份验证失败')
+    for action in ('verify','restore'):
+     response=page.request.post(base+'/api/backups/'+action,data={'id':old_snapshot['id'],'folder':str(destination),'confirmed':True})
+     assert not response.ok
     old_row=page.locator('.backup-history-row').filter(has_text='旧备份目录')
+    with page.expect_response(lambda response:response.url.endswith('/api/backups/verify')) as verified:
+     old_row.get_by_role('button',name='验证此备份').click()
+    assert verified.value.ok
+    expect(bad_row).to_contain_text('备份验证失败')
     page.once('dialog',lambda confirmation:confirmation.accept())
     with page.expect_response(lambda response:response.url.endswith('/api/backups/restore')) as restored:
      old_row.get_by_role('button',name='恢复此备份',exact=True).click()
