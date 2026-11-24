@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import sys
-from . import backup_index, backup_workspace, paths, restore_transaction
+from . import backup_identity, backup_index, backup_workspace, paths, restore_transaction
 
 class Backups:
     def __init__(self,archive):
@@ -12,26 +12,28 @@ class Backups:
         self.lock=threading.RLock();self.stop=threading.Event();self.config_path=archive.root/'backup-settings.json';self.state_path=archive.root/'backup-status.json'
         try:self.config=json.loads(self.config_path.read_text())
         except (OSError,ValueError):self.config={}
-        self.library_id=self.config.get('library_id')
+        self.binding=backup_identity.binding(archive.root)
+        self.library_id=self.config.get('library_id') if self.config.get('library_binding')==self.binding else None
         if not isinstance(self.library_id,str) or not re.fullmatch('[0-9a-f]{32}',self.library_id):
             self.library_id=None
         self.folder=Path(self.config.get('folder',str(self.default)));self.limit=int(self.config.get('max_bytes',10*1024**3));self.daily_keep=int(self.config.get('daily_keep',7));self.other_keep=int(self.config.get('other_keep',3))
         try:self.state=json.loads(self.state_path.read_text())
         except (OSError,ValueError):self.state={}
+        if self.library_id is None or self.state.get('library_id')!=self.library_id:
+            self.state={}
         self.error=self.state.get('last_error','')
         if self.state.get('state')=='creating':self.error='上次备份未完成，请重新备份。';self.state.update(state='error',last_error=self.error)
     def _save_config(self,value):
         value['library_id']=self.library_id or uuid.uuid4().hex
-        temporary=self.config_path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(value))
-        temporary.replace(self.config_path)
+        value['library_binding']=self.binding
+        backup_identity.write(self.config_path,value)
         self.config=value
         self.library_id=value['library_id']
 
     def _save_state(self,**values):
         if 'state' in values:
             values['state_folder']=str(self.folder)
-        self.state={**self.state,**values,'revision':self.state.get('revision',0)+1};temporary=self.state_path.with_suffix('.tmp');temporary.write_text(json.dumps(self.state));temporary.replace(self.state_path)
+        self.state={**self.state,**values,'library_id':self.library_id,'revision':self.state.get('revision',0)+1};temporary=self.state_path.with_suffix('.tmp');temporary.write_text(json.dumps(self.state));temporary.replace(self.state_path)
     def status(self):
         folder,config,state=self.folder,self.config,self.state
         entries=self._entries(folder)

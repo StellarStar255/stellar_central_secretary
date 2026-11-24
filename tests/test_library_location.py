@@ -122,6 +122,8 @@ class LibraryLocationTest(unittest.TestCase):
         moved_backups = Backups(moved)
         self.assertEqual(moved_backups.folder, self.backups.folder)
         self.assertIn(old['id'], {entry['id'] for entry in moved_backups.entries()})
+        self.assertTrue(moved_backups.owns(old))
+        self.assertFalse(Backups(self.archive).owns(old))
         moved_backups.restore(old['id'])
         self.assertEqual(moved.get(item)['title'], 'Memory')
 

@@ -1,4 +1,6 @@
 import json
+import shutil
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -19,6 +21,50 @@ class SharedBackupTests(unittest.TestCase):
         self.b = Backups(Archive(root/'b'))
         for backups in (self.a, self.b):
             backups.configure({'folder':str(root/'shared'), 'other_keep':1})
+
+    def test_copied_libraries_rotate_and_restore_independently(self):
+        a = self.a
+        item, _ = a.archive.add('Original', 'shared starting point')
+        first = a.create()
+        a.due()
+        clone = a.archive.root.parent/'clone'
+        shutil.copytree(a.archive.root, clone)
+        b = Backups(Archive(clone))
+        self.assertFalse(b.owns(first))
+        self.assertIsNone(b.status()['last_success'])
+        b.due()
+        self.assertNotEqual(a.library_id, b.library_id)
+        self.assertEqual(len([e for e in b.entries() if b.owns(e) and e['reason']=='daily']), 1)
+        for backups, title in ((b, 'B first'), (a, 'A latest'), (b, 'B latest')):
+            backups.archive.update(item, title=title)
+            backups.create()
+        for original, title in ((b, 'B latest'), (a, 'A latest')):
+            reopened = Backups(original.archive)
+            self.assertEqual(reopened.library_id, original.library_id)
+            latest, = [e for e in reopened.entries() if reopened.owns(e) and e['reason']=='manual']
+            reopened.archive.update(item, title='Changed again')
+            reopened.restore(latest['id'])
+            self.assertEqual(reopened.archive.get(item)['title'], title)
+
+    def test_same_path_and_directory_number_on_another_machine(self):
+        first = self.a.create()
+        with patch('secretary.backup_identity._machine', return_value='another computer'):
+            second = Backups(self.a.archive)
+            self.assertFalse(second.owns(first))
+            second.create()
+            self.assertNotEqual(second.library_id, first['library_id'])
+            self.assertEqual(second.verify(first['id'])['verification']['state'], 'verified')
+
+    def test_unbound_legacy_settings_cannot_claim_an_existing_backup(self):
+        a = self.a
+        first = a.create()
+        config = json.loads(a.config_path.read_text())
+        del config['library_binding']
+        a.config_path.write_text(json.dumps(config))
+        reopened = Backups(a.archive)
+        reopened.create()
+        self.assertFalse(reopened.owns(first))
+        self.assertEqual(reopened.verify(first['id'])['verification']['state'], 'verified')
 
     def test_independent_rotation_daily_schedule_and_cleanup(self):
         a, b = self.a, self.b

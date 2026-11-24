@@ -9,7 +9,7 @@ import uuid
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
-from . import paths
+from . import backup_identity, paths
 
 
 class Unavailable(ValueError):
@@ -331,6 +331,7 @@ def migrate(root, value):
                 if sys.platform == 'win32' and target.parent.is_dir():
                     target.mkdir(exist_ok=True)
                 raise
+        backup_identity.transfer(root, target)
     except (OSError, ValueError, sqlite3.Error) as error:
         write({**value, 'error': str(error), 'failure_id': uuid.uuid4().hex})
         return root
