@@ -96,6 +96,41 @@ class RestoreTransactionTest(unittest.TestCase):
                 self.assertFalse((root/JOURNAL).exists())
                 self.assertFalse(list(root.glob('.stellar-restore-*')))
 
+    def test_committed_restore_with_moved_rollback_finishes_retention(self):
+        from threading import Event
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            archive = Archive(root)
+            backups = Backups(archive)
+            backups.configure({'other_keep': 2})
+            item, _ = archive.add('Original', 'body')
+            older = backups.create()
+            snapshot = backups.create()
+            backups.configure({'other_keep': 1})
+            archive.update(item, title='Changed')
+            args = [sys.executable, '-c', INTERRUPT, str(root), snapshot['id'], 'committed']
+            self.assertEqual(subprocess.run(args, timeout=30).returncode, 73)
+            reopened = Backups(Archive(root))
+            source, rollback = reopened.state['restore_protected']
+            self.assertEqual(source, snapshot['id'])
+            for suffix in ('.json', '.zip'):
+                (reopened.folder/(rollback+suffix)).rename(root/(rollback+suffix))
+            started = Event()
+            reopened.due = started.set
+            reopened.start()
+            try:
+                self.assertTrue(started.wait(5))
+            finally:
+                reopened.close()
+            persisted = Backups(reopened.archive)
+            self.assertFalse(persisted.restore_protected())
+            self.assertIsNone(persisted.state['restore_transaction'])
+            self.assertEqual(persisted.archive.get(item)['title'], 'Original')
+            self.assertFalse((persisted.folder/(older['id']+'.zip')).exists())
+            self.assertEqual(persisted.verify(source)['verification']['state'], 'verified')
+            self.assertTrue(persisted.restore(source)['ok'])
+
     def test_locked_cleanup_after_commit_allows_startup_and_retries(self):
         from unittest.mock import patch
         from secretary import restore_transaction

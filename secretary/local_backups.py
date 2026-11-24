@@ -289,12 +289,17 @@ class Backups:
                 raise
     def _finish_restore_retention(self):
         protected=self.state.get('restore_protected',[])
-        if len(protected)!=2:
-            return
-        rollback=self._find_entry(protected[1])
         self._save_state(restore_protected=[],restore_transaction=None)
-        if (rollback['folder']==str(self.folder)
-                and rollback.get('verification',{}).get('state')=='verified'):
+        if len(protected)!=2 or self.state.get('state_folder')!=str(self.folder):
+            return
+        # Once the restore has committed, missing files must not keep it pending.
+        owned=[entry for entry in self.entries()
+               if entry['folder']==str(self.folder) and self.owns(entry)]
+        rollback=next((entry for entry in owned if entry['id']==protected[1]),None)
+        if rollback is None or rollback.get('index_issue')=='missing_zip':
+            rollback=next((entry for entry in owned
+                           if entry.get('verification',{}).get('state')=='verified'),None)
+        if rollback and rollback.get('verification',{}).get('state')=='verified':
             self._prune(rollback['id'])
 
     def start(self):
