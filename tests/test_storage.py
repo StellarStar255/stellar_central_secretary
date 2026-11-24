@@ -46,3 +46,34 @@ class StorageTest(unittest.TestCase):
     result=service.storage.clean({'token':plan['token'],'ids':[choice['id']],'confirmed':True})
     self.assertEqual(len(result['removed']),1);self.assertFalse(attachment_recovery.public(service.archive,ident));self.assertEqual(service.archive.get(ident)['title'],'new title')
    finally:service.close()
+
+ def test_backup_folder_alias_is_counted_and_cleaned_once(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp).resolve()
+   actual=root/'library'
+   actual.mkdir()
+   alias=root/'alias'
+   try:alias.symlink_to(actual,target_is_directory=True)
+   except OSError:self.skipTest('directory symlinks unavailable')
+   service=Service(alias)
+   try:
+    backups=service.backups
+    older=backups.create()
+    backups.configure({'folder':str(actual/'local-backups')})
+    latest=backups.create()
+    self.assertEqual(backups.folders(),[backups.folder])
+    self.assertEqual({e['id']:e['folder'] for e in backups.entries()},
+                     {e['id']:str(backups.folder) for e in (older,latest)})
+    self.assertEqual(len(backups.entries()),2)
+    preview=service.storage.preview()
+    physical=[p for p in backups.folder.rglob('*') if p.is_file()]
+    self.assertEqual(preview['overview']['groups']['backups'],
+                     {'files':len(physical),'bytes':sum(p.stat().st_size for p in physical)})
+    self.assertEqual(preview['overview']['total_bytes'],sum(p.stat().st_size for p in actual.rglob('*') if p.is_file()))
+    candidate,=preview['items']
+    self.assertNotIn('backup_folder',candidate)
+    result=service.storage.clean({'token':preview['token'],'ids':[candidate['id']],'confirmed':True})
+    self.assertEqual(result['failed'],[])
+    self.assertEqual([e['id'] for e in backups.entries()],[latest['id']])
+    self.assertEqual(backups.verify(latest['id'])['verification']['state'],'verified')
+   finally:service.close()

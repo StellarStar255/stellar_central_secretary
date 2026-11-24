@@ -1,10 +1,22 @@
 """Enumerate managed snapshots independently of the health of their sidecar files."""
 import json
+import os
 import re
 import uuid
 from datetime import datetime, timezone
 
 REASONS = ('manual', 'upgrade', 'before-restore', 'daily', 'recovered')
+
+
+def directory_key(path):
+    try:
+        info = path.stat()
+        if info.st_ino:
+            return info.st_dev, info.st_ino
+    except OSError:
+        pass
+    # Keep disconnected drives and paths on filesystems without file IDs usable.
+    return os.path.normcase(os.path.realpath(path))
 
 
 def valid_date(value):

@@ -85,9 +85,14 @@ class Backups:
             self._save_config(value)
             self.folder=folder;self.limit=limit;self.daily_keep=daily;self.other_keep=other
             return self.status()
+    def folders(self):
+        locations={}
+        for folder in (self.folder,self.default,*map(Path,self.config.get('previous_folders',[]))):
+            locations.setdefault(backup_index.directory_key(folder),folder)
+        return list(locations.values())
+
     def entries(self):
-        folders=list(dict.fromkeys([str(self.folder),str(self.default),*self.config.get('previous_folders',[])]))
-        result=[entry for location in folders for entry in self._entries(Path(location))]
+        result=[entry for folder in self.folders() for entry in self._entries(folder)]
         return sorted(result,key=lambda value:value['created'],reverse=True)
     def owns(self,entry):
         return self.library_id is not None and entry.get('library_id')==self.library_id
@@ -305,7 +310,7 @@ class Backups:
 
     def start(self):
         def loop():
-            for folder in {self.folder,self.default,*map(Path,self.config.get('previous_folders',[]))}:
+            for folder in self.folders():
                 backup_workspace.recover(folder,self.archive.root)
             self.repair_indexes()
             with self.lock:

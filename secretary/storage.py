@@ -2,13 +2,20 @@
 import hashlib,json,os,re,shutil,threading,time,uuid
 from collections import Counter
 from pathlib import Path
+from .backup_index import directory_key
 
 KINDS=('originals','backups','deleted_attachments','uploads','working_files','video_cache','database','other')
-def files(root):
+def files(root,seen_directories=None):
     if root.is_symlink():return []
     if root.is_file():return [] if root.is_symlink() else [root]
     result=[]
     for directory,folders,names in os.walk(root,followlinks=False):
+        if seen_directories is not None:
+            key=directory_key(Path(directory))
+            if key in seen_directories:
+                folders.clear()
+                continue
+            seen_directories.add(key)
         folders[:]=[name for name in folders if not (Path(directory)/name).is_symlink()]
         for name in names:
             path=Path(directory)/name
@@ -24,15 +31,15 @@ def fingerprint(paths):
 
 class Storage:
     def __init__(self,service):self.service=service;self.lock=threading.RLock();self.plans={}
-    def folders(self):return list(dict.fromkeys([self.service.backups.folder,self.service.backups.default,*map(Path,self.service.backups.config.get('previous_folders',[]))]))
     def overview(self):
-        root=self.service.archive.root;totals={key:{'bytes':0,'files':0} for key in KINDS};backup_folders=self.folders()
-        locations=list(dict.fromkeys([root,*[folder for folder in backup_folders if not folder.is_relative_to(root)]]))
-        for location in locations:
-            for path in files(location):
+        root=self.service.archive.root.resolve();totals={key:{'bytes':0,'files':0} for key in KINDS}
+        seen=set()
+        # Count backup directories first, including ones reachable inside the library.
+        for location in [*self.service.backups.folders(),root]:
+            for path in files(location,seen):
                 try:
-                    relative=path.relative_to(root) if path.is_relative_to(root) else None
-                    if any(path.is_relative_to(folder) for folder in backup_folders):kind='backups'
+                    relative=path.relative_to(root) if location==root else None
+                    if relative is None:kind='backups'
                     elif relative and relative.parts[0]=='files':kind='originals'
                     elif relative and relative.parts[0]=='uploads':kind='uploads'
                     elif relative and relative.parts[0]=='open-files':kind='deleted_attachments' if any('-deleted-' in part for part in relative.parts) else 'working_files'
@@ -44,10 +51,11 @@ class Storage:
         return {'groups':totals,'total_bytes':sum(value['bytes'] for value in totals.values()),'scanned_at':time.time()}
     def candidates(self):
         service=self.service;root=service.archive.root;result=[]
+        backup_folders=service.backups.folders()
         def add(kind,name,paths,directory=None):
             if len(result)>=500 or not paths:return
             try:
-                base=root if paths[0].is_relative_to(root) else next((folder for folder in self.folders() if paths[0].is_relative_to(folder)),None)
+                base=root if paths[0].is_relative_to(root) else next((folder for folder in backup_folders if paths[0].is_relative_to(folder)),None)
                 if base is None or any(path.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent==base or base in parent.parents) for path in paths):return
                 item={'id':uuid.uuid4().hex,'kind':kind,'name':name,'bytes':sum(path.stat().st_size for path in paths),'files':len(paths),'paths':paths,'directory':directory,'fingerprint':fingerprint(paths)}
                 result.append(item)
@@ -66,7 +74,7 @@ class Storage:
         entries=[entry for entry in service.backups.entries() if service.backups.owns(entry)]
         copies=Counter(entry['id'] for entry in entries)
         protected=service.backups.restore_protected()
-        for folder in self.folders():
+        for folder in backup_folders:
             values=[entry for entry in entries if Path(entry['folder'])==folder]
             if values:protected.add(values[0]['id'])
             verified=next((entry for entry in values if entry.get('verification',{}).get('state')=='verified'),None)
