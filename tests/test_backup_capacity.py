@@ -128,3 +128,26 @@ class BackupCapacityTest(unittest.TestCase):
     backups.due()
     self.assertIsNone(backups.status()['daily_retry'])
    finally:service.close()
+
+ def test_manual_upgrade_and_daily_failures_share_one_diagnostic(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    archive=service.archive
+    ident,_=archive.add('Original','body',filename='note.txt',data=b'original')
+    backups=service.backups
+    verified=backups.create()
+    (archive.root/'files'/ident).write_bytes(b'changed')
+    for reason in ('manual','manual','upgrade','daily','upgrade'):
+     with self.assertRaisesRegex(ValueError,'note.txt'):backups.create(reason)
+     entries=backups.entries()
+     self.assertEqual(len(entries),2)
+     failed=[e for e in entries if e['verification']['state']=='failed']
+     self.assertEqual([e['reason'] for e in failed],[reason])
+     self.assertEqual(len(list(backups.folder.glob('*.zip'))),2)
+    # One new snapshot fits alone, but the diagnostic plus the verified one do not.
+    backups.limit=max(e['size'] for e in backups.entries())+1024
+    with self.assertRaisesRegex(ValueError,'note.txt'):backups.create('manual')
+    self.assertEqual([e['id'] for e in backups.entries()],[verified['id']])
+    self.assertEqual(backups.verify(verified['id'])['verification']['state'],'verified')
+   finally:service.close()

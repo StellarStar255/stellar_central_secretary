@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import sys
-from . import paths
+from . import paths, restore_transaction
 
 class Backups:
     def __init__(self,archive):
@@ -101,6 +101,28 @@ class Backups:
             except OSError:continue  # An open Windows download may temporarily hold an old backup.
         used=sum(value['size'] for value in self.entries() if Path(value['folder'])==self.folder)
         self._save_state(warning='部分旧备份被占用，暂时超过容量上限；关闭相关文件后可再次备份。' if used>self.limit else '')
+    def _limit_failed_snapshots(self, newest):
+        # Rotate diagnostics across automatic, manual and pre-upgrade attempts.
+        entries=self._entries(self.folder)
+        current=next((entry for entry in entries if entry['id']==newest),None)
+        if not current or current.get('verification',{}).get('state')!='failed':
+            return
+        used=sum(entry['size'] for entry in entries)
+        for entry in entries:
+            if entry['id']==newest or entry.get('verification',{}).get('state')!='failed':
+                continue
+            payload=self.folder/(entry['id']+'.zip')
+            try:
+                payload.unlink()
+                used-=entry['size']
+                payload.with_suffix('.json').unlink()
+            except OSError:
+                continue  # A later attempt retries files locked by another process.
+        if used>self.limit:
+            payload=self.folder/(newest+'.zip')
+            payload.unlink()
+            payload.with_suffix('.json').unlink()
+
     def create(self,reason='manual',*,expected_folder=None):
         with self.lock:
             if expected_folder is not None and expected_folder!=str(self.folder):
@@ -142,19 +164,7 @@ class Backups:
                 try:
                     value=self.verify(key,allow_source_mismatch=reason=='before-restore')
                 except Exception:
-                    if reason=='daily':
-                        # Only discard older explicitly failed daily snapshots in this folder.
-                        for entry in self._entries(self.folder):
-                            if entry['id']!=key and entry['reason']=='daily' and entry.get('verification',{}).get('state')=='failed':
-                                try:
-                                    (self.folder/(entry['id']+'.zip')).unlink()
-                                    (self.folder/(entry['id']+'.json')).unlink()
-                                except OSError:
-                                    pass  # Retry after a locked file becomes available.
-                        # A diagnostic must not push verified history over the budget.
-                        if sum(entry['size'] for entry in self._entries(self.folder))>self.limit:
-                            target.unlink(missing_ok=True)
-                            meta.unlink(missing_ok=True)
+                    self._limit_failed_snapshots(key)
                     raise
                 if value['verification']['state']!='verified':
                     self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
@@ -223,8 +233,8 @@ class Backups:
             source=Path(entry['folder'])/(key+'.zip')
             with source.open('rb') as stream:
                 if hashlib.file_digest(stream,'sha256').hexdigest()!=entry['sha256']:raise ValueError('备份校验失败，未修改当前资料')
-            with tempfile.TemporaryDirectory(dir=self.archive.root) as temp:
-                stage=Path(temp);incoming=stage/'files';incoming.mkdir()
+            with restore_transaction.workspace(self.archive.root,self._save_state) as (stage,transaction):
+                incoming=stage/'files';incoming.mkdir()
                 with zipfile.ZipFile(source) as archive:
                     for info in archive.infolist():
                         name=info.filename
@@ -243,27 +253,5 @@ class Backups:
                 from .core import Archive
                 Archive(stage,recover=False)
                 self.create('before-restore')
-                current=self.archive.root/'files'
-                # If rollback itself encounters an OS error, retain the previous files
-                # outside the temporary directory for recovery.
-                old=self.archive.root/('.restore-originals-'+uuid.uuid4().hex)
-                old_chats=self.archive.root/'conversations.json';chat_copy=old_chats.read_bytes() if old_chats.exists() else None
-                try:
-                    current.replace(old)
-                    incoming.replace(current)
-                    if (stage/'conversations.json').exists():shutil.copyfile(stage/'conversations.json',old_chats)
-                    else:old_chats.unlink(missing_ok=True)
-                    with closing(sqlite3.connect(database)) as src,closing(sqlite3.connect(self.archive.root/'archive.sqlite3')) as dst:src.backup(dst)
-                except BaseException:
-                    if not old.exists():raise
-                    if current.exists():shutil.rmtree(current)
-                    old.replace(current)
-                    if chat_copy is not None:old_chats.write_bytes(chat_copy)
-                    else:old_chats.unlink(missing_ok=True)
-                    raise
-                try:
-                    shutil.rmtree(old)
-                except OSError:
-                    # The restore committed; surface leftover files separately.
-                    self._save_state(warning='恢复已完成，旧原件目录尚未清理：'+str(old))
+                restore_transaction.install(self.archive.root,stage,transaction)
             return {'ok':True,'restored':key}

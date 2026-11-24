@@ -130,6 +130,9 @@ def search_aliases(text):
 class Archive:
     def __init__(self, root, recover=True):
         self.root = Path(root); self.root.mkdir(parents=True, exist_ok=True)
+        if recover:
+            from .restore_transaction import recover as recover_restore
+            recover_restore(self.root)
         (self.root / 'files').mkdir(exist_ok=True)
         self.lock = threading.RLock()
         self._database_uri = (self.root/'archive.sqlite3').resolve().as_uri()

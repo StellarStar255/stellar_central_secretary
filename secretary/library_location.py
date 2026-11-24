@@ -148,6 +148,8 @@ def startup_directory(stack, override, recover=None):
             if action == 'existing' and root != original:
                 _remember_recovery_location(root, original, value)
                 return root
+            from .restore_transaction import recover as recover_restore
+            recover_restore(root)
             destination = migrate(root, value)
             if destination != root:
                 stack.enter_context(lease(destination))
