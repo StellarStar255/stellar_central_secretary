@@ -67,7 +67,7 @@ class Storage:
             verified=next((entry for entry in values if entry.get('verification',{}).get('state')=='verified'),None)
             if verified:protected.add(verified['id'])
         for entry in entries:
-            if entry['id'] not in protected:
+            if not entry.get('index_issue') and entry['id'] not in protected:
                 folder=Path(entry['folder']);add('backups',entry['created'],[folder/(entry['id']+'.zip'),folder/(entry['id']+'.json')])
         return result
     def preview(self):

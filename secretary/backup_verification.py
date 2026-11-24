@@ -5,7 +5,8 @@ from pathlib import Path
 
 def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
     with source.open('rb') as stream:
-        if hashlib.file_digest(stream,'sha256').hexdigest()!=expected_sha:raise ValueError('备份 SHA256 校验失败，当前资料未修改')
+        digest_sum=hashlib.file_digest(stream,'sha256').hexdigest()
+        if expected_sha is not None and digest_sum!=expected_sha:raise ValueError('备份 SHA256 校验失败，当前资料未修改')
     with tempfile.TemporaryDirectory(prefix='stellar-backup-check-') as temp,zipfile.ZipFile(source) as archive:
         entries=archive.infolist();names={entry.filename for entry in entries}
         if len(names)!=len(entries) or len(names)>200000 or not {'archive.sqlite3','archive.json'}<=names:raise ValueError('备份文件清单无效')
@@ -16,6 +17,8 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
             manifest=json.loads(archive.read('manifest.json'));values=manifest.get('files')
             if manifest.get('version')!=1 or not isinstance(values,dict) or set(values)!=names-{'manifest.json'}:raise ValueError('备份文件清单不完整')
             if any(not isinstance(value,dict) or type(value.get('size')) is not int or value['size']<0 or not re.fullmatch('[a-f0-9]{64}',str(value.get('sha256',''))) for value in values.values()):raise ValueError('备份文件清单无效')
+        if manifest is None and expected_sha is None:
+            raise ValueError('缺少备份校验值和逐文件清单，无法重建索引。')
         database=Path(temp)/'archive.sqlite3';actual={}
         for entry in entries:
             hasher=hashlib.sha256();size=0;output=database.open('wb') if entry.filename=='archive.sqlite3' else None
@@ -56,4 +59,4 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
                 if not allow_source_mismatch:raise ValueError('备份缺少附件或速记图片：'+', '.join(sorted(refs-names)[:3]))
                 anomalies.append('缺少附件或速记图片')
             if manifest and manifest.get('records')!=records:raise ValueError('备份资料数量与清单不一致')
-        return {'state':'inconsistent' if anomalies else 'verified','anomalies':anomalies[:20],'mode':'manifest' if manifest else 'legacy','records':records,'files':len(names),'referenced_files':len(refs)}
+        return {'sha256':digest_sum,'snapshot':manifest.get('snapshot') if manifest else None,'state':'inconsistent' if anomalies else 'verified','anomalies':anomalies[:20],'mode':'manifest' if manifest else 'legacy','records':records,'files':len(names),'referenced_files':len(refs)}

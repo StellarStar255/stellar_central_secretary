@@ -137,7 +137,15 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     assert snapshot['verification']['state']=='verified'
     assert (service.backups.folder/(snapshot['id']+'.zip')).is_file()
     assert (configured_backup/(old_snapshot['id']+'.zip')).is_file()
+    # Simulate an interrupted publication and repair it from the normal UI.
+    (service.backups.folder/(snapshot['id']+'.json')).unlink()
+    page.locator('#backup-history-dialog .dialog-head button').click()
+    page.locator('#backup-list').click()
+    issue_row=page.locator('.backup-history-row').filter(has_text='缺少索引，验证后可重建')
+    expect(issue_row.get_by_role('button',name='恢复此备份')).to_be_disabled()
+    expect(page.locator('.backup-history-row').filter(has_text='旧备份目录').get_by_role('button',name='恢复此备份')).to_be_enabled()
     page.locator('[data-backup-verify="'+snapshot['id']+'"]').click()
+    expect(issue_row).to_have_count(0)
     expect(page.locator('#toast')).to_contain_text('备份验证通过')
     page.locator('#backup-history-dialog .dialog-head button').click()
     expect(page.locator('#backup-history-dialog')).to_be_hidden()

@@ -16,6 +16,7 @@
   line.hidden=!text;
  }
  function sync(status){if(!status)return;const version=status.config_revision||0,revision=status.state_revision||0;if(version<configRevision||version===configRevision&&revision<stateRevision)return;if(version>configRevision)stateRevision=-1;configRevision=version;stateRevision=revision;const line=$('#backup-status');if(line)line.textContent=(status.last_success?t('最近成功：')+new Date(status.last_success).toLocaleString():t(status.folder_available===false?'当前备份目录不可用。':status.snapshot_count===0?'此目录尚无备份':'尚无成功备份'))+' · '+t('当前目录占用：')+((status.used_bytes||0)/1073741824).toFixed(2)+' / '+(status.max_bytes/1073741824).toFixed(1)+' GB'+(status.state==='creating'?' · '+t('正在备份…'):'');
+  if(line&&status.index_issue_count)line.textContent+=' · '+t('待检查的备份索引')+' '+status.index_issue_count;
   if(line&&status.daily_retry)line.textContent+=' · '+t('连续失败次数')+' '+status.daily_retry.attempts+' · '+t('下次自动重试')+' '+new Date(status.daily_retry.next_attempt).toLocaleString();
   backupFolder=status.folder;backupButtons();
   if(line&&status.last_verification){const check=status.last_verification;line.textContent+=' · '+t(check.state==='verified'?'最近验证通过：':check.state==='checking'?'正在验证备份…':'最近验证失败：')+(check.state==='checking'?'':new Date(check.checked_at).toLocaleString())}

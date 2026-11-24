@@ -1528,5 +1528,13 @@
   "正在测试连接…": "Testing connection…",
   "已通过本机记忆接口读取测试": "Successfully tested read access to the local library",
   "连续失败次数": "Consecutive failures",
-  "下次自动重试": "Next automatic retry"
+  "下次自动重试": "Next automatic retry",
+  "找不到备份 ZIP": "Backup ZIP missing",
+  "缺少索引，验证后可重建": "Index missing. Verify to rebuild.",
+  "索引损坏，验证后可重建": "Index damaged. Verify to rebuild.",
+  "备份索引不可读取": "Backup index is unreadable",
+  "原类型未知的备份": "Unknown backup type",
+  "无法读取备份索引或找不到对应的 ZIP 文件。": "The index is unreadable or the backup ZIP is missing.",
+  "缺少备份校验值和逐文件清单，无法重建索引。": "The backup has neither a saved checksum nor a file manifest to verify against.",
+  "待检查的备份索引": "Backup indexes needing attention"
 }

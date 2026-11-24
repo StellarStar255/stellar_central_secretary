@@ -1,10 +1,10 @@
 """Disk-streamed local snapshots, bounded retention, and transactional local recovery."""
-import hashlib,json,re,shutil,sqlite3,tempfile,threading,uuid,zipfile
+import hashlib,json,logging,re,shutil,sqlite3,tempfile,threading,uuid,zipfile
 from contextlib import closing
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import sys
-from . import paths, restore_transaction
+from . import backup_index, paths, restore_transaction
 
 class Backups:
     def __init__(self,archive):
@@ -39,7 +39,8 @@ class Backups:
                 'daily_retry':state.get('daily_retry') if (state.get('daily_retry') or {}).get('folder')==str(folder) else None,
                 'last_attempt':state.get('last_attempt') if current else None,
                 'warning':state.get('warning','') if current else '',
-                'used_bytes':sum(entry['size'] for entry in entries),'snapshot_count':len(entries),
+                'used_bytes':sum(entry['size'] for entry in entries),'snapshot_count':sum(e.get('index_issue')!='missing_zip' for e in entries),
+                'index_issue_count':sum('index_issue' in e for e in entries),
                 'last_success':max((entry['created'] for entry in verified),default=None),
                 'last_verification':verification,
                 'config_revision':config.get('revision',0),'state_revision':state.get('revision',0)}
@@ -73,28 +74,52 @@ class Backups:
         folders=list(dict.fromkeys([str(self.folder),str(self.default),*self.config.get('previous_folders',[])]))
         result=[entry for location in folders for entry in self._entries(Path(location))]
         return sorted(result,key=lambda value:value['created'],reverse=True)
-    @staticmethod
-    def _entries(folder):
-        result=[]
-        try:metadata=list(folder.glob('*.json'))
-        except OSError:return result
-        for path in metadata:
-            try:
-                value=json.loads(path.read_text())
-                if path.stem==value['id'] and re.fullmatch('[a-f0-9]{32}',path.stem):
-                    source=path.with_suffix('.zip')
-                    if source.is_file():result.append({**value,'size':source.stat().st_size,'folder':str(folder)})
-            except (OSError,ValueError,KeyError,TypeError):pass
-        return result
+    _entries = staticmethod(backup_index.entries)
+
+    def _repair_index(self, entry):
+        from . import backup_verification
+        if entry['index_issue'] in ('unreadable_index', 'missing_zip'):
+            raise ValueError('无法读取备份索引或找不到对应的 ZIP 文件。')
+        source=Path(entry['folder'])/(entry['id']+'.zip')
+        expected=entry.get('sha256')
+        with self.archive.db() as db:
+            schema=db.execute('PRAGMA user_version').fetchone()[0]
+        check=backup_verification.verify(source,expected,schema)
+        digest=check.pop('sha256')
+        snapshot=check.pop('snapshot',None)
+        checked=datetime.now(timezone.utc).isoformat()
+        value={k:v for k,v in entry.items() if k not in ('folder','index_issue')}
+        if (isinstance(snapshot,dict) and snapshot.get('id')==entry['id']
+                and snapshot.get('reason') in backup_index.REASONS and backup_index.valid_date(snapshot.get('created'))):
+            value.update(created=snapshot['created'],reason=snapshot['reason'])
+        value.update(sha256=digest,verification={**check,'id':entry['id'],'checked_at':checked})
+        backup_index.save(source.with_suffix('.json'),value)
+        return value
+
+    def repair_indexes(self):
+        for candidate in self.entries():
+            if self.stop.is_set():
+                return
+            if candidate.get('index_issue') in ('missing_index','invalid_index'):
+                with self.lock:
+                    folder=Path(candidate['folder'])
+                    entry=backup_index.read_entry(folder,candidate['id'])
+                    if entry and entry.get('index_issue'):
+                        try:
+                            self._repair_index(entry)
+                        except Exception as error:
+                            # Leave the original files intact and continue checking other snapshots.
+                            logging.getLogger(__name__).warning('Backup index %s: %s',entry['id'],error)
+
     def _prune(self,keep):
         active=[value for value in self.entries() if Path(value['folder'])==self.folder]
         remove=set()
         for kind in ('daily','upgrade','manual','before-restore'):
-            remove.update(value['id'] for value in [entry for entry in active if entry['reason']==kind][self.daily_keep if kind=='daily' else self.other_keep:])
+            remove.update(value['id'] for value in [entry for entry in active if not entry.get('index_issue') and entry['reason']==kind][self.daily_keep if kind=='daily' else self.other_keep:])
         total=sum(value['size'] for value in active if value['id'] not in remove)
         for value in reversed(active):
             if total<=self.limit:break
-            if value['id']==keep or value['id'] in remove:continue
+            if value.get('index_issue') or value['id']==keep or value['id'] in remove:continue
             remove.add(value['id']);total-=value['size']
         for key in remove:
             try:(self.folder/(key+'.zip')).unlink(missing_ok=True);(self.folder/(key+'.json')).unlink(missing_ok=True)
@@ -129,6 +154,7 @@ class Backups:
                 raise ValueError('备份目录已更改，请刷新设置后重试。')
             self._save_state(state='creating',last_attempt=datetime.now(timezone.utc).isoformat(),reason=reason)
             key=uuid.uuid4().hex;target=self.folder/(key+'.zip');temporary=target.with_suffix('.part')
+            snapshot_info={'id':key,'reason':reason,'created':datetime.now(timezone.utc).isoformat()}
             try:
                 if not self.folder.is_dir():raise ValueError('备份目录所在位置不可用，请检查硬盘连接。')
                 with self.archive.lock,tempfile.TemporaryDirectory(dir=self.folder) as temp:
@@ -149,18 +175,13 @@ class Backups:
                             if source.is_file():write_file(source,'files/'+source.name)
                         chats=self.archive.root/'conversations.json'
                         if chats.exists():write_file(chats,'conversations.json')
-                        output.writestr('manifest.json',json.dumps({'version':1,'records':record_count,'files':manifest}))
+                        output.writestr('manifest.json',json.dumps({'version':1,'records':record_count,'files':manifest,'snapshot':snapshot_info}))
                 with temporary.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
                 if temporary.stat().st_size>self.limit:raise ValueError('单份备份超过容量上限，请提高备份容量；已有备份保留。')
                 temporary.replace(target)
-                value={'id':key,'created':datetime.now(timezone.utc).isoformat(),'reason':reason,'size':target.stat().st_size,'sha256':digest}
+                value={**snapshot_info,'size':target.stat().st_size,'sha256':digest}
                 meta=self.folder/(key+'.json')
-                try:
-                    meta.write_text(json.dumps(value))
-                except OSError:
-                    target.unlink(missing_ok=True)
-                    meta.unlink(missing_ok=True)
-                    raise
+                backup_index.save(meta,value)
                 try:
                     value=self.verify(key,allow_source_mismatch=reason=='before-restore')
                 except Exception:
@@ -175,21 +196,31 @@ class Backups:
             except Exception as error:
                 if temporary.parent.is_dir():temporary.unlink(missing_ok=True)
                 self.error=str(error);self._save_state(state='error',last_error=self.error);raise
+    def _find_entry(self,key):
+        matches=[entry for entry in self.entries() if entry['id']==key]
+        if not matches:
+            raise ValueError('本机备份不存在')
+        # The same snapshot can also exist in a previously configured folder.
+        return next((entry for entry in matches if not entry.get('index_issue')),matches[0])
+
     def verify(self,key,allow_source_mismatch=False):
         from . import backup_verification
         with self.lock:
-            entry=next((value for value in self.entries() if value['id']==key),None)
-            if not entry:raise ValueError('本机备份不存在')
+            entry=self._find_entry(key)
+            if entry.get('index_issue'):
+                return self._repair_index(entry)
             meta=Path(entry['folder'])/(key+'.json');checked=datetime.now(timezone.utc).isoformat()
             def save(value):
                 entry['verification']=value
                 encoded={name:value for name,value in entry.items() if name!='folder'}
-                temporary=meta.with_suffix('.verify-part');temporary.write_text(json.dumps(encoded));temporary.replace(meta)
+                backup_index.save(meta,encoded)
                 self._save_state(last_verification=value)
             self._save_state(last_verification={'state':'checking','id':key,'checked_at':checked,'folder':entry['folder']})
             try:
                 with self.archive.db() as db:max_schema=db.execute('PRAGMA user_version').fetchone()[0]
                 result=backup_verification.verify(Path(entry['folder'])/(key+'.zip'),entry['sha256'],max_schema,allow_source_mismatch)
+                result.pop('sha256',None)
+                result.pop('snapshot',None)
                 value={**result,'id':key,'checked_at':datetime.now(timezone.utc).isoformat()};save(value)
                 return {name:value for name,value in entry.items() if name!='folder'}
             except Exception as error:
@@ -216,6 +247,7 @@ class Backups:
                 raise
     def start(self):
         def loop():
+            self.repair_indexes()
             while not self.stop.is_set():
                 try:self.due()
                 except Exception as error:self.error=str(error)
@@ -227,12 +259,11 @@ class Backups:
         if getattr(self,'worker',None):self.worker.join()
     def restore(self,key):
         with self.lock,self.archive.lock:
-            entry=next((value for value in self.entries() if value['id']==key),None)
-            if not entry:raise ValueError('本机备份不存在')
-            self.verify(key)
+            entry=self._find_entry(key)
+            checked=self.verify(key)
             source=Path(entry['folder'])/(key+'.zip')
             with source.open('rb') as stream:
-                if hashlib.file_digest(stream,'sha256').hexdigest()!=entry['sha256']:raise ValueError('备份校验失败，未修改当前资料')
+                if hashlib.file_digest(stream,'sha256').hexdigest()!=checked['sha256']:raise ValueError('备份校验失败，未修改当前资料')
             with restore_transaction.workspace(self.archive.root,self._save_state) as (stage,transaction):
                 incoming=stage/'files';incoming.mkdir()
                 with zipfile.ZipFile(source) as archive:
