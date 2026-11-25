@@ -150,8 +150,11 @@ def load(data):
 
 def metadata(data):
     archive,value=load(data)
+    with archive:return file_metadata(value)
+
+def file_metadata(value):
     # Older archives saved HEIC as an opaque file; expose it without rewriting the ZIP.
-    with archive:return [{**{key:file[key] for key in ('id','name','media','size','warning')},**({'media':'image/heic'} if image_formats.is_heif(file['name']) else {})} for file in value['files']]
+    return [{**{key:file[key] for key in ('id','name','media','size','warning')},**({'media':'image/heic'} if image_formats.is_heif(file['name']) else {})} for file in value['files']]
 
 def attachment(data,key):
     archive,value=load(data)

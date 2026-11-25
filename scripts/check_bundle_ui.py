@@ -5,6 +5,7 @@ from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from PIL import Image
+from tests.test_large_pdf_preview import fixture as make_pdf
 from secretary.server import Service,handler
 from secretary import ai,attachment_editor as editor
 from playwright.sync_api import sync_playwright,expect
@@ -86,6 +87,30 @@ with tempfile.TemporaryDirectory() as temp:
     new_image=next((entry,item['id']) for item in service.archive.list() for entry in service.item_detail(item['id'])['attachments'] if entry['name']=='only-image.png')
     assert page.request.get(base+'/api/items/'+new_image[1]+'/attachments/'+new_image[0]['id']+'/preview').body()==png
     assert page.locator('#input-mode').input_value()=='library' and mocked.call_count==1
+    # Two previously saved PDFs with similar names must open distinct originals.
+    documents=[]
+    for number in (101,102):
+     path=Path(temp)/f'采购单据-附件-{number}.pdf'
+     make_pdf(path,pages=1,text_size=number)
+     documents.append({'name':path.name,'data':base64.b64encode(path.read_bytes()).decode()})
+    bundle=service.ingest({'text':'发票','attachments':documents,'archive_only':True})['item']
+    ident=bundle['id'];page.goto(base+'/?item='+ident)
+    body=page.locator('.bundle-body');rows=body.locator('.bundle-body-file')
+    expect(rows).to_have_count(2);expect(body.locator('.bundle-reading-text').first).to_have_text('发票')
+    assert not body.locator('details[open]').count()
+    second=rows.nth(1);second.locator('summary').click()
+    expect(second.locator('.bundle-reading-text')).to_contain_text('PAGETOKEN1')
+    assert second.locator('.bundle-reading-text').evaluate("e=>getComputedStyle(e).maxHeight==='none' && getComputedStyle(e).overflowY==='visible'")
+    second.locator('.bundle-page-link').first.click()
+    expect(page.locator('#pdf-reader h2')).to_have_text(documents[1]['name'])
+    expect(page.locator('#pdf-reader [data-pdf-image]')).to_have_attribute('src',bundle['all_attachments'][1]['path']+'/pdf-page/1')
+    page.keyboard.press('Escape')
+    body.locator('.bundle-raw summary').click()
+    assert body.locator('.bundle-raw .bundle-reading-text').text_content()==bundle['text']
+    service.archive.update(ident,text='用户编辑后的正文 <保留>');page.reload()
+    expect(body.locator('.bundle-reading-text').first).to_have_text('用户编辑后的正文 <保留>')
+    assert not errors,errors
+    print('PASS: grouped note, distinct PDF source targets, single scrolling surface, exact original and edited body')
     print('PASS: library chat archives a file and an image with no caption; original bytes preserved; no question sent')
     print('PASS: pasted PNG and clipboard text preserved; additional file submitted as one archive; one scoped model call; native image payload; originals preview; AI vision label; persisted image bubble; grouped deletion; unrelated source preserved; no cloud calls')
    finally:browser.close()

@@ -1548,5 +1548,14 @@
   "原类型未知的备份": "Unknown backup type",
   "无法读取备份索引或找不到对应的 ZIP 文件。": "The index is unreadable or the backup ZIP is missing.",
   "缺少备份校验值和逐文件清单，无法重建索引。": "The backup has neither a saved checksum nor a file manifest to verify against.",
-  "待检查的备份索引": "Backup indexes needing attention"
+  "待检查的备份索引": "Backup indexes needing attention",
+  "归档内容": "Archive contents",
+  "当前保存的正文": "Saved text",
+  "你的备注": "Your note",
+  "附件": "Attachment",
+  "查看原页": "View original page",
+  "展开提取文字": "Extracted text",
+  "暂无提取文字": "No extracted text",
+  "查看原始文本": "View original text",
+  "页码": "Page"
 }

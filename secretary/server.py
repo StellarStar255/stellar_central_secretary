@@ -968,16 +968,26 @@ class Service:
                 page=origin.get('page');entry=selected.get(pdf_reading.key(origin['batch_id'],origin['attachment_id']),{})
                 token=(origin['batch_id'],origin['attachment_id'],page)
                 if page and (page<=5 or str(page) in entry.get('pages',{})) and token not in seen:seen.add(token);item['source_pages'].append(origin)
-        self.material_attachments(item)
+        self.material_attachments(item,include_body=True)
         return item
 
-    def material_attachments(self,item):
+    def material_attachments(self,item,include_body=False):
         item_id=item['id']
         for batch in item['additions']:
             try:batch['attachments']=bundles.metadata((self.archive.root/'files'/batch['id']))
             except Exception:batch['attachment_error']='追加附件暂时无法读取，可下载原件后检查。'
         if bundles.is_bundle(item['filename']):
-            try:item['attachments']=bundles.metadata((self.archive.root/'files'/item_id))
+            try:
+                original,manifest=bundles.load(self.archive.root/'files'/item_id)
+                with original:
+                    item['attachments']=bundles.file_metadata(manifest)
+                    if include_body and manifest['files']:
+                        current=dict(manifest,links=item.get('group_links') or manifest.get('links',[]))
+                        item['bundle_body']={
+                            'note':manifest['text'],
+                            'edited':item['text']!=bundles.assemble(current),
+                            'texts':{f['id']:f['text'] for f in manifest['files']}
+                        }
             except Exception:item['bundle_error']='组合附件暂时无法读取，可下载原文件后检查。'
         item['can_open_file']=not bundles.is_bundle(item['filename']) and attachment_editor.can_open(item['filename'])
         item['file_editing']=attachment_editor.has_copy(self.archive,item_id)

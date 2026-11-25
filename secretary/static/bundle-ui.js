@@ -2,6 +2,32 @@
 (()=>{
  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const valid=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
+ function readingText(value,pdf){
+  // Keep line and column boundaries intact. Only reduce runs of empty lines.
+  const plain=esc(value.replace(/\r\n?/g,'\n').replace(/\n(?:[ \t]*\n){2,}/g,'\n\n'));
+  return pdf?plain.replace(/^\[第 (\d+) 页\]$/gm,(_,page)=>'<strong class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+page+'</strong>'):plain;
+ }
+ function renderBody(item){
+  const {note,edited,texts}=item.bundle_body;
+  const t=StellarI18n.t;
+  const files=item.all_attachments.filter(file=>!file.batch_id && Object.hasOwn(texts,file.id));
+  const rows=files.map((file,index)=>{
+   const pdf=/\.pdf$/i.test(file.name);
+   const pages=(item.source_pages||[]).filter(origin=>!origin.batch_id && origin.attachment_id===file.id).map(origin=>origin.page);
+   const pageLinks=pdf?(pages.length?pages:[1]).map(page=>
+    '<button type="button" class="bundle-page-link" data-pdf-read="'+esc(file.path)+'" data-pdf-name="'+esc(file.name)+'" data-pdf-page="'+page+'">'+esc(t('查看原页'))+' · '+page+'</button>'
+   ).join(''):'';
+   const text=texts[file.id];
+   return '<article class="bundle-body-file"><header><span class="muted">'+esc(t('附件'))+' '+(index+1)+'</span><strong>'+esc(file.name)+'</strong></header>'+
+    (pageLinks?'<div class="bundle-page-links">'+pageLinks+'</div>':'')+
+    (text?'<details><summary>'+esc(t('展开提取文字'))+'</summary><div class="bundle-reading-text">'+readingText(text,pdf)+'</div></details>':'<p class="muted">'+esc(t('暂无提取文字'))+'</p>')+
+    (file.warning?'<p class="warning">'+esc(file.warning)+'</p>':'')+'</article>';
+  }).join('');
+  return '<section class="archived-body bundle-body"><h3>'+esc(t('归档内容'))+'</h3>'+
+   (edited?'<h4>'+esc(t('当前保存的正文'))+'</h4><div class="bundle-reading-text">'+esc(item.text)+'</div>':
+    note?'<h4>'+esc(t('你的备注'))+'</h4><div class="bundle-reading-text">'+esc(note)+'</div>':'')+
+   rows+(edited?'':'<details class="bundle-raw"><summary>'+esc(t('查看原始文本'))+' · '+item.text.length.toLocaleString()+' '+esc(t('字符'))+'</summary><div class="bundle-reading-text">'+esc(item.text)+'</div></details>')+'</section>';
+ }
  function renderAll(item,compact=false){
   const files=item.all_attachments||[];if(!files.length&&!item.deleted_attachment_count)return '';
   return '<section class="material-attachments" data-attachment-item="'+esc(item.id)+'"'+(compact?'':' id="detail-attachments"')+'><h3>'+StellarI18n.t('全部附件')+' <span class="muted">('+files.length+')</span></h3>'+(item.deleted_attachment_count?'<button type="button" class="secondary" data-attachment-history="'+item.id+'">'+StellarI18n.t('恢复已删附件')+' ('+item.deleted_attachment_count+')</button>':'')+(files.length>1?'<p class="muted attachment-order-hint">'+StellarI18n.t('拖动附件可调整顺序，自动保存。')+'</p>':'')+'<div class="material-grid">'+files.map(file=>{
@@ -59,5 +85,5 @@
   try{const result=await options.api(path+'/'+action,{});await options.onSaved(path.split('/')[3]);options.toast(StellarI18n.t(result.conflict?'归档附件已更新，本机编辑文件仍保留，请先核对版本。':action==='save'?(result.changed?'文件修改已保存，已有摘要可能过期；可手动重新整理。':'没有检测到文件内容变化，请先在外部程序中保存。'):action==='open'?(button.classList.contains('image-open')?'已在默认程序中打开图片':'已在默认程序中打开编辑副本'):'已在文件夹中显示编辑文件'))}
   catch(error){options.toast(StellarI18n.message(error.message))}finally{button.disabled=false}
  })}
- globalThis.StellarBundles={render,renderAll,chatImages,bind};
+ globalThis.StellarBundles={render,renderAll,renderBody,chatImages,bind};
 })();
