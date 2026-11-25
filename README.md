@@ -4,6 +4,8 @@
 
 Version **v0.1.153** · [MIT License](LICENSE) · [Release notes](docs/releases/v0.1.153.md)
 
+**The macOS installer is signed with Developer ID and notarized by Apple.** [Download for Mac](https://github.com/StellarStar255/stellar_central_secretary/releases/tag/v0.1.153)
+
 HEIC/HEIF photos support local thumbnails, the in-app image viewer and visual summarization with an image-capable model. Originals stay intact; compatible JPEG images are generated locally for preview and analysis. Existing HEIC attachments work without re-uploading; use **Summarize again** to replace an earlier summary that did not read the image.
 
 For Live Photo motion, import the photo and its matching same-name `.MOV` together (for example, `IMG_4259.HEIC` and `IMG_4259.MOV`), or append the MOV to the same item later. Open the photo and select **Play Live Photo** to watch, pause or seek the video; closing playback returns to the photo. Both originals remain available. A single still HEIC cannot provide missing motion; the viewer explains when no companion is available. Ambiguous same-name companions are not automatically paired.

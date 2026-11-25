@@ -4,6 +4,8 @@
 
 版本 **v0.1.153** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.153.md)
 
+**macOS 安装包已使用 Developer ID 签名，并通过 Apple 公证。** [下载 Mac 版](https://github.com/StellarStar255/stellar_central_secretary/releases/tag/v0.1.153)
+
 HEIC/HEIF 照片支持本地缩略图、应用内查看和视觉总结（需支持图片输入的模型）。原件完整保留，预览和分析使用本地生成的兼容 JPEG；已入库附件无需重新上传，旧摘要可通过“重新总结”更新图片内容。
 
 播放实况照片时，将照片与配套的同名 `.MOV` 一起导入，例如 `IMG_4259.HEIC` 和 `IMG_4259.MOV`；也可后续把 MOV 追加到同一份资料。打开照片后点击“播放实况”，即可播放、暂停或拖动进度，关闭播放器返回照片，两份原件均保留。单张静态 HEIC 无法补出缺失的动态部分，查看器会提示未找到配套视频；同名候选不明确时不会自动配对。
