@@ -1,4 +1,4 @@
-"""Remove updater-owned payloads while keeping logs and the latest rollback."""
+"""Remove completed update payloads while preserving logs and any requested rollback."""
 import logging
 import re
 import shutil

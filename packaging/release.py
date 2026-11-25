@@ -42,16 +42,13 @@ def mac_rollback_copies(target):
                 copies.append(path)
         except (OSError, ValueError, KeyError) as error:
             print(f'Skipping unreadable rollback copy {path}: {error}',file=sys.stderr)
-    return sorted(copies,key=lambda path:path.stat().st_mtime,reverse=True)
+    return copies
 
 
-def old_mac_rollbacks(target, newest=None):
+def unused_mac_rollbacks(target):
     copies=mac_rollback_copies(target)
-    if newest in copies:
-        copies.remove(newest)
-        copies.insert(0,newest)
     commands=output('/bin/ps','-axo','command=').splitlines()
-    return [path for path in copies[2:] if not any(str(path)+'/' in line for line in commands)]
+    return [path for path in copies if not any(str(path)+'/' in line for line in commands)]
 
 def require(value,message):
     if not value:raise RuntimeError(message)
@@ -354,9 +351,9 @@ class Release:
         require(digest(target/'Contents/MacOS/Stellar Secretary')==digest(self.app/'Contents/MacOS/Stellar Secretary'),'Installed binary differs')
         for name in ('bundle-ui.js','library-preview.js','image-viewer.js'):
             require(get('/'+name)==(self.app/'Contents/Resources/secretary/static'/name).read_bytes(),'Running UI differs: '+name)
-        print(f'PASS: installed {self.tag}; all columns of {count} records preserved; backup: {backup}')
+        print(f'PASS: installed {self.tag}; all columns of {count} records preserved')
         try:
-            for path in remove_artifacts(old_mac_rollbacks(target,backup)):
+            for path in remove_artifacts(unused_mac_rollbacks(target)):
                 print('Removed old program rollback:',path)
         except (OSError,subprocess.CalledProcessError) as error:
             print(f'Could not finish old program rollback cleanup: {error}',file=sys.stderr)

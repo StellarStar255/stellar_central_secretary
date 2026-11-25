@@ -281,3 +281,44 @@ class HealthModeTest(unittest.TestCase):
                 if child.poll() is None:child.kill()
             self.assertTrue(finished.is_set())
             self.assertEqual(child.wait(),17)
+
+
+class MacUpdateRetentionTest(unittest.TestCase):
+    def test_rollback_exists_through_health_check_and_cleanup_requires_success(self):
+        from unittest.mock import Mock, patch
+        from secretary import update_transaction as transaction
+        for succeeds in (True, False):
+            with self.subTest(succeeds=succeeds), tempfile.TemporaryDirectory() as temp:
+                base=Path(temp)
+                root=base/'Stellar Secretary.app'
+                root.mkdir()
+                executable=root/'program'
+                executable.write_text('old')
+                data=base/'library'
+                work=data/'updates/0.1.155'
+                work.mkdir(parents=True)
+                backup=work/('previous-program-'+'a'*32+'.app')
+                shutil.copytree(root,backup)
+                package=work/'Stellar-Secretary-0.1.155-macos-arm64.dmg'
+                package.write_bytes(b'fixture')
+                candidate=work/'mounted'/root.name
+                candidate.mkdir(parents=True)
+                (candidate/'program').write_text('new')
+                (work/'proceed').touch()
+                config=dict(kind='mac',version='0.1.155',old_version='0.1.154',work=str(work),
+                            data=str(data),root=str(root),backup=str(backup),package=str(package),
+                            sha=hashlib.sha256(package.read_bytes()).hexdigest(),
+                            executable=str(executable),args=[],parent=0)
+                def health(config, version, legacy):
+                    self.assertEqual((backup/'program').read_text(),'old')
+                    self.assertEqual(executable.read_text(),'old' if legacy else 'new')
+                    return legacy or succeeds
+                with patch.object(transaction.subprocess,'run',return_value=Mock(stderr='TeamIdentifier=3QCL9WNFBB')), \
+                     patch.object(transaction,'spawn',return_value=Mock(pid=123,poll=Mock(return_value=1))), \
+                     patch.object(transaction,'healthy',side_effect=health):
+                    self.assertEqual(run(config),succeeds)
+                self.assertEqual(backup.exists(),not succeeds)
+                self.assertEqual(executable.read_text(),'new' if succeeds else 'old')
+                result=json.loads((data/'update-result.json').read_text())
+                self.assertEqual(result['phase'],'complete' if succeeds else 'rolled_back')
+                self.assertEqual('backup' in result,not succeeds)

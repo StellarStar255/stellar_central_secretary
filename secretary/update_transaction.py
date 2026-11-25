@@ -173,7 +173,8 @@ def run(config):
     if data.resolve().is_relative_to(root.resolve()) or not backup.is_dir():raise ValueError('无效的更新恢复目录')
     result=data/'update-result.json';child=None;changed=False;old_root=None;privileged_backup=None;parent_exited=False
     def report(phase,error=''):
-        value=dict(phase=phase,error=error,version=config['version'],backup=str(backup),updated=time.time())
+        value=dict(phase=phase,error=error,version=config['version'],updated=time.time())
+        if phase!='complete' or config['kind']!='mac':value['backup']=str(backup)
         if config['kind']=='windows' and (work/'installer.log').is_file():
             value['installer_log']=str(work/'installer.log')
         atomic(result,value)
@@ -274,7 +275,8 @@ def run(config):
             raise RuntimeError('新版窗口、版本或资料库健康检查未通过。'+detail)
         report('complete')
         try:
-            obsolete=update_retention.cache_artifacts(data,config['version'],keep_backup=backup)
+            keep_backup=None if kind=='mac' else backup
+            obsolete=update_retention.cache_artifacts(data,config['version'],keep_backup=keep_backup)
             if old_root is not None:
                 obsolete.append(old_root)
             update_retention.remove_artifacts(obsolete)

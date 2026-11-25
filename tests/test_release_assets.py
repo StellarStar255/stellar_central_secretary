@@ -102,3 +102,23 @@ class ReleaseAssetsTest(unittest.TestCase):
             self.assertTrue(target.is_dir())
             self.assertTrue(backup.is_dir())
             self.assertFalse(list(root.glob('*.failed-*.app')))
+
+    @unittest.skipUnless(release.sys.platform=="darwin","macOS release installation")
+    def test_verified_install_can_remove_all_unused_program_rollbacks(self):
+        import plistlib
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            target=root/'Stellar Secretary.app'
+            def bundle(name,identifier='io.github.stellarstar255.stellar-secretary'):
+                app=root/name
+                (app/'Contents/MacOS').mkdir(parents=True)
+                (app/'Contents/MacOS/Stellar Secretary').touch()
+                (app/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':identifier}))
+                return app
+            idle=bundle('.Stellar Secretary.backup-1234567890.app')
+            active=bundle('.Stellar Secretary.backup-1234567891.app')
+            bundle('.Stellar Secretary.backup-1234567892.app','other.application')
+            (root/'.Stellar Secretary.backup-1234567893.app').symlink_to(idle, target_is_directory=True)
+            with patch.object(release,'output',return_value=str(active/'Contents/MacOS/Stellar Secretary')):
+                self.assertEqual(release.unused_mac_rollbacks(target),[idle])
