@@ -120,6 +120,7 @@ class Service:
         self.request_lock = threading.Lock()
         self.active_posts = 0
         self.restart_requested = False
+        self.upgrade_shutdown_requested = False
         self.restart_supported = False
         from .completion_notifications import CompletionEvents
         self.completion_events=CompletionEvents();self.summary_jobs.on_finished=self.notify_summary_finished
@@ -377,7 +378,7 @@ class Service:
 
     def enter_post(self):
         with self.request_lock:
-            if self.restart_requested:
+            if self.restart_requested or self.upgrade_shutdown_requested:
                 return False
             self.active_posts += 1
             return True
@@ -387,22 +388,33 @@ class Service:
             self.active_posts -= 1
 
     def request_library_restart(self, folder):
-        busy = '请等待当前任务、备份或升级完成后再重启。'
         with self.request_lock:
             if not self.restart_supported:
                 raise ValueError('请手动重启程序以迁移记忆。')
             pending = library_location.status(self.archive.root).get('pending')
             if not pending or folder != pending:
                 raise ValueError('待迁移目录已更改，请刷新设置。')
-            if (self.active_posts != 1 or any(self.runtime().values())
+            self._reserve_idle_shutdown()
+            self.restart_requested = True
+
+    def request_upgrade_shutdown(self):
+        with self.request_lock:
+            if library_location.status(self.archive.root).get('pending'):
+                raise ValueError('请先完成或取消记忆迁移。')
+            self._reserve_idle_shutdown()
+            self.upgrade_shutdown_requested = True
+
+    def _reserve_idle_shutdown(self):
+        # Called under request_lock while the current POST owns one admission.
+        if (self.active_posts != 1 or any(self.runtime().values())
                     or updater.status().get('phase') in ('downloading','verifying','installing')
                     or not self.backups.lock.acquire(blocking=False)):
-                raise ValueError(busy)
-            try:
-                self.restart_requested = True
-                self.backups.stop.set()
-            finally:
-                self.backups.lock.release()
+            raise ValueError('请等待当前任务、备份或升级完成后再重启。')
+        try:
+            self.backups.stop.set()
+        finally:
+            self.backups.lock.release()
+
     def append_material(self,item_id,body):
         if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
@@ -1275,7 +1287,7 @@ def handler(service):
                 if path=='/api/update/health':
                     with service.archive.db() as db:db.execute('SELECT COUNT(*) FROM items').fetchone()
                     return self.send(200,{'application':'stellar-central-secretary','version':__version__,'pid':os.getpid(),'database_ok':True,'data_dir':str(service.archive.root.resolve()),'desktop':service.desktop_status()})
-                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':service.update_status(), 'memory_mcp':service.memory_mcp, 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
+                if path=='/api/status': return self.send(200, {'application':'stellar-central-secretary', **({} if paths.FROZEN else {'source_service':{'pid':os.getpid(),'root':str(Path(__file__).resolve().parent.parent)}}), 'version':__version__, 'backup':service.backups.status(), 'library_location':library_location.status(service.archive.root), 'ocr':local_ocr.capability(), 'company_model':service.company_model_status(), 'runtime':service.runtime(), 'completion_events':service.completion_events.snapshot(), 'desktop':service.desktop_status(), 'interface_request':service.interface_request, 'video_request':service.video_request, 'video_probes':list(service.video_probes.copy().values()), 'update':service.update_status(), 'memory_mcp':service.memory_mcp, 'tutorial_pending':service.tutorial_pending, 'tutorial_update':service.tutorial_update, 'capabilities':{'guarded_upgrade_shutdown':True,'reconnectable_questions':True,'desktop_bridge':True,'custom_model_api':True,'grouped_links':True,'append_materials':True,'grouped_materials':True,'archive_delete':True,'generic_page_capture':True,'conversation_capture':True,'manual_browser_login':True,'profile_window_reuse':True,'in_place_browser_read':True}, 'token':token, 'settings':service.archive.settings(), 'model_api':model_api.public(service.archive.root), 'backends':{n:bool(ai.executable(n)) for n in ai.CLI_BACKENDS}, 'data_dir':str(service.archive.root)})
                 pdf_job=re.fullmatch(r'/api/pdf-jobs/([a-f0-9]{32})',path)
                 if pdf_job:return self.send(200,service.pdf_jobs.get(pdf_job[1]))
                 pdf_info=re.fullmatch(r'/api/items/([a-f0-9]{32})(?:/(?:additions/([a-f0-9]{32})/)?attachments/([a-f0-9]{32}))?/pdf-info',path)
@@ -1600,6 +1612,12 @@ def handler(service):
                                       desktop=bool(service.desktop_status().get('enabled')),
                                       before_install=backup_before_upgrade, before_handoff=require_idle)
                     return self.send(200, service.update_status())
+                if path=='/api/update/shutdown':
+                    try:service.request_upgrade_shutdown()
+                    except ValueError as exc:return self.send(409, {'error':str(exc)})
+                    try:self.send(200, {'ok':True})
+                    finally:threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 if path=='/api/shutdown':
                     if body.get('force'):service.close()
                     self.send(200, {'ok':True})

@@ -6,6 +6,7 @@ browser session lives in data/browser-live-profile and is excluded from backups.
 import os
 import sys
 import json
+import logging
 import socket
 import urllib.request
 from types import SimpleNamespace
@@ -150,7 +151,9 @@ def debug_info(endpoint):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with opener.open(endpoint+'/json/version', timeout=1) as response:
         info = json.loads(response.read(65536))
-    ws = urlsplit(info.get('webSocketDebuggerUrl', ''))
+    if not isinstance(info,dict) or not isinstance(info.get('webSocketDebuggerUrl'),str):
+        raise ValueError('浏览器连接信息不完整')
+    ws = urlsplit(info['webSocketDebuggerUrl'])
     if ws.scheme != 'ws' or ws.hostname != '127.0.0.1' or ws.port != parsed.port or not ws.path.startswith('/devtools/browser/'):
         raise ValueError('浏览器返回了无效的连接信息')
     return {'endpoint':endpoint, 'websocket':info['webSocketDebuggerUrl']}
@@ -235,19 +238,40 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
             startup.wShowWindow = 7  # SW_SHOWMINNOACTIVE
             options['startupinfo'] = startup
     from .system_integration import external_env
-    proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True, env=external_env(), **options)
-    deadline = time.monotonic()+timeout
+    started = time.monotonic()
+    last_probe = 'not_attempted'
+
+    def report_failure(stage, exit_code):
+        # Only controlled labels, exception class names and numeric values.
+        # Exception messages and Chrome arguments may contain private URLs.
+        logging.getLogger(__name__).warning(
+            'Chrome startup stage=%s elapsed=%.2fs launcher_exit=%s last_probe=%s',
+            stage, time.monotonic() - started, exit_code, last_probe)
+
+    try:
+        proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True, env=external_env(), **options)
+    except OSError as exc:
+        report_failure(type(exc).__name__, 'not_started')
+        raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。') from None
+    deadline = started + timeout
     rediscover_at=time.monotonic()+1
     while time.monotonic()<deadline:
         if cancelled.is_set(): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
-        if proc.poll() not in (None,0): raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
+        exit_code = proc.poll()
+        if exit_code not in (None,0):
+            report_failure('launcher_exit', exit_code)
+            raise RuntimeError('Chrome 启动失败，请使用常用浏览器采集扩展。')
         try:
             session = dict(debug_info(endpoint),confirmed=False,process=proc,proxy=proxy)
             if not background: session['startup_url'] = target
             save_session(profile,session)
             return session
-        except (OSError,ValueError): pass
+        except (OSError, ValueError) as exc:
+            reason = getattr(exc, 'reason', None)
+            last_probe = type(reason if isinstance(reason, OSError) else exc).__name__
+            if isinstance(exc, urllib.error.HTTPError):
+                last_probe = f'HTTP_{exc.code}'
         if time.monotonic()>=rediscover_at:
             current=existing_session(profile)
             if current:
@@ -263,6 +287,8 @@ def _start_or_reuse_browser(target, profile, cancelled, timeout=20, background=F
                 return current
             rediscover_at=time.monotonic()+1
         if cancelled.wait(0.25): raise CaptureCancelled('已停止连接。浏览器窗口保持打开。')
+    exit_code = proc.poll()
+    report_failure('connection_timeout', 'running' if exit_code is None else exit_code)
     raise RuntimeError('浏览器已请求打开，但未能建立本地连接。请使用常用浏览器采集扩展；程序不会关闭你的登录窗口。')
 
 

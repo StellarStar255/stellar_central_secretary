@@ -1,9 +1,11 @@
 """Repeatable Stellar Secretary release operations; credentials stay in existing stores."""
 import argparse,hashlib,json,os,plistlib,re,shutil,sqlite3,subprocess,sys,tempfile,time,urllib.request,uuid
+from contextlib import closing
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 REPO='StellarStar255/stellar_central_secretary'
 sys.path.insert(0,str(ROOT))
+from secretary import library_location
 from secretary.update_retention import remove_artifacts, version_key
 
 
@@ -55,7 +57,9 @@ def require(value,message):
 def run(*args,**kwargs):return subprocess.run([str(arg) for arg in args],cwd=ROOT,check=True,**kwargs)
 def output(*args):return subprocess.check_output([str(arg) for arg in args],cwd=ROOT,text=True)
 def gh(*args):return json.loads(output('gh',*args))
-def digest(path):return 'sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
+def digest(path):
+    with path.open('rb') as stream:
+        return 'sha256:'+hashlib.file_digest(stream,'sha256').hexdigest()
 def verify_assets(release,expected):
     assets={asset['name']:asset for asset in release['assets']}
     require(set(assets)==set(expected),'Release asset set differs')
@@ -71,6 +75,54 @@ def manifest_entries(text):
         require(name==Path(name).name and name not in entries,'Invalid or duplicate asset name')
         entries[name]=parts[0]
     return entries
+
+def require_install_idle(status):
+    require(status.get('application') == 'stellar-central-secretary', 'Unexpected application')
+    require(not any(status['runtime'].values()), 'Active tasks; installation deferred')
+    require(status['update'].get('phase') not in ('downloading', 'verifying', 'installing'), 'Another update is active')
+    require(status['backup'].get('state') != 'creating' and not status['library_location'].get('pending'),
+            'Backup or library migration pending; installation deferred')
+
+
+def listener_pid(port):
+    listeners=output('/usr/sbin/lsof','-t',f'-iTCP:{port}','-sTCP:LISTEN').split()
+    require(len(listeners)==1, 'Expected one listening process')
+    return int(listeners[0])
+
+
+def verify_install_process(pid, target, status):
+    binary=target/'Contents/MacOS/Stellar Secretary'
+    executable=output('/bin/ps','-p',str(pid),'-o','comm=').strip()
+    if executable==str(binary):
+        return
+    # macOS framework Python may report Python.app as its executable.
+    python=output('/bin/ps','-p',str(os.getpid()),'-o','comm=').strip()
+    command=output('/bin/ps','-ww','-p',str(pid),'-o','command=').strip()
+    interpreter, separator, arguments=command.partition(' -m ')
+    allowed={Path(python).resolve(), (ROOT/'.venv/bin/python').resolve()}
+    cwd=output('/usr/sbin/lsof','-a','-p',str(pid),'-d','cwd','-Fn').splitlines()
+    require(Path(executable).resolve() in allowed and separator and
+            Path(interpreter).resolve() in allowed and
+            arguments.partition(' ')[0] in ('secretary.launcher','secretary.server') and
+            'n'+str(ROOT) in cwd and status.get('source_service')=={'pid':pid,'root':str(ROOT)},
+            'Unexpected application process; installation deferred')
+
+
+def archive_fingerprint(database, preserved_columns):
+    columns=','.join('"'+name.replace('"','""')+'"' for name in preserved_columns)
+    checksum=hashlib.sha256(b'[')
+    count=0
+    with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as db:
+        for row in db.execute('SELECT '+columns+' FROM items ORDER BY id'):
+            if count:
+                checksum.update(b', ')
+            # SQLite BLOBs are distinguished from text and numeric values.
+            values=[{'blob':value.hex()} if isinstance(value,bytes) else value for value in row]
+            checksum.update(json.dumps(values,ensure_ascii=False).encode())
+            count+=1
+    checksum.update(b']')
+    return checksum.hexdigest(), count
+
 
 class Release:
     def __init__(self):
@@ -156,40 +208,62 @@ class Release:
         except OSError as error:
             print(f'Could not finish old build cleanup: {error}',file=sys.stderr)
     def install(self,args):
+        self.install_mac(Path('/Applications/Stellar Secretary.app'),8768)
+
+    def install_mac(self,target,port):
         # This helper only upgrades the known running macOS installation.
         mac=self.load('signed-mac.json');require(digest(self.app/'Contents/MacOS/Stellar Secretary')==mac['app_digest'],'App differs from verified DMG');require(digest(self.dmg)==mac['digest'],'Verified DMG changed')
         run('codesign','--verify','--deep','--strict',self.app)
         signature=run('codesign','-dvv',self.app,capture_output=True,text=True)
         require('TeamIdentifier='+mac['team_id'] in signature.stderr,'App signing team changed')
-        target=Path('/Applications/Stellar Secretary.app');base='http://127.0.0.1:8768'
+        base=f'http://127.0.0.1:{port}'
         opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
         def get(path):
             with opener.open(base+path,timeout=3) as response:return response.read()
         status=json.loads(get('/api/status'))
-        require(status.get('application')=='stellar-central-secretary' and not any(status.get('runtime',{}).values()),'Wrong application or active tasks; installation deferred')
-        require(status.get('update',{}).get('phase') not in ('downloading','verifying','installing'),'Another update is active')
-        data=Path(status['data_dir']).resolve();require(data==Path.home()/'Library/Application Support/Stellar Secretary','Unexpected data directory')
-        with sqlite3.connect('file:'+str(data/'archive.sqlite3')+'?mode=ro',uri=True) as db:
+        require_install_idle(status)
+        data=Path(status['data_dir']).resolve()
+        default_library=Path.home()/'Library/Application Support/Stellar Secretary'
+        preferences=library_location.read()
+        configured_library=Path(preferences.get('active') or preferences.get('source') or default_library)
+        require(data==configured_library.resolve(),
+                'Running library differs from the configured installation library')
+        require(target.is_dir() and not target.is_symlink(), 'Expected an existing installed application')
+        database=data/'archive.sqlite3'
+        with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as db:
             preserved_columns=[row[1] for row in db.execute('PRAGMA table_info(items)')]
         require(preserved_columns,'Missing archive schema')
-        def fingerprint():
-            with sqlite3.connect('file:'+str(data/'archive.sqlite3')+'?mode=ro',uri=True) as db:
-                # Every persisted column, including additions, is compared.
-                columns=','.join('\"'+name.replace('\"','\"\"')+'\"' for name in preserved_columns)
-                rows=db.execute('SELECT '+columns+' FROM items ORDER BY id').fetchall()
-            return hashlib.sha256(json.dumps(rows,ensure_ascii=False).encode()).hexdigest(),len(rows)
-        before,count=fingerprint();mode=status['settings'].get('company_mode',False)
-        pid_text=output('/usr/sbin/lsof','-t','-iTCP:8768','-sTCP:LISTEN').split();require(len(pid_text)==1,'Unexpected listening processes');pid=int(pid_text[0])
-        require(output('/bin/ps','-p',str(pid),'-o','comm=').strip()==str(target/'Contents/MacOS/Stellar Secretary'),'Unexpected application process')
+        pid=listener_pid(port)
+        verify_install_process(pid,target,status)
         nonce=uuid.uuid4().hex[:10];staging=target.with_name('.Stellar Secretary.staging-'+nonce+'.app');backup=target.with_name('.Stellar Secretary.backup-'+nonce+'.app')
-        shutil.copytree(self.app,staging,symlinks=True);run('codesign','--verify','--deep','--strict',staging)
-        request=urllib.request.Request(base+'/api/shutdown',data=b'{}',headers={'Content-Type':'application/json','X-Knowledge-Token':status['token']})
-        with opener.open(request,timeout=5) as response:require(response.status==200,'Shutdown failed')
+        try:
+            shutil.copytree(self.app,staging,symlinks=True)
+            run('codesign','--verify','--deep','--strict',staging)
+            require(listener_pid(port)==pid, 'Listening process changed during staging')
+            latest=json.loads(get('/api/status'))
+            require_install_idle(latest)
+            require(latest['token']==status['token'] and latest['data_dir']==status['data_dir'],
+                    'Running library or service changed during staging')
+            # Older installations only support the original shutdown endpoint.
+            endpoint='/api/update/shutdown' if latest.get('capabilities',{}).get('guarded_upgrade_shutdown') else '/api/shutdown'
+            request=urllib.request.Request(base+endpoint,data=b'{}',headers={'Content-Type':'application/json','X-Knowledge-Token':latest['token']})
+            try:
+                with opener.open(request,timeout=5) as response:require(response.status==200,'Shutdown failed')
+            except urllib.error.HTTPError as error:
+                if error.code!=409:raise
+                error.close()
+                raise RuntimeError('Service became busy; installation deferred') from None
+        except BaseException:
+            if staging.exists():shutil.rmtree(staging)
+            raise
         for _ in range(100):
             try:os.kill(pid,0)
             except ProcessLookupError:break
             time.sleep(.2)
         else:raise RuntimeError('Old application still running; replacement deferred')
+        # Include any completed edits made while the signed app was staged.
+        before,count=archive_fingerprint(database,preserved_columns)
+        mode=latest['settings'].get('company_mode',False)
         target.rename(backup)
         try:staging.rename(target)
         except BaseException:backup.rename(target);raise
@@ -201,8 +275,11 @@ class Release:
             except OSError:pass
             time.sleep(.2)
         else:raise RuntimeError('Updated app failed to start; previous app preserved at '+str(backup))
+        installed_pid=listener_pid(port)
+        require(output('/bin/ps','-p',str(installed_pid),'-o','comm=').strip()==str(target/'Contents/MacOS/Stellar Secretary'),
+                'Updated installation does not own the listening port')
         require(current['data_dir']==str(data) and current['settings'].get('company_mode',False)==mode,'Data directory or company mode changed')
-        require(fingerprint()==(before,count),'Archived data changed during installation')
+        require(archive_fingerprint(database,preserved_columns)==(before,count),'Archived data changed during installation')
         require(digest(target/'Contents/MacOS/Stellar Secretary')==digest(self.app/'Contents/MacOS/Stellar Secretary'),'Installed binary differs')
         for name in ('bundle-ui.js','library-preview.js','image-viewer.js'):
             require(get('/'+name)==(self.app/'Contents/Resources/secretary/static'/name).read_bytes(),'Running UI differs: '+name)

@@ -110,3 +110,18 @@ class CaptureProxyTests(unittest.TestCase):
      self.assertEqual(goto.call_args.args,('https://chatgpt.com/',))
      self.assertIn('--proxy-server='+policy['url'],launch.call_args.kwargs['args'])
      self.assertEqual(browser.close.call_count,previous+1)
+
+ def test_startup_log_identifies_failure_without_private_inputs(self):
+  with tempfile.TemporaryDirectory() as folder:
+   proc=Mock();proc.poll.return_value=None
+   secret='private-fixture-value'
+   with patch.object(browser_reader,'existing_session',return_value=None), patch.object(browser_reader,'chrome_executable',return_value='/chrome'), patch.object(browser_reader.subprocess,'Popen',return_value=proc), patch.object(browser_reader,'debug_info',side_effect=ConnectionRefusedError(secret)):
+    for code,stage in [(None,'connection_timeout'),(12,'launcher_exit')]:
+     proc.poll.return_value=code
+     with self.assertLogs(browser_reader.__name__,level='WARNING') as logs, self.assertRaises(RuntimeError):
+      browser_reader.start_or_reuse_browser('https://example.com/'+secret,Path(folder),threading.Event(),timeout=.1,proxy='http://user:'+secret+'@localhost')
+     message=logs.output[0]
+     self.assertIn('stage='+stage,message)
+     self.assertIn('elapsed=',message)
+     self.assertIn('last_probe=ConnectionRefusedError' if code is None else 'launcher_exit=12',message)
+     self.assertNotIn(secret,message)

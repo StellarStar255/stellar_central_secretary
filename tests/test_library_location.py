@@ -217,3 +217,45 @@ class LibraryLocationTest(unittest.TestCase):
         self.assertFalse(service.enter_post())
         self.assertTrue(service.backups.stop.is_set())
         service.leave_post()
+
+    def test_upgrade_shutdown_waits_for_inflight_question_and_blocks_new_posts(self):
+        import json, threading, urllib.request, urllib.error
+        from concurrent.futures import ThreadPoolExecutor
+        from secretary.server import LocalHTTPServer, handler
+        service=Service(self.root)
+        self.addCleanup(service.close)
+        service.archive.configure('codex',False)
+        service.archive.add('fixture','fixture text for testing shutdown')
+        server=self.enterContext(LocalHTTPServer(('127.0.0.1',0),handler(service)))
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        base=f'http://127.0.0.1:{server.server_port}'
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(base+'/api/status') as response:
+            token=json.load(response)['token']
+        def post(path,body):
+            request=urllib.request.Request(base+path,data=json.dumps(body).encode(),headers={'X-Knowledge-Token':token})
+            with opener.open(request,timeout=5) as response:
+                return json.load(response)
+        entered,finish=threading.Event(),threading.Event()
+        def answer(*args):
+            entered.set()
+            if not finish.wait(5):raise AssertionError('question timed out')
+            return 'fixture answer [1]'
+        with patch('secretary.ai.run',side_effect=answer), ThreadPoolExecutor(1) as pool:
+            question=pool.submit(post,'/api/ask',{'question':'fixture'})
+            self.assertTrue(entered.wait(5))
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    post('/api/update/shutdown',{})
+                self.assertEqual(denied.exception.code,409)
+                denied.exception.close()
+            finally:
+                finish.set()
+            self.assertEqual(question.result()['answer'],'fixture answer [1]')
+        self.assertTrue(post('/api/update/shutdown',{})['ok'])
+        thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(service.enter_post())
+        self.assertFalse(service.restart_requested)
