@@ -151,6 +151,11 @@ extension WiFiRelayTests {
         relay.listener.stateUpdateHandler={state in if case .ready=state {ready.fulfill()}}
         relay.start();defer {relay.stop()};await fulfillment(of:[ready],timeout:3)
         let endpoint="https://127.0.0.1:\(relay.listener.port!.rawValue)"
+        let direct="https://127.0.0.1:\(port)"
+        let promoted=await PairingTLSProbe.firstVerifiedDirect(["https://127.0.0.1:1",direct],fingerprint:pin,timeout:2)
+        XCTAssertEqual(promoted,direct)
+        let wrongPin=await PairingTLSProbe.firstVerifiedDirect([direct],fingerprint:String(repeating:"0",count:64),timeout:2)
+        XCTAssertNil(wrongPin)
         let verified=try await PairingTLSProbe.verified(endpoint,fingerprint:pin)
         XCTAssertEqual(verified,endpoint,"A pinned 403 response must allow an unpaired phone to select the carrier")
         do {
@@ -169,6 +174,14 @@ extension WiFiRelayTests {
             XCTAssertEqual(object?["connected"] as? Bool,true)
         }
         XCTAssertEqual(trust.challenges,1,"Foreground requests must reuse one pinned TLS connection")
+        relay.stop()
+        let recovered=await PairingTLSProbe.firstVerifiedDirect([endpoint,direct],fingerprint:pin,timeout:2)
+        XCTAssertEqual(recovered,direct)
+        var status=URLRequest(url:URL(string:direct+"/status")!)
+        status.setValue("Bearer "+credential,forHTTPHeaderField:"Authorization")
+        let (_,response)=try await session.data(for:status)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode,200,"The original pairing must work after losing the relay")
+
     }
 }
 
@@ -214,6 +227,14 @@ extension PairingNetworkTests {
 }
 
 extension PairingNetworkTests {
+    func testBonjourIPv4SurvivesMissingHostnameAndDuplicateResults() {
+        var address=sockaddr_in()
+        address.sin_family=sa_family_t(AF_INET)
+        address.sin_addr.s_addr=inet_addr("192.0.2.77")
+        let data=withUnsafeBytes(of:&address) { Data($0) }
+        XCTAssertEqual(discoveredLANEndpoints(addresses:[Data(),data,data],hostname:nil,port:7443),["https://192.0.2.77:7443"])
+        XCTAssertEqual(discoveredLANEndpoints(addresses:[data],hostname:"mac.local.",port:7443),["https://192.0.2.77:7443","https://mac.local.:7443"])
+    }
     func testTCPReadyWithoutTLSIsRejected() async throws {
         let listener=try NWListener(using:.tcp,on:.any)
         let ready=expectation(description:"TCP-only fixture")

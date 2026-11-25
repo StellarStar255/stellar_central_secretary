@@ -1,4 +1,5 @@
 """Repeatable Stellar Secretary release operations; credentials stay in existing stores."""
+import socket
 import argparse,hashlib,json,os,plistlib,re,shutil,sqlite3,subprocess,sys,tempfile,time,urllib.request,uuid
 from contextlib import closing
 from pathlib import Path
@@ -122,6 +123,70 @@ def archive_fingerprint(database, preserved_columns):
             count+=1
     checksum.update(b']')
     return checksum.hexdigest(), count
+
+
+def launch_mac(target):
+    # Keep Launch Services' completion handle. A missing HTTP response alone
+    # cannot distinguish a crashed application from a slow, live one.
+    return subprocess.Popen(['/usr/bin/open','-W',str(target)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
+
+def wait_mac_status(get, launch, version):
+    for _ in range(100):
+        if launch.poll() is not None:
+            break
+        try:
+            current=json.loads(get('/api/status'))
+        except OSError:
+            time.sleep(.2)
+            continue
+        require(current.get('application')=='stellar-central-secretary' and current.get('version')==version,
+                'Unexpected service after launch; inspect the installation')
+        return current
+    return None
+
+
+def library_file_state(data):
+    # Even a settings/schema change outside the items table warrants inspection.
+    state=[]
+    for name in ('archive.sqlite3','archive.sqlite3-wal','conversations.json'):
+        path=data/name
+        try:
+            info=path.stat()
+        except FileNotFoundError:
+            state.append(None)
+        else:
+            state.append((info.st_ino,info.st_size,info.st_mtime_ns))
+    return state
+
+
+def recover_mac_launch(target,backup,port,data,get,baseline,columns,mode):
+    previous_version=plistlib.loads((backup/'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
+    failed=target.with_name(backup.name.replace('.backup-','.failed-',1))
+    binary=target/'Contents/MacOS/Stellar Secretary'
+    with library_location.lease(data),socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+        probe.bind(('127.0.0.1',port))
+        probe.listen(1)
+        require(str(binary) not in {line.strip() for line in output('/bin/ps','-axo','comm=').splitlines()},
+                'New application is still running')
+        require(library_file_state(data)==baseline[0] and archive_fingerprint(data/'archive.sqlite3',columns)==baseline[1],
+                'Library changed after launch; inspect the library before recovery')
+        require(not library_location.status(data).get('pending'), 'Library migration pending')
+        require(not failed.exists(), 'Failed application destination already exists')
+        target.rename(failed)
+        try:
+            backup.rename(target)
+        except OSError:
+            failed.rename(target)
+            raise
+    restored=wait_mac_status(get,launch_mac(target),previous_version)
+    require(restored is not None and restored['data_dir']==str(data)
+            and restored['settings'].get('company_mode',False)==mode, 'Previous app did not reopen the original library')
+    require(output('/bin/ps','-p',str(listener_pid(port)),'-o','comm=').strip()==str(binary),
+            'Previous app does not own the listening port')
+    require(archive_fingerprint(data/'archive.sqlite3',columns)==baseline[1], 'Library verification after recovery failed')
+    return failed
 
 
 class Release:
@@ -263,18 +328,24 @@ class Release:
         else:raise RuntimeError('Old application still running; replacement deferred')
         # Include any completed edits made while the signed app was staged.
         before,count=archive_fingerprint(database,preserved_columns)
+        file_state=library_file_state(data)
         mode=latest['settings'].get('company_mode',False)
         target.rename(backup)
         try:staging.rename(target)
         except BaseException:backup.rename(target);raise
-        run('/usr/bin/open',target)
-        for _ in range(100):
+        try:
+            launch=launch_mac(target)
+        except OSError:
+            launch=None
+        current=wait_mac_status(get,launch,self.version) if launch is not None else None
+        if current is None:
+            require(launch is None or launch.poll() is not None,
+                    f'New application is still starting; previous app preserved at {backup}')
             try:
-                current=json.loads(get('/api/status'))
-                if current.get('version')==self.version:break
-            except OSError:pass
-            time.sleep(.2)
-        else:raise RuntimeError('Updated app failed to start; previous app preserved at '+str(backup))
+                failed=recover_mac_launch(target,backup,port,data,get,(file_state,(before,count)),preserved_columns,mode)
+            except (OSError,ValueError,RuntimeError,KeyError,sqlite3.Error,subprocess.SubprocessError) as error:
+                raise RuntimeError(f'Upgrade recovery incomplete: {error}. Inspect {target} and {backup}') from error
+            raise RuntimeError(f'Upgrade failed; restored the previous app and verified its library. Failed build: {failed}')
         installed_pid=listener_pid(port)
         require(output('/bin/ps','-p',str(installed_pid),'-o','comm=').strip()==str(target/'Contents/MacOS/Stellar Secretary'),
                 'Updated installation does not own the listening port')

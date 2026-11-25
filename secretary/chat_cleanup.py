@@ -2,6 +2,25 @@
 import copy
 
 
+def validate_chat_history(history):
+    if not isinstance(history, dict):
+        raise ValueError('对话记录格式无效')
+    chats = history.get('conversations')
+    if not isinstance(chats, list) or len(chats) > 500 or not isinstance(history.get('activeId', ''), str):
+        raise ValueError('对话记录格式无效')
+    for chat in chats:
+        if (not isinstance(chat, dict) or not isinstance(chat.get('id'), str)
+                or not isinstance(chat.get('title'), str) or not isinstance(chat.get('messages'), list)):
+            raise ValueError('对话记录格式无效')
+        updated = chat.get('updated', 0)
+        if not isinstance(updated, (int, float)) or not 0 <= updated <= 10**15:
+            raise ValueError('对话时间格式无效')
+        for message in chat['messages']:
+            if (not isinstance(message, dict) or message.get('role') not in ('user', 'assistant')
+                    or not isinstance(message.get('id'), str) or not isinstance(message.get('text', ''), str)):
+                raise ValueError('消息格式无效')
+
+
 def clean_chats(chats,deleted_items,deleted_messages):
     deleted_items=set(deleted_items);removed=set(deleted_messages);result=[]
     affected={chat for chat,_ in removed}

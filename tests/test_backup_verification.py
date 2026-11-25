@@ -51,3 +51,26 @@ class BackupVerificationTest(unittest.TestCase):
     preserved=next(value for value in service.backups.entries() if value['reason']=='before-restore');self.assertEqual(preserved['verification']['state'],'inconsistent')
     with zipfile.ZipFile(service.backups.folder/(preserved['id']+'.zip')) as archive:self.assertEqual(archive.read('files/'+ident),b'EXTERNAL MODIFICATION')
    finally:service.close()
+
+ def test_damaged_chats_retained_while_previous_history_opens_after_restore(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    history={'activeId':'chat','conversations':[{'id':'chat','title':'Original','messages':[
+        {'id':'q','role':'user','text':'saved question'}, {'id':'a','role':'assistant','text':'saved answer'}]}]}
+    service.chat_history(history)
+    good=service.backups.create()
+    chats=service.archive.root/'conversations.json'
+    for damaged in (b'{"conversations":[',b'[]',b'{"conversations":[{"id":"x","title":"T","messages":[null]}]}',b'\xff'):
+     with self.subTest(damaged=damaged):
+      chats.write_bytes(damaged)
+      with self.assertRaisesRegex(ValueError,'对话记录无法读取'):service.backups.create()
+      failed=next(e for e in service.backups.entries() if e['verification']['state']=='failed')
+      with self.assertRaisesRegex(ValueError,'对话记录无法读取'):service.backups.restore(failed['id'])
+      self.assertEqual(chats.read_bytes(),damaged)
+      service.backups.restore(good['id'])
+      self.assertEqual(service.chat_history(),history)
+      retained=next(e for e in service.backups.entries() if e['verification']['state']=='inconsistent' and e['reason']=='before-restore')
+      with zipfile.ZipFile(service.backups.folder/(retained['id']+'.zip')) as z:
+       self.assertEqual(z.read('conversations.json'),damaged)
+   finally:service.close()

@@ -1,7 +1,24 @@
 import Foundation
+import Darwin
 import Network
 import Security
 import CryptoKit
+
+// Keep fresh Bonjour IPv4 addresses ahead of routes saved on a different subnet.
+func discoveredLANEndpoints(addresses: [Data], hostname: String?, port: Int) -> [String] {
+    guard (1...65535).contains(port) else { return [] }
+    var endpoints: [String] = []
+    for data in addresses where data.count >= MemoryLayout<sockaddr_in>.size {
+        var address = data.withUnsafeBytes { $0.loadUnaligned(as: sockaddr_in.self) }
+        guard address.sin_family == AF_INET else { continue }
+        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        guard inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(buffer.count)) != nil else { continue }
+        let endpoint = "https://\(String(cString: buffer)):\(port)"
+        if !endpoints.contains(endpoint) { endpoints.append(endpoint) }
+    }
+    if let hostname, !hostname.isEmpty { endpoints.append("https://\(hostname):\(port)") }
+    return endpoints
+}
 
 // A short, credential-free transport check distinguishes LAN failures from TLS/HTTP failures.
 final class PairingNetworkProbe: @unchecked Sendable {
@@ -10,9 +27,11 @@ final class PairingNetworkProbe: @unchecked Sendable {
     private let timeout: TimeInterval
     private var continuation: CheckedContinuation<Void, Error>?
     private var finished = false
-    init(url: URL, timeout: TimeInterval = 5) throws {
-        guard let host = url.host, let number = UInt16(exactly: url.port ?? 443), let port = NWEndpoint.Port(rawValue: number) else { throw PairingCodeError.invalid }
+    init(url: URL, timeout: TimeInterval = 5, wifiOnly: Bool = false) throws {
+        guard var host = URLComponents(url:url,resolvingAgainstBaseURL:false)?.host, let number = UInt16(exactly: url.port ?? 443), let port = NWEndpoint.Port(rawValue: number) else { throw PairingCodeError.invalid }
+        if host.hasPrefix("["), host.hasSuffix("]") { host=String(host.dropFirst().dropLast()) }
         let parameters=NWParameters.tcp;parameters.preferNoProxies=true
+        if wifiOnly {parameters.requiredInterfaceType = .wifi;parameters.includePeerToPeer=false}
         connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: parameters)
         self.timeout = timeout
     }
@@ -121,12 +140,23 @@ final class PairingTLSProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
         } while Date()<deadline
         throw failure
     }
-    static func verified(_ endpoint: String, fingerprint: String) async throws -> String {
+    static func firstVerifiedDirect(_ urls: [String], fingerprint: String, timeout: TimeInterval) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            for url in urls.prefix(9) {
+                group.addTask { try? await verified(url, fingerprint: fingerprint, timeout: timeout) }
+            }
+            for await endpoint in group {
+                if let endpoint { group.cancelAll(); return endpoint }
+            }
+            return nil
+        }
+    }
+    static func verified(_ endpoint: String, fingerprint: String, timeout: TimeInterval = 8) async throws -> String {
         try Task.checkCancellation()
         guard let url = URL(string: endpoint + "/pair/status") else { throw PairingCodeError.invalid }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.connectionProxyDictionary = [:]
-        configuration.timeoutIntervalForRequest = 8;configuration.timeoutIntervalForResource = 8
+        configuration.timeoutIntervalForRequest = timeout;configuration.timeoutIntervalForResource = timeout
         let session = URLSession(configuration: configuration, delegate: PairingTLSProbe(fingerprint: fingerprint), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (_, response) = try await session.data(from: url)
@@ -151,3 +181,23 @@ struct ConnectionResumePolicy {
         return date.timeIntervalSince(backgroundSince) >= 20
     }
 }
+
+#if DEBUG
+// Compare only subnet membership; do not persist network addresses or SSIDs.
+func wifiSubnetMatch(_ host: String) -> String {
+    var target=in_addr(), head: UnsafeMutablePointer<ifaddrs>?
+    guard inet_pton(AF_INET,host,&target)==1, getifaddrs(&head)==0 else {return "unknown"}
+    defer {freeifaddrs(head)}
+    var cursor=head
+    while let item=cursor {
+        let entry=item.pointee
+        cursor=entry.ifa_next
+        guard String(cString:entry.ifa_name)=="en0", let addr=entry.ifa_addr, let mask=entry.ifa_netmask,
+              addr.pointee.sa_family==AF_INET else {continue}
+        let ip=UnsafeRawPointer(addr).loadUnaligned(as:sockaddr_in.self).sin_addr.s_addr
+        let bits=UnsafeRawPointer(mask).loadUnaligned(as:sockaddr_in.self).sin_addr.s_addr
+        return (ip & bits)==(target.s_addr & bits) ? "same":"different"
+    }
+    return "no-wifi-ipv4"
+}
+#endif

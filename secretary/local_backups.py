@@ -145,12 +145,22 @@ class Backups:
     def _prune(self,keep):
         protected=self.restore_protected() | {keep}
         active=[value for value in self.entries() if Path(value['folder'])==self.folder and self.owns(value)]
+        # Stable sort retains newest-first order within each verification class.
+        # Use failed diagnostics first when making space for a usable snapshot.
+        def retention_priority(entry):
+            state=entry.get('verification',{}).get('state')
+            if state=='verified':return 0
+            if state in ('failed','inconsistent'):return 2
+            return 1
+        candidates=sorted((entry for entry in active if not entry.get('index_issue')),key=retention_priority)
         remove=set()
         for kind in ('daily','upgrade','manual','before-restore'):
-            remove.update(value['id'] for value in [entry for entry in active if not entry.get('index_issue') and entry['reason']==kind][self.daily_keep if kind=='daily' else self.other_keep:])
+            matching=[entry for entry in candidates if entry['reason']==kind]
+            limit=self.daily_keep if kind=='daily' else self.other_keep
+            remove.update(entry['id'] for entry in matching[limit:])
         remove.difference_update(protected)
         total=sum(value['size'] for value in active if value['id'] not in remove)
-        for value in reversed(active):
+        for value in reversed(candidates):
             if total<=self.limit:break
             if value.get('index_issue') or value['id'] in protected or value['id'] in remove:continue
             remove.add(value['id']);total-=value['size']
@@ -169,8 +179,9 @@ class Backups:
         if not current or current.get('verification',{}).get('state')!='failed':
             return
         used=sum(entry['size'] for entry in entries)
+        protected=self.restore_protected()
         for entry in entries:
-            if entry['id']==newest or entry.get('verification',{}).get('state')!='failed':
+            if entry['id']==newest or entry['id'] in protected or entry.get('verification',{}).get('state')!='failed':
                 continue
             payload=self.folder/(entry['id']+'.zip')
             try:
@@ -179,7 +190,7 @@ class Backups:
                 payload.with_suffix('.json').unlink()
             except OSError:
                 continue  # A later attempt retries files locked by another process.
-        if used>self.limit:
+        if used>self.limit and newest not in protected:
             payload=self.folder/(newest+'.zip')
             payload.unlink()
             payload.with_suffix('.json').unlink()
@@ -234,7 +245,10 @@ class Backups:
                 if restore_source:
                     self._save_state(restore_protected=[restore_source,key])
                 if value['verification']['state']!='verified':
-                    self._save_state(state='ready',warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。')
+                    warning='恢复前现场副本已保留，但原件与索引不一致；该副本未标记为验证通过。'
+                    if '备份中的对话记录无法读取' in value['verification']['anomalies']:
+                        warning='恢复前现场副本已保留，其中的对话记录无法读取。'
+                    self._save_state(state='ready',warning=warning)
                     return value
                 if not restore_source:
                     self._prune(key)

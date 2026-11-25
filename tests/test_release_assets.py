@@ -71,3 +71,34 @@ class ReleaseAssetsTest(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError,'Unexpected application process'):
                         release.verify_install_process(pid,Path('/Applications/Stellar Secretary.app'),{'source_service':reported})
+
+    def test_mac_launch_recovery_preserves_bundles_on_busy_library_or_changed_data(self):
+        import plistlib,sqlite3
+        from contextlib import closing
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve()
+            target=root/'Stellar Secretary.app'
+            target.mkdir()
+            backup=root/'.Stellar Secretary.backup-1234567890.app'
+            (backup/'Contents').mkdir(parents=True)
+            (backup/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleShortVersionString':'0.1.148'}))
+            data=root/'library'
+            data.mkdir()
+            database=data/'archive.sqlite3'
+            with closing(sqlite3.connect(database)) as db:
+                db.execute('CREATE TABLE items(id PRIMARY KEY)')
+            fingerprint=release.archive_fingerprint(database,['id'])
+            baseline=(release.library_file_state(data),fingerprint)
+            def recover():
+                release.recover_mac_launch(target,backup,0,data,None,baseline,['id'],False)
+            with release.library_location.lease(data), self.assertRaises(ValueError):
+                recover()
+            with patch.object(release,'output',return_value=str(target/'Contents/MacOS/Stellar Secretary')), self.assertRaisesRegex(RuntimeError,'still running'):
+                recover()
+            (data/'conversations.json').write_text('changed')
+            with patch.object(release,'output',return_value=''), self.assertRaisesRegex(RuntimeError,'Library changed'):
+                recover()
+            self.assertTrue(target.is_dir())
+            self.assertTrue(backup.is_dir())
+            self.assertFalse(list(root.glob('*.failed-*.app')))

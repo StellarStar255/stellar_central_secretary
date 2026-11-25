@@ -75,7 +75,7 @@ class BackupCapacityTest(unittest.TestCase):
     saved=service.backups.create()
     archive.update(ident,title='Current')
     chats=archive.root/'conversations.json'
-    chats.write_text('[]')
+    chats.write_text('{"conversations":[],"activeId":""}')
     read=Path.read_bytes
     def fail_chat_read(path):
      if path==chats:raise PermissionError('chat file locked')
@@ -83,7 +83,7 @@ class BackupCapacityTest(unittest.TestCase):
     with patch.object(Path,'read_bytes',fail_chat_read),self.assertRaises(PermissionError):
      service.backups.restore(saved['id'])
     self.assertEqual((archive.root/'files'/ident).read_bytes(),b'original')
-    self.assertEqual(chats.read_text(),'[]')
+    self.assertEqual(chats.read_text(),'{"conversations":[],"activeId":""}')
     self.assertEqual(archive.get(ident)['title'],'Current')
    finally:service.close()
 
@@ -94,14 +94,14 @@ class BackupCapacityTest(unittest.TestCase):
     archive=service.archive
     archive.add('First','body')
     chats=archive.root/'conversations.json'
-    chats.write_text('[]')
+    chats.write_text('{"conversations":[],"activeId":""}')
     saved=service.backups.create()
     ident,_=archive.add('Current','body',filename='current.txt',data=b'latest')
-    chats.write_text('["current"]')
+    chats.write_text('{"conversations":[],"activeId":"current"}')
     with patch('secretary.local_backups.shutil.copyfile',side_effect=PermissionError('locked chats')),self.assertRaises(PermissionError):
      service.backups.restore(saved['id'])
     self.assertEqual((archive.root/'files'/ident).read_bytes(),b'latest')
-    self.assertEqual(chats.read_text(),'["current"]')
+    self.assertEqual(chats.read_text(),'{"conversations":[],"activeId":"current"}')
     self.assertEqual(archive.get(ident)['title'],'Current')
    finally:service.close()
 
@@ -161,15 +161,15 @@ class BackupCapacityTest(unittest.TestCase):
     archive=service.archive
     item,_=archive.add('Selected version','body')
     chats=archive.root/'conversations.json'
-    chats.write_text('["selected"]')
+    chats.write_text('{"conversations":[],"activeId":"selected"}')
     selected=backups.create('before-restore')
     archive.update(item,title='Before attempt')
-    chats.write_text('["current"]')
+    chats.write_text('{"conversations":[],"activeId":"current"}')
     with patch('secretary.restore_transaction.shutil.copyfile',side_effect=PermissionError('locked chats')):
      with self.assertRaisesRegex(PermissionError,'locked chats'):
       backups.restore(selected['id'])
     self.assertEqual(archive.get(item)['title'],'Before attempt')
-    self.assertEqual(chats.read_text(),'["current"]')
+    self.assertEqual(chats.read_text(),'{"conversations":[],"activeId":"current"}')
     rollback,=[e for e in backups.entries() if e['id']!=selected['id']]
     for entry in (selected,rollback):
      self.assertEqual(backups.verify(entry['id'])['verification']['state'],'verified')
@@ -180,12 +180,12 @@ class BackupCapacityTest(unittest.TestCase):
     self.assertEqual(backups.restore_protected(),{selected['id'],rollback['id']})
     self.assertTrue(backups.restore(selected['id'])['ok'])
     self.assertEqual(archive.get(item)['title'],'Selected version')
-    self.assertEqual(chats.read_text(),'["selected"]')
+    self.assertEqual(chats.read_text(),'{"conversations":[],"activeId":"selected"}')
     self.assertFalse(backups.restore_protected())
     latest,=[e for e in backups.entries() if e['reason']=='before-restore']
     self.assertTrue(backups.restore(latest['id'])['ok'])
     self.assertEqual(archive.get(item)['title'],'Before attempt')
-    self.assertEqual(chats.read_text(),'["current"]')
+    self.assertEqual(chats.read_text(),'{"conversations":[],"activeId":"current"}')
    finally:service.close()
 
  def test_recent_folder_history_survives_revisit_resave_and_restart(self):
@@ -233,4 +233,24 @@ class BackupCapacityTest(unittest.TestCase):
     self.assertFalse(backups.entries())
     backups.configure({'folder':str(root/'B')})
     self.assertEqual(backups.config['previous_folders'],[str(folder)])
+   finally:service.close()
+
+ def test_failed_manual_snapshot_cannot_displace_last_good_manual_restore_point(self):
+  with tempfile.TemporaryDirectory() as temp:
+   service=Service(temp)
+   try:
+    backups=service.backups
+    backups.configure({'other_keep':1})
+    item,_=service.archive.add('Original title','saved body')
+    good=backups.create('manual')
+    chats=service.archive.root/'conversations.json'
+    chats.write_bytes(b'{"conversations":[')
+    with self.assertRaisesRegex(ValueError,'对话记录无法读取'):
+     backups.create('manual')
+    chats.unlink()
+    service.archive.update(item,title='Later title')
+    backups.create('daily')
+    self.assertTrue((backups.folder/(good['id']+'.zip')).exists())
+    backups.restore(good['id'])
+    self.assertEqual(service.archive.get(item)['title'],'Original title')
    finally:service.close()

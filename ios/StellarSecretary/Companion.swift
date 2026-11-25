@@ -188,6 +188,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private var inBackground = false
     private var mayRetryConnection = false
     private var discoveredURLs: [String] = []
+    private var nextDirectProbe = Date.distantPast
     private var sessionEndpoint = ""
     private var wifiRelay: WiFiRelay?
     private var bluetoothRelay: BluetoothRelay?
@@ -218,6 +219,26 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         }
         browser.delegate = self
         if let pair = paired { configure(pair);status = "正在连接 \(pair.displayName)…";discover() }
+        #if DEBUG
+        let arguments=ProcessInfo.processInfo.arguments
+        if let pair=paired,let i=arguments.firstIndex(of:"--diagnose-wifi") {
+            for raw in arguments.dropFirst(i+1).prefix(2) {
+                guard let url=URL(string:raw),url.scheme=="https",let host=url.host else {continue}
+                Task {
+                    let label=host.contains(":") ? "ipv6" : "ipv4"
+                    let stage="lan-diagnostic-"+label
+                    do {
+                        try await PairingNetworkProbe(url:url,timeout:7,wifiOnly:true).check()
+                        pairingDiagnostic(stage+"-tcp-ready")
+                        _=try await PairingTLSProbe.verified(raw,fingerprint:pair.info.fingerprint,timeout:5)
+                        pairingDiagnostic(stage+"-tls-verified")
+                        let result=try await request("/chats",using:pair,timeout:5,endpoint:raw)
+                        if result["conversations"] is [[String:Any]] {pairingDiagnostic(stage+"-chats-verified")}
+                    } catch {pairingDiagnostic(stage+"-failed",error:error)}
+                }
+            }
+        }
+        #endif
     }
     private func cacheURL(_ kind:String, serverID:String, fingerprint:String) -> URL {
         storageFolder.appendingPathComponent(kind+"-"+PairedMac.identity(serverID:serverID,fingerprint:fingerprint)+".json")
@@ -321,7 +342,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         let bluetoothOnly=false
         #endif
         let preferBluetooth=preferred == "bluetooth"
-        if !bluetoothOnly && !preferBluetooth {wifiRelay?.start()};bluetoothRelay?.start()
+        if !bluetoothOnly {wifiRelay?.start()};bluetoothRelay?.start()
         let wifi = wifiRelay, bluetooth=bluetoothRelay
         return try await withThrowingTaskGroup(of:String.self) { group in
             #if DEBUG
@@ -333,11 +354,10 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             let directURLs=urls.filter { !(URLComponents(string:$0)?.host?.hasPrefix("169.254.") ?? false) }
             if !nearbyOnly && !bluetoothOnly {
                 for url in directURLs.prefix(9) { group.addTask {
-                    if preferBluetooth {try await Task.sleep(for:.seconds(3))}
                     return try await PairingTLSProbe.verifiedWhileDiscovering(url,fingerprint:info.fingerprint)
                 }}
             }
-            if let wifi, !bluetoothOnly { group.addTask {if preferBluetooth {try await Task.sleep(for:.seconds(3))};let endpoint = try await wifi.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint) } }
+            if let wifi, !bluetoothOnly { group.addTask {let endpoint = try await wifi.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint) } }
             if let bluetooth, !wifiOnly {group.addTask {if !bluetoothOnly && !preferBluetooth {try await Task.sleep(for:.seconds(4))};let endpoint = try await bluetooth.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint)}}
             var failure: Error = PairingTransportFailure.timedOut
             while !group.isEmpty {
@@ -370,14 +390,16 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) { services.append(service);service.delegate = self;service.resolve(withTimeout:5) }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) { services.removeAll { $0 == service } }
     func netServiceDidResolveAddress(_ sender: NetService) {
-        guard services.contains(sender), let pair = paired, let host = sender.hostName else { return }
+        guard services.contains(sender), let pair = paired else { return }
         let txt = NetService.dictionary(fromTXTRecord:sender.txtRecordData() ?? Data())
         guard let id = txt["id"], String(data:id,encoding:.utf8) == pair.info.server_id else { return }
-        let endpoint = "https://\(host):\(sender.port)"
+        let endpoints=discoveredLANEndpoints(addresses:sender.addresses ?? [],hostname:sender.hostName,port:sender.port)
+        guard !endpoints.isEmpty else {return}
         // Discovery is a hint, never overwrite a verified USB/Tailscale address.
-        discoveredURLs = Array(([endpoint] + pair.info.connectionURLs.map { raw in
+        let hints=endpoints + pair.info.connectionURLs.map { raw in
             guard var value = URLComponents(string:raw) else { return raw };value.port = sender.port;return value.string ?? raw
-        } + discoveredURLs).prefix(16))
+        } + discoveredURLs
+        discoveredURLs=Array((NSOrderedSet(array:hints).array as? [String] ?? endpoints).prefix(16))
         Task { await connect() }
     }
     private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil, endpoint: String? = nil, uploadKey:String? = nil) async throws -> [String:Any] {
@@ -518,7 +540,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         // delivered after foregrounding must not overwrite the new connection.
         connectionGeneration = UUID();connectionTask?.cancel();connectionTask = nil;connecting = false
         cancelLibraryRefresh()
-        session?.invalidateAndCancel();session = nil;sessionEndpoint = "";online = false
+        session?.invalidateAndCancel();session = nil;sessionEndpoint = "";nextDirectProbe = .distantPast;online = false
         wifiRelay?.onAvailable = nil;bluetoothRelay?.onAvailable = nil
         wifiRelay?.stop();bluetoothRelay?.stop();wifiRelay = nil;bluetoothRelay = nil;relayServerID = ""
         browser.stop();discovering = false
@@ -570,22 +592,49 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         connecting = true;mayRetryConnection=false;defer {if connectionGeneration==generation {connecting=false}}
         do {
             let urls = Array(NSOrderedSet(array: [pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? [pair.info.url]
-            let endpoint = online && session != nil ? sessionEndpoint : try await transport(pair.info,urls:Array(urls.prefix(9)),preferred:pair.transport)
-            guard connectionGeneration==generation,!Task.isCancelled,!pairingInFlight,paired?.info.server_id==pair.info.server_id else {return}
-            let nearby = endpoint.hasPrefix("https://127.0.0.1:")
-            if !nearby { pair.info.url = endpoint }
-            if session == nil || sessionEndpoint != endpoint { configure(pair,endpoint:endpoint) }
+            var endpoint = online && session != nil ? sessionEndpoint : try await transport(pair.info,urls:urls,preferred:pair.transport)
+            guard connectionGeneration==generation,!Task.isCancelled else {return}
+            let usingRelay = online && endpoint.hasPrefix("https://127.0.0.1:")
+            var allowDirectProbe = usingRelay && Date() >= nextDirectProbe && !busy && !flushing && !chatSubmitting && activeWrites==0
+            #if DEBUG
+            if ["--nearby-only","--bluetooth-only","--wifi-only"].contains(where:ProcessInfo.processInfo.arguments.contains) {
+                allowDirectProbe=false
+            }
+            #endif
+            if allowDirectProbe {
+                nextDirectProbe=Date().addingTimeInterval(30)
+                let direct=urls.filter { url in
+                    let host=URLComponents(string:url)?.host ?? ""
+                    return host != "127.0.0.1" && !host.hasPrefix("169.254.")
+                }
+                if let verified=await PairingTLSProbe.firstVerifiedDirect(direct,fingerprint:pair.info.fingerprint,timeout:2) {
+                    endpoint=verified
+                }
+            }
+            guard connectionGeneration==generation,!Task.isCancelled else {return}
+            if session == nil {configure(pair,endpoint:endpoint)}
             let value:[String:Any]
-            do {value = try await request("/status",using:pair,timeout:quickResume ? 3:nil)}
-            catch {
-                guard connectionGeneration==generation,quickResume,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
-                // A genuinely stale socket gets one fresh, still-pinned TLS
-                // session on the same carrier before rediscovering the Mac.
-                configure(pair,endpoint:endpoint)
-                value = try await request("/status",using:pair,timeout:6)
+            var refreshed=false
+            do {
+                value=try await request("/status",using:pair,timeout:quickResume ? 3:nil,endpoint:endpoint==sessionEndpoint ? nil:endpoint)
+            } catch {
+                guard connectionGeneration==generation,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
+                if online {
+                    // Retry only the read-only status check. Never replay an in-flight write.
+                    endpoint=try await transport(pair.info,urls:urls)
+                } else if !quickResume {throw error}
+                guard connectionGeneration==generation,!Task.isCancelled else {return}
+                value=try await request("/status",using:pair,timeout:6,endpoint:endpoint)
+                refreshed=true
             }
             guard connectionGeneration==generation,!Task.isCancelled,!pairingInFlight,paired?.info.server_id==pair.info.server_id else {return}
             guard value["server_id"] as? String == pair.info.server_id else { throw URLError(.serverCertificateUntrusted) }
+            if session == nil || sessionEndpoint != endpoint || refreshed {
+                session?.finishTasksAndInvalidate()
+                session=pinnedSession(pair);sessionEndpoint=endpoint
+            }
+            let nearby=endpoint.hasPrefix("https://127.0.0.1:")
+            if !nearby {pair.info.url=endpoint}
             if let urls = value["urls"] as? [String], urls.count <= 8 {
                 let port = URLComponents(string:pair.info.url)?.port ?? 443
                 pair.info.urls = urls.filter { raw in
@@ -623,15 +672,16 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private func persist(_ next: [Draft]) throws {
         let data = try JSONEncoder().encode(next);try data.write(to:queueURL,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]);var values = URLResourceValues();values.isExcludedFromBackup = true;var url = queueURL;try? url.setResourceValues(values);drafts = next
     }
-    func enqueue(text: String, files: [ChatAttachment], workspace:String) async -> Bool {
+    func enqueue(text: String, files: [ChatAttachment], workspace:String, id: String = UUID().uuidString) async -> Bool {
         guard workspace==workspaceID else {return false}
         guard let pair = paired else { error = "请先配对电脑";return false }
         guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
+        if let queued = drafts.first(where: { $0.id == id }) { return queued.serverID == pair.info.server_id && queued.fingerprint == pair.info.fingerprint }
         guard ChatAttachment.fits(files), drafts.count < 50 else { error = "附件最多 8 个，合计最多 10 MB。";return false }
         if files.count>1, online, !multiAttachmentsAvailable { error = "请更新电脑端以发送多个附件。";return false }
         do {
             let single = files.count == 1 ? files.first : nil
-            try persist(drafts + [Draft(serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:single?.name,data:single?.data.base64EncodedString(),attachmentBatch:files.count>1 ? files : nil)])
+            try persist(drafts + [Draft(id:id,serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:single?.name,data:single?.data.base64EncodedString(),attachmentBatch:files.count>1 ? files : nil)])
             error = ""
             Task { await flush() }
             return true
@@ -816,8 +866,21 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         }
         selectedChatID=id;chatSnapshot=chatCache?.snapshots[id];chatPartial="";partialMessageID="";partialOffset=0;chatStage="";chatNotice="";saveChatCache()
     }
+    private func chatTransportFailed(_ error: Error, on attempted: URLSession?) -> Bool {
+        guard canRefreshSession(after:error) else {return false}
+        // A late response from a retired carrier cannot invalidate the replacement.
+        guard let attempted, attempted === session else {return true}
+        pairingDiagnostic("chat-read-transport-failed",error:error)
+        attempted.finishTasksAndInvalidate()
+        session=nil;online=false
+        if let pair=paired {status="正在连接 \(pair.displayName)…"}
+        chatNotice="对话同步暂未完成，保留手机缓存"
+        Task {await self.connect()}
+        return true
+    }
     func syncChatList() async {
         guard online,!chatListSyncing,let pair=paired else {return}
+        let attempted=session
         let generation=deviceGeneration;chatListSyncing=true;defer {if generation==deviceGeneration {chatListSyncing=false}}
         do {
             let value=try await request("/chats?revision="+(chatCache?.listRevision ?? ""),using:pair)
@@ -833,12 +896,13 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
                 }
             }
             chatCache?.listRevision=value["revision"] as? String ?? "";saveChatCache();chatNotice=""
-        } catch {if !Task.isCancelled, generation==deviceGeneration {chatNotice="对话同步暂未完成，保留手机缓存"}}
+        } catch {if !Task.isCancelled, generation==deviceGeneration, !chatTransportFailed(error,on:attempted) {chatNotice="对话同步暂未完成，保留手机缓存"}}
     }
     func syncSelectedChat(older:Bool=false) async {
         let id=selectedChatID
         guard online,!id.isEmpty,chatFetchingID != id,let pair=paired else {return}
         let generation=deviceGeneration
+        let attempted=session
         chatFetchingID=id;defer {if generation==deviceGeneration && chatFetchingID==id {chatFetchingID=nil}}
         let before=older ? chatSnapshot?.messages.first?.id ?? "":""
         let revision=older ? "":chatSnapshot?.revision ?? ""
@@ -862,7 +926,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             } else {chatPartial="";partialMessageID="";partialOffset=0;chatStage=""}
             chatNotice=""
         } catch {
-            if !Task.isCancelled,generation==deviceGeneration {
+            if !Task.isCancelled,generation==deviceGeneration,selectedChatID==id,!chatTransportFailed(error,on:attempted) {
                 chatNotice=error.localizedDescription
                 if (error as NSError).code==400 && chatNotice.contains("会话不存在") {chatCache?.snapshots.removeValue(forKey:id);chatSnapshot=nil;await syncChatList()}
             }

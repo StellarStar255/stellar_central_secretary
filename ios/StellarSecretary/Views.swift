@@ -54,6 +54,12 @@ private struct PhoneLanguagePicker: View {
             ContentView().environmentObject(model)
                 .environment(\.locale,Locale(identifier:language))
                 .onOpenURL { url in
+                    if url.isFileURL {
+                        model.selectedTab = "archive"
+                        guard model.paired != nil else { model.error = "请先配对电脑"; return }
+                        importCaptureFile(url, into: model, external: true)
+                        return
+                    }
                     pairingDiagnostic("url-received")
                     guard url.scheme == "stellar-secretary", url.host == "pair", let value = URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "data"})?.value,
                           let data = Data(base64Encoded:value), let raw = String(data:data,encoding:.utf8) else { return }
@@ -142,6 +148,35 @@ private func appendAttachment(_ file: ChatAttachment,to files:inout [ChatAttachm
     return true
 }
 
+@MainActor
+private func importCaptureFile(_ url: URL, into model: Companion, external: Bool = false) {
+    let access = url.startAccessingSecurityScopedResource()
+    defer { if access { url.stopAccessingSecurityScopedResource() } }
+    let inbox = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Inbox").resolvingSymlinksInPath().standardizedFileURL.path
+    let inboxCopy = url.resolvingSymlinksInPath().standardizedFileURL.deletingLastPathComponent().path == inbox
+    do {
+        guard !external || access || inboxCopy else { model.error = "无法读取文件"; return }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else { model.error = "无法读取文件"; return }
+        defer { if external && inboxCopy { try? FileManager.default.removeItem(at: url) } }
+        guard let size = values.fileSize, (1...ChatAttachment.maxBytes).contains(size) else {
+            model.error = attachmentLimit
+            return
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: ChatAttachment.maxBytes + 1) ?? Data()
+        guard data.count == size else { model.error = "无法读取文件"; return }
+        let attachment = ChatAttachment(name: url.lastPathComponent, data: data)
+        let added = appendAttachment(attachment, to: &model.captureEditor.files)
+        model.error = added ? "" : attachmentLimit
+        if external && added { pairingDiagnostic("open-document-staged") }
+    } catch {
+        model.error = "无法读取文件"
+    }
+}
+
 private func loadPhotos(_ photos:[PhotosPickerItem],addingTo existing:[ChatAttachment]) async -> ([ChatAttachment],String) {
     var files = existing
     var error = ""
@@ -169,12 +204,43 @@ struct CaptureView: View {
     @State private var photos: [PhotosPickerItem] = []
     @State private var loadingPhotos = false
     @State private var importing = false
+    @State private var sharedFiles: [URL] = []
     @State private var saving = false
     @FocusState private var editing: Bool
     var body: some View {
         NavigationStack {
             Form {
                 Section { ConnectionBanner() }
+                if !sharedFiles.isEmpty {
+                    Section("其他 App 分享的文件") {
+                        ForEach(sharedFiles, id: \.self) { url in
+                            VStack(alignment: .leading) {
+                                Text(verbatim: url.lastPathComponent)
+                                Button("发送到当前电脑") {
+                                    let workspace = model.workspaceID
+                                    saving = true
+                                    Task {
+                                        defer { saving = false }
+                                        do {
+                                            let file = ChatAttachment(name: url.lastPathComponent, data: try Data(contentsOf: url))
+                                            if await model.enqueue(text: "", files: [file], workspace: workspace, id: url.deletingLastPathComponent().lastPathComponent) {
+                                                try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                                                sharedFiles.removeAll { $0 == url }
+                                            }
+                                        } catch { model.error = "无法读取文件" }
+                                    }
+                                }.disabled(saving)
+                            }.swipeActions {
+                                Button("删除", role: .destructive) {
+                                    do {
+                                        try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                                        sharedFiles.removeAll { $0 == url }
+                                    } catch { model.error = "无法移除待发送内容" }
+                                }.disabled(saving)
+                            }
+                        }
+                    }
+                }
                 Section("链接、笔记或安排") { TextEditor(text:$model.captureEditor.text).focused($editing).frame(minHeight:150).accessibilityLabel("归档内容") }
                 Section {
                     PhotosPicker(selection:$photos,maxSelectionCount:ChatAttachment.maxCount,selectionBehavior:.ordered,matching:.images,preferredItemEncoding:.current) {
@@ -235,6 +301,10 @@ struct CaptureView: View {
                     }
                 }
             }.navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            .task(id:"\(scene)-\(model.selectedTab)") {
+                guard scene == .active, model.selectedTab == "archive" else { return }
+                do { sharedFiles = try SharedInbox.files() } catch { model.error = "无法读取文件" }
+            }
             .task(id:"\(model.workspaceID)-\(model.selectedTab)-\(model.online)-\(model.captureStatusAvailable)-\(scene)") {
                 guard model.selectedTab == "archive", model.online, model.captureStatusAvailable, scene == .active else {return}
                 while !Task.isCancelled {
@@ -256,12 +326,7 @@ struct CaptureView: View {
             }
             .fileImporter(isPresented:$importing,allowedContentTypes:[.item]) { result in
                 do {
-                    let url = try result.get(), access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    let size = try url.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
-                    guard (1...ChatAttachment.maxBytes).contains(size) else { model.error=attachmentLimit;return }
-                    let file=ChatAttachment(name:url.lastPathComponent,data:try Data(contentsOf:url))
-                    model.error = appendAttachment(file,to:&model.captureEditor.files) ? "" : attachmentLimit
+                    importCaptureFile(try result.get(), into: model)
                 }
                 catch { model.error = "无法读取文件" }
             }
@@ -1182,7 +1247,16 @@ struct DeviceView: View {
         NavigationStack {
             Form {
                 if model.paired != nil {
-                    Section("当前电脑") {ConnectionBanner();Button("重新连接") {Task {await model.connect()}}.disabled(model.pairingInFlight)}
+                    Section("当前电脑") {
+                        ConnectionBanner()
+                        if let route=model.paired?.transport, ["direct","bluetooth","wifi"].contains(route) {
+                            LabeledContent {
+                                Text(LocalizedStringKey(route=="direct" ? "网络直连" : route=="bluetooth" ? "蓝牙中继" : "附近 Wi-Fi 中继"))
+                            } label: {
+                                Text(LocalizedStringKey(model.online ? "连接方式" : "上次连接方式"))
+                            }
+                        }
+                        Button("重新连接") {Task {await model.connect()}}.disabled(model.pairingInFlight)}
                 }
                 if model.pairingInFlight {Section("添加电脑") {if model.waiting {Text(model.code).font(.largeTitle.monospacedDigit()).tracking(8);Text(PhoneLanguage.text(model.status,in:interfaceLocale))};ProgressView();Button("取消添加电脑") {model.cancelPairing()}}}
                 Section {

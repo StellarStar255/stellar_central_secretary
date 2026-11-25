@@ -287,3 +287,11 @@
 "回答引用的片段" = "Excerpts cited in the answer";
 "提供的资料片段 · %lld" = "Source excerpts provided · %lld";
 "参考的对话轮次 · %lld" = "Conversation turns provided · %lld";
+"网络直连" = "Direct network";
+"蓝牙中继" = "Bluetooth relay";
+"附近 Wi-Fi 中继" = "Nearby Wi-Fi relay";
+"连接方式" = "Connection type";
+"上次连接方式" = "Last connection type";
+
+"其他 App 分享的文件" = "Files from other apps";
+"发送到当前电脑" = "Send to current computer";

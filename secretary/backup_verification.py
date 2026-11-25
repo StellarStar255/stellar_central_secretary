@@ -2,6 +2,7 @@
 import hashlib,json,re,sqlite3,tempfile,zipfile
 from contextlib import closing
 from pathlib import Path
+from .chat_cleanup import validate_chat_history, clean_chats
 
 def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
     with source.open('rb') as stream:
@@ -38,6 +39,26 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
             if not {'id','filename','digest'}<=columns:raise ValueError('备份数据库缺少必要字段')
             optional=','.join(name if name in columns else "'[]' AS "+name for name in ('note_images','additions'))
             records=0;refs=set();anomalies=[]
+            if 'conversations.json' in names:
+                try:
+                    if archive.getinfo('conversations.json').file_size > 8_000_000:
+                        raise ValueError('对话记录超过 8 MB')
+                    history=json.loads(archive.read('conversations.json').decode('utf-8'))
+                    validate_chat_history(history)
+                    # Exercise the same deletion cleanup that runs when opening history.
+                    tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    deleted=db.execute('SELECT id FROM deleted_items') if 'deleted_items' in tables else ()
+                    messages=db.execute('SELECT chat_id,message_id FROM deleted_messages') if 'deleted_messages' in tables else ()
+                    chats,_=clean_chats(history['conversations'],(row[0] for row in deleted),messages)
+                    active=history.get('activeId','')
+                    cleaned={'conversations':chats,'activeId':active if any(chat['id']==active for chat in chats) else ''}
+                    if len(json.dumps(cleaned,ensure_ascii=False).encode())>8_000_000:
+                        raise ValueError('对话记录超过 8 MB')
+                except (ValueError,KeyError,TypeError,AttributeError,RecursionError) as error:
+                    message='备份中的对话记录无法读取'
+                    if not allow_source_mismatch:
+                        raise ValueError(message) from error
+                    anomalies.append(message)
             for ident,filename,digest,images,batches in db.execute('SELECT id,filename,digest,'+optional+' FROM items'):
                 records+=1
                 if not re.fullmatch('[a-f0-9]{32}',str(ident)):raise ValueError('备份资料编号无效')
@@ -59,4 +80,4 @@ def verify(source,expected_sha,max_schema,allow_source_mismatch=False):
                 if not allow_source_mismatch:raise ValueError('备份缺少附件或速记图片：'+', '.join(sorted(refs-names)[:3]))
                 anomalies.append('缺少附件或速记图片')
             if manifest and manifest.get('records')!=records:raise ValueError('备份资料数量与清单不一致')
-        return {'sha256':digest_sum,'snapshot':manifest.get('snapshot') if manifest else None,'state':'inconsistent' if anomalies else 'verified','anomalies':anomalies[:20],'mode':'manifest' if manifest else 'legacy','records':records,'files':len(names),'referenced_files':len(refs)}
+        return {'sha256':digest_sum,'snapshot':manifest.get('snapshot') if manifest else None,'state':'inconsistent' if anomalies else 'verified','anomalies':anomalies[:20],'mode':'manifest' if manifest else 'legacy','records':records,'chat_history_checked':'conversations.json' in names and not anomalies,'files':len(names),'referenced_files':len(refs)}

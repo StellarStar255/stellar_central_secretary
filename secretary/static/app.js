@@ -1263,7 +1263,7 @@ async function localBackupList(){
  const format=value=>new Date(value).toLocaleString(StellarI18n.locale,{dateStyle:'medium',timeStyle:'short'});
  const issueNames={missing_zip:'找不到备份 ZIP',missing_index:'缺少索引，验证后可重建',invalid_index:'索引损坏，验证后可重建',unreadable_index:'备份索引不可读取'};
  const reasonNames={recovered:'原类型未知的备份',daily:'每日备份',upgrade:'升级前备份',manual:'手动备份','before-restore':'恢复前备份'};
- const verificationNames={verified:'数据库与原件已验证',failed:'备份验证失败',inconsistent:'恢复前现场副本：原件与索引不一致'};
+ const verificationNames={verified:'数据库与原件已验证',failed:'备份验证失败',inconsistent:'恢复前现场副本未通过验证'};
  const verifyFocus=document.activeElement?.dataset;
  const rows=result.items.map(entry=>{
   const row=document.createElement('li'),details=document.createElement('div'),title=document.createElement('strong'),
@@ -1277,6 +1277,8 @@ async function localBackupList(){
   const verificationLabel=verificationState==='verified'&&verification.mode==='legacy'
     ?'完整性已验证（旧版无逐文件清单）':verificationNames[verificationState]||'尚未验证';
   metadata.textContent=[(entry.size/1048576).toFixed(1)+' MB',t(issueNames[entry.index_issue]||verificationLabel),
+    verification?.chat_history_checked?t('对话记录已验证'):'',
+    verification?.error?t(verification.error):verification?.anomalies?.map(t).join(' · '),
     !entry.library_id?t('来源知识库未知'):entry.library_id!==result.status?.library_id?t('其他知识库'):'',
     entry.folder&&entry.folder!==result.status?.folder?t('旧备份目录'):''].filter(Boolean).join(' · ');
   if(verification?.checked_at)metadata.title=t('最近验证：')+format(verification.checked_at);

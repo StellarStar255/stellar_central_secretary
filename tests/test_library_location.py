@@ -95,7 +95,7 @@ class LibraryLocationTest(unittest.TestCase):
 
     def test_move_preserves_archive_and_independent_backup_location(self):
         item, _ = self.archive.add('Memory', 'A saved memory', filename='original.txt', data=b'original')
-        (self.root/'conversations.json').write_text('[]')
+        (self.root/'conversations.json').write_text('{"conversations":[],"activeId":""}')
         old = self.backups.create()
         self.backups.configure({'folder':str(self.backup)})
         self.assertEqual(library_location.schedule(self.root, str(self.target), self.backups.folder)['pending'], str(self.target))
@@ -116,7 +116,7 @@ class LibraryLocationTest(unittest.TestCase):
         moved = Archive(self.target)
         self.assertEqual(moved.get(item)['title'], 'Edited before restart')
         self.assertEqual((self.target/'files'/item).read_bytes(), b'original')
-        self.assertEqual((self.target/'conversations.json').read_text(), '[]')
+        self.assertEqual((self.target/'conversations.json').read_text(), '{"conversations":[],"activeId":""}')
         self.assertTrue((self.root/'files'/item).exists())
         self.assertFalse((self.target/'local-backups').exists())
         moved_backups = Backups(moved)

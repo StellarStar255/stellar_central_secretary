@@ -30,7 +30,7 @@ from . import ai, browser_reader, web_reader, capture_worker, notes, paths, upda
 from . import image_formats, library_location, mobile_privacy
 from . import __version__, local_paths, company_ai, thumbnails, attachment_recovery, attachment_delete, extension_install, origins, pdf_reading, pdf_jobs, pdf_preview, local_ocr, uploads, local_backups, storage, video_state, media as local_media
 from .backup_import import import_backup, MAX_BACKUP
-from .chat_cleanup import clean_chats
+from .chat_cleanup import clean_chats, validate_chat_history
 
 STATIC = Path(__file__).parent / 'static'
 MAX_UPLOAD = 50 * 1024 * 1024
@@ -153,15 +153,11 @@ class Service:
             saved=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'conversations':[],'activeId':''}
             if body is None:return self.clean_chat_history(saved,path,saved)
             if not isinstance(body,dict) or len(json.dumps(body,ensure_ascii=False).encode())>8_000_000:raise ValueError('对话记录格式无效或超过 8 MB')
-            chats=body.get('conversations');active=body.get('activeId','')
-            if not isinstance(chats,list) or len(chats)>500 or not isinstance(active,str):raise ValueError('对话记录格式无效')
+            validate_chat_history(body)
+            active=body.get('activeId','')
             merged={c['id']:c for c in saved['conversations']}
-            for chat in chats:
-                if not isinstance(chat,dict) or not isinstance(chat.get('id'),str) or not isinstance(chat.get('messages'),list) or not isinstance(chat.get('title'),str):raise ValueError('对话记录格式无效')
+            for chat in body['conversations']:
                 updated=chat.get('updated',0)
-                if not isinstance(updated,(int,float)) or not 0<=updated<=10**15:raise ValueError('对话时间格式无效')
-                for message in chat['messages']:
-                    if not isinstance(message,dict) or message.get('role') not in ('user','assistant') or not isinstance(message.get('id'),str) or not isinstance(message.get('text',''),str):raise ValueError('消息格式无效')
                 if chat['id'] not in merged or updated>merged[chat['id']].get('updated',0):
                     from .question_jobs import preserve
                     previous=merged.get(chat['id'],{})
@@ -208,7 +204,8 @@ class Service:
         refs=self.archive.deletion_refs()
         known={tuple(pair) for pair in refs['deletedMessages']}
         chats,removed=clean_chats(result['conversations'],refs['deletedItemIds'],known)
-        result={'conversations':chats,'activeId':result['activeId'] if any(chat['id']==result['activeId'] for chat in chats) else ''}
+        active=result.get('activeId','')
+        result={'conversations':chats,'activeId':active if any(chat['id']==active for chat in chats) else ''}
         if removed-known:
             with self.archive.db() as db:db.executemany('INSERT OR IGNORE INTO deleted_messages VALUES (?,?)',sorted(removed-known))
             refs=self.archive.deletion_refs()

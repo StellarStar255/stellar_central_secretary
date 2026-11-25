@@ -55,12 +55,12 @@ class RestoreTransactionTest(unittest.TestCase):
                 archive = Archive(root)
                 first, _ = archive.add('Snapshot', 'body', filename='first.txt', data=b'first')
                 chats = root/'conversations.json'
-                chats.write_text('["snapshot"]')
+                chats.write_text('{"conversations":[],"activeId":"snapshot"}')
                 backups = Backups(archive)
                 backups.configure({'other_keep': 1})
                 snapshot = backups.create('before-restore')
                 latest, _ = archive.add('Live', 'other', filename='latest.txt', data=b'latest')
-                chats.write_text('["live"]')
+                chats.write_text('{"conversations":[],"activeId":"live"}')
                 args = [sys.executable, '-c', INTERRUPT, str(root), snapshot['id']]
                 self.assertEqual(subprocess.run([*args, point], timeout=30).returncode, 73)
                 if point == 'chats':
@@ -72,11 +72,11 @@ class RestoreTransactionTest(unittest.TestCase):
                     with self.assertRaises(KeyError):
                         reopened.get(latest)
                     self.assertFalse((root/'files'/latest).exists())
-                    self.assertEqual(chats.read_text(), '["snapshot"]')
+                    self.assertEqual(chats.read_text(), '{"conversations":[],"activeId":"snapshot"}')
                 else:
                     self.assertEqual(reopened.get(latest)['title'], 'Live')
                     self.assertEqual((root/'files'/latest).read_bytes(), b'latest')
-                    self.assertEqual(chats.read_text(), '["live"]')
+                    self.assertEqual(chats.read_text(), '{"conversations":[],"activeId":"live"}')
                 from threading import Event
                 started = Event()
                 backups = Backups(reopened)

@@ -13,6 +13,8 @@ class BackupTestServer(LocalHTTPServer):
 
 with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'preference_file', side_effect=lambda: Path(temp)/'settings'/'location.json'):
  service=Service(Path(temp)/'data');service.archive.configure('codex',False);service.archive.add('Original','Backup fixture')
+ service.chat_history({'activeId':'saved-chat','conversations':[{'id':'saved-chat','title':'Recovery example','messages':[
+     {'id':'q','role':'user','text':'Original question'},{'id':'a','role':'assistant','text':'Original answer from backup'}]}]})
  server=BackupTestServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with sync_playwright() as pw:
@@ -212,6 +214,8 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     with page.expect_response(lambda response:response.url.endswith('/api/backups/verify')) as verified:
      old_row.get_by_role('button',name='验证此备份').click()
     assert verified.value.ok
+    expect(old_row).to_contain_text('对话记录已验证')
+    (service.archive.root/'conversations.json').write_bytes(b'{"conversations":[')
     expect(bad_row).to_contain_text('备份验证失败')
     page.once('dialog',lambda confirmation:confirmation.accept())
     with page.expect_response(lambda response:response.url.endswith('/api/backups/restore')) as restored:
@@ -219,6 +223,9 @@ with tempfile.TemporaryDirectory() as temp, patch.object(library_location, 'pref
     assert restored.value.ok
     assert service.archive.get(original['id'])['title']=='Original'
     expect(page.locator('#settings-dialog')).to_be_hidden()
+    page.reload()
+    page.locator('[data-chat="saved-chat"]').click()
+    expect(page.get_by_text('Original answer from backup',exact=True).first).to_be_visible()
     page.locator('#settings-open').click()
     with page.expect_download() as exported:
      download.click()
