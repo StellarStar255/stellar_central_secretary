@@ -191,6 +191,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert options.first.locator('.search-history-label').evaluate('el=>el.scrollWidth>el.clientWidth')
     options.first.click()
     expect(search).to_have_value(past[-1])
+    # Selecting history commits after the results arrive. Finish that write before reseeding.
+    page.wait_for_function("value=>JSON.parse(localStorage.getItem('stellar.library-search-history'))[0]===value",arg=past[-1])
     page.evaluate("""() => localStorage.setItem('stellar.library-search-history',
                   JSON.stringify(['日报例会','月度总结']))""")
     page.reload()
