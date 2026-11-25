@@ -1,11 +1,11 @@
 """Synthetic pasted image + text + file in one archived question, no cloud calls."""
 import base64,io,json,os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from PIL import Image
 from tests.test_large_pdf_preview import fixture as make_pdf
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from secretary import ai,attachment_editor as editor
 from playwright.sync_api import sync_playwright,expect
@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as temp:
  service=Service(temp);service.archive.configure('codex',False)
  other,_=service.archive.add('Unrelated','UNRELATED_SECRET_SHOULD_NOT_BE_SENT')
  before=service.archive.get(other)
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  def model(prompt,backend,**options):
   assert 'UNRELATED_SECRET_SHOULD_NOT_BE_SENT' not in prompt
   assert 'Attached synthetic context' in prompt and len(options['images'])==1
@@ -101,12 +101,34 @@ with tempfile.TemporaryDirectory() as temp:
     second=rows.nth(1);second.locator('summary').click()
     expect(second.locator('.bundle-reading-text')).to_contain_text('PAGETOKEN1')
     assert second.locator('.bundle-reading-text').evaluate("e=>getComputedStyle(e).maxHeight==='none' && getComputedStyle(e).overflowY==='visible'")
-    second.locator('.bundle-page-link').first.click()
+    # A summary finishing above the reader must not collapse text or lose keyboard focus.
+    control=second.locator('summary');control.focus()
+    before_y=control.bounding_box()['y']
+    service.archive.update(ident,summary='Updated summary. '*40)
+    page.evaluate('id=>detail(id,false,true)',ident)
+    expect(second.locator('.bundle-reading-text')).to_be_visible()
+    expect(control).to_be_focused()
+    assert abs(control.bounding_box()['y']-before_y)<3
+    page_link=second.locator('.bundle-page-link').first
+    page_link.focus();page.keyboard.press('Enter')
     expect(page.locator('#pdf-reader h2')).to_have_text(documents[1]['name'])
     expect(page.locator('#pdf-reader [data-pdf-image]')).to_have_attribute('src',bundle['all_attachments'][1]['path']+'/pdf-page/1')
-    page.keyboard.press('Escape')
+    service.archive.update(ident,summary='Updated again.')
+    page.evaluate('id=>detail(id,false,true)',ident)
+    page.keyboard.press('Escape');expect(page_link).to_be_focused()
+    expect(second.locator('.bundle-reading-text')).to_be_visible()
     body.locator('.bundle-raw summary').click()
     assert body.locator('.bundle-raw .bundle-reading-text').text_content()==bundle['text']
+    sample='发票号码：012345\n开票日期：2026年1月2日\n购\n买\n方\n信\n息\n名称:<测试>\n销\n售\n方\n信\n息\n名称:商户\n数量  单价  金额'
+    formatted=page.evaluate("""([item,sample])=>{
+     item.bundle_body.texts[item.attachments[0].id]=sample;
+     const root=document.createElement('div');root.innerHTML=StellarBundles.renderBody(item);
+     const view=root.querySelector('.invoice-reading');
+     return [[...view.querySelectorAll('h5')].map(el=>el.textContent),
+      [...view.querySelectorAll('.invoice-field>span:last-child')].map(el=>el.textContent),
+      view.querySelector('.invoice-line').textContent];
+    }""",[bundle,sample])
+    assert formatted==[['购买方信息','销售方信息'],['012345','2026年1月2日','<测试>','商户'],'数量  单价  金额']
     service.archive.update(ident,text='用户编辑后的正文 <保留>');page.reload()
     expect(body.locator('.bundle-reading-text').first).to_have_text('用户编辑后的正文 <保留>')
     assert not errors,errors

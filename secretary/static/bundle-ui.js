@@ -4,7 +4,22 @@
  const valid=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
  function readingText(value,pdf){
   // Keep line and column boundaries intact. Only reduce runs of empty lines.
-  const plain=esc(value.replace(/\r\n?/g,'\n').replace(/\n(?:[ \t]*\n){2,}/g,'\n\n'));
+  let text=value.replace(/\r\n?/g,'\n').replace(/\n(?:[ \t]*\n){2,}/g,'\n\n');
+  if(pdf && /发票号码[：:]/.test(text) && /开票日期[：:]/.test(text)){
+   // Vertical labels in invoice PDFs are often extracted as five separate lines.
+   for(const title of ['购买方信息','销售方信息']){
+    const vertical=new RegExp('^'+[...title].join('[ \\t]*\\n[ \\t]*')+'$','gm');
+    text=text.replace(vertical,title);
+   }
+   return '<div class="invoice-reading">'+text.split('\n').filter(Boolean).map(line=>{
+    if(/^\[第 \d+ 页\]$/.test(line))return '<small class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+line.match(/\d+/)[0]+'</small>';
+    if(/^(购买方信息|销售方信息)$/.test(line))return '<h5>'+esc(line)+'</h5>';
+    const field=line.match(/^(发票号码|开票日期|名称|统一社会信用代码\/纳税人识别号)[：:]\s*(.+)$/);
+    if(field)return '<div class="invoice-field"><span>'+esc(field[1])+'</span><span>'+esc(field[2])+'</span></div>';
+    return '<div class="invoice-line">'+esc(line)+'</div>';
+   }).join('')+'</div>';
+  }
+  const plain=esc(text);
   return pdf?plain.replace(/^\[第 (\d+) 页\]$/gm,(_,page)=>'<strong class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+page+'</strong>'):plain;
  }
  function renderBody(item){
@@ -15,18 +30,37 @@
    const pdf=/\.pdf$/i.test(file.name);
    const pages=(item.source_pages||[]).filter(origin=>!origin.batch_id && origin.attachment_id===file.id).map(origin=>origin.page);
    const pageLinks=pdf?(pages.length?pages:[1]).map(page=>
-    '<button type="button" class="bundle-page-link" data-pdf-read="'+esc(file.path)+'" data-pdf-name="'+esc(file.name)+'" data-pdf-page="'+page+'">'+esc(t('查看原页'))+' · '+page+'</button>'
+    '<button type="button" class="bundle-page-link" data-reader-key="page-'+file.id+'-'+page+'" data-pdf-read="'+esc(file.path)+'" data-pdf-name="'+esc(file.name)+'" data-pdf-page="'+page+'">'+esc(t('查看原页'))+' · '+page+'</button>'
    ).join(''):'';
    const text=texts[file.id];
-   return '<article class="bundle-body-file"><header><span class="muted">'+esc(t('附件'))+' '+(index+1)+'</span><strong>'+esc(file.name)+'</strong></header>'+
+   return '<article class="bundle-body-file" data-reader-key="file-'+file.id+'"><div class="bundle-file-heading"><span class="muted">'+esc(t('附件'))+' '+(index+1)+'</span><strong>'+esc(file.name)+'</strong></div>'+
     (pageLinks?'<div class="bundle-page-links">'+pageLinks+'</div>':'')+
-    (text?'<details><summary>'+esc(t('展开提取文字'))+'</summary><div class="bundle-reading-text">'+readingText(text,pdf)+'</div></details>':'<p class="muted">'+esc(t('暂无提取文字'))+'</p>')+
+    (text?'<details data-reader-key="text-'+file.id+'"><summary data-reader-key="toggle-'+file.id+'">'+esc(t('展开提取文字'))+'</summary><div class="bundle-reading-text">'+readingText(text,pdf)+'</div></details>':'<p class="muted">'+esc(t('暂无提取文字'))+'</p>')+
     (file.warning?'<p class="warning">'+esc(file.warning)+'</p>':'')+'</article>';
   }).join('');
   return '<section class="archived-body bundle-body"><h3>'+esc(t('归档内容'))+'</h3>'+
    (edited?'<h4>'+esc(t('当前保存的正文'))+'</h4><div class="bundle-reading-text">'+esc(item.text)+'</div>':
     note?'<h4>'+esc(t('你的备注'))+'</h4><div class="bundle-reading-text">'+esc(note)+'</div>':'')+
-   rows+(edited?'':'<details class="bundle-raw"><summary>'+esc(t('查看原始文本'))+' · '+item.text.length.toLocaleString()+' '+esc(t('字符'))+'</summary><div class="bundle-reading-text">'+esc(item.text)+'</div></details>')+'</section>';
+   rows+(edited?'':'<details class="bundle-raw" data-reader-key="raw"><summary data-reader-key="raw-toggle">'+esc(t('查看原始文本'))+' · '+item.text.length.toLocaleString()+' '+esc(t('字符'))+'</summary><div class="bundle-reading-text">'+esc(item.text)+'</div></details>')+'</section>';
+ }
+ // Capture immediately before replacing the detail DOM, after the network request.
+ function preserveReading(dialog){
+  const body=dialog.querySelector('.bundle-body');
+  if(!body)return;
+  const top=dialog.getBoundingClientRect().top,bottom=dialog.getBoundingClientRect().bottom;
+  const visible=node=>node.getBoundingClientRect().bottom>top && node.getBoundingClientRect().top<bottom;
+  const focus=body.contains(document.activeElement)?document.activeElement.dataset.readerKey:null;
+  const anchor=focus && visible(document.activeElement)?document.activeElement:
+   [...body.querySelectorAll('.bundle-body-file,.bundle-raw')].find(visible);
+  const offset=anchor?.getBoundingClientRect().top;
+  const open=[...body.querySelectorAll('details[open]')].map(node=>node.dataset.readerKey);
+  return ()=>{
+   const nodes=new Map([...dialog.querySelectorAll('.bundle-body [data-reader-key]')].map(node=>[node.dataset.readerKey,node]));
+   for(const key of open){const node=nodes.get(key);if(node)node.open=true}
+   nodes.get(focus)?.focus({preventScroll:true});
+   const replacement=nodes.get(anchor?.dataset.readerKey);
+   if(replacement)dialog.scrollTop+=replacement.getBoundingClientRect().top-offset;
+  };
  }
  function renderAll(item,compact=false){
   const files=item.all_attachments||[];if(!files.length&&!item.deleted_attachment_count)return '';
@@ -85,5 +119,5 @@
   try{const result=await options.api(path+'/'+action,{});await options.onSaved(path.split('/')[3]);options.toast(StellarI18n.t(result.conflict?'归档附件已更新，本机编辑文件仍保留，请先核对版本。':action==='save'?(result.changed?'文件修改已保存，已有摘要可能过期；可手动重新整理。':'没有检测到文件内容变化，请先在外部程序中保存。'):action==='open'?(button.classList.contains('image-open')?'已在默认程序中打开图片':'已在默认程序中打开编辑副本'):'已在文件夹中显示编辑文件'))}
   catch(error){options.toast(StellarI18n.message(error.message))}finally{button.disabled=false}
  })}
- globalThis.StellarBundles={render,renderAll,renderBody,chatImages,bind};
+ globalThis.StellarBundles={render,renderAll,renderBody,preserveReading,chatImages,bind};
 })();
