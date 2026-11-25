@@ -12,7 +12,7 @@ enum SharedInbox {
         return folder
     }
 
-    static func save(_ source: URL, name: String) throws {
+    static func save(_ source: URL, name: String) throws -> URL {
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true, let size = values.fileSize, (1...maxBytes).contains(size) else {
             throw CocoaError(.fileReadTooLarge)
@@ -29,7 +29,16 @@ enum SharedInbox {
         let leaf = (name as NSString).lastPathComponent
         let file = leaf.isEmpty || leaf.hasPrefix(".") ? "Attachment" : leaf
         try data.write(to: staging.appendingPathComponent(file), options: .completeFileProtectionUntilFirstUserAuthentication)
-        try FileManager.default.moveItem(at: staging, to: inbox.appendingPathComponent(id))
+        let folder = inbox.appendingPathComponent(id)
+        try FileManager.default.moveItem(at: staging, to: folder)
+        return folder.appendingPathComponent(file)
+    }
+
+    static func noteReference(for file: URL) throws -> String {
+        guard let date = try file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return ISO8601DateFormatter().string(from: date)
     }
 
     static func files() throws -> [URL] {

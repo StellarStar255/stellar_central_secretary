@@ -223,7 +223,7 @@ struct CaptureView: View {
                                         defer { saving = false }
                                         do {
                                             let file = ChatAttachment(name: url.lastPathComponent, data: try Data(contentsOf: url))
-                                            if await model.enqueue(text: "", files: [file], workspace: workspace, id: url.deletingLastPathComponent().lastPathComponent) {
+                                            if await model.enqueue(text: "", files: [file], workspace: workspace, id: url.deletingLastPathComponent().lastPathComponent, noteReference: try SharedInbox.noteReference(for: url)) {
                                                 try FileManager.default.removeItem(at: url.deletingLastPathComponent())
                                                 sharedFiles.removeAll { $0 == url }
                                             }

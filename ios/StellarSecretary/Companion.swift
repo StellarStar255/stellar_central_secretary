@@ -672,7 +672,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     private func persist(_ next: [Draft]) throws {
         let data = try JSONEncoder().encode(next);try data.write(to:queueURL,options:[.atomic,.completeFileProtectionUntilFirstUserAuthentication]);var values = URLResourceValues();values.isExcludedFromBackup = true;var url = queueURL;try? url.setResourceValues(values);drafts = next
     }
-    func enqueue(text: String, files: [ChatAttachment], workspace:String, id: String = UUID().uuidString) async -> Bool {
+    func enqueue(text: String, files: [ChatAttachment], workspace:String, id: String = UUID().uuidString, noteReference: String? = nil) async -> Bool {
         guard workspace==workspaceID else {return false}
         guard let pair = paired else { error = "请先配对电脑";return false }
         guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
@@ -681,7 +681,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         if files.count>1, online, !multiAttachmentsAvailable { error = "请更新电脑端以发送多个附件。";return false }
         do {
             let single = files.count == 1 ? files.first : nil
-            try persist(drafts + [Draft(id:id,serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:single?.name,data:single?.data.base64EncodedString(),attachmentBatch:files.count>1 ? files : nil)])
+            try persist(drafts + [Draft(id:id,serverID:pair.info.server_id,fingerprint:pair.info.fingerprint,text:text,filename:single?.name,data:single?.data.base64EncodedString(),created:noteReference ?? ISO8601DateFormatter().string(from:Date()),attachmentBatch:files.count>1 ? files : nil)])
             error = ""
             Task { await flush() }
             return true

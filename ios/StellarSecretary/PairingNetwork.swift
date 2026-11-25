@@ -116,7 +116,7 @@ enum PairingTransportFailure: LocalizedError {
 
 // A TCP accept alone can be a stale relay or an unreachable TLS upstream.
 // Race carriers through an actual pinned HTTPS response before selecting one.
-final class PairingTLSProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
+final class PairingTLSProbe: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let fingerprint: String
     init(fingerprint: String) { self.fingerprint = fingerprint.lowercased() }
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
@@ -127,6 +127,10 @@ final class PairingTLSProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
             completionHandler(.cancelAuthenticationChallenge, nil);return
         }
         completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
     static func verifiedWhileDiscovering(_ endpoint: String, fingerprint: String, timeout: TimeInterval = 12) async throws -> String {
         let deadline=Date().addingTimeInterval(timeout)

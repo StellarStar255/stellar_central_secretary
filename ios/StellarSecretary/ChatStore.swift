@@ -87,3 +87,8 @@ struct ChatCache: Codable {
         var target=url;var values=URLResourceValues();values.isExcludedFromBackup=true;try target.setResourceValues(values)
     }
 }
+
+struct CaptureEditor {
+    var text = ""
+    var files: [ChatAttachment] = []
+}

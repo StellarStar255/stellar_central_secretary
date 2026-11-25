@@ -65,8 +65,3 @@ enum CredentialStore {
         guard status == errSecSuccess else { throw NSError(domain:NSOSStatusErrorDomain,code:Int(status)) }
     }
 }
-
-struct CaptureEditor {
-    var text = ""
-    var files: [ChatAttachment] = []
-}

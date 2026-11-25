@@ -37,5 +37,19 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>发现附近的 Mac，与 Wi-Fi 配合连接已配对知识库。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>寻找并连接已配对的 Mac，共用知识库。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_stellar-sec._tcp</string>
+		<string>_stellar-wifi._tcp</string>
+	</array>
 </dict>
 </plist>
