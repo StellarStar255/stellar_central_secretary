@@ -81,8 +81,8 @@ class ArchiveTest(unittest.TestCase):
         self.assertTrue(extract('image.png', b'fake')[1])
     def test_office_and_zip_limit(self):
         data = io.BytesIO()
-        with zipfile.ZipFile(data,'w') as z: z.writestr('word/document.xml', '<document><p><t>Research</t></p></document>')
-        self.assertIn('Research', extract('a.docx',data.getvalue())[0])
+        with zipfile.ZipFile(data,'w') as z: z.writestr('word/document.xml', '<document><p><t>Research</t><t> notes</t></p><p><t>Next paragraph</t></p><tbl><tr><tc><p><t>A</t></p></tc><tc><p><t>B</t></p></tc></tr></tbl></document>')
+        self.assertEqual(extract('a.docx',data.getvalue())[0], 'Research notes\nNext paragraph\nA\tB')
 
 
 class ManualLoginTest(unittest.TestCase):

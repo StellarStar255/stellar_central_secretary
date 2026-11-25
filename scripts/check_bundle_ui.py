@@ -129,6 +129,19 @@ with tempfile.TemporaryDirectory() as temp:
       view.querySelector('.invoice-line').textContent];
     }""",[bundle,sample])
     assert formatted==[['购买方信息','销售方信息'],['012345','2026年1月2日','<测试>','商户'],'数量  单价  金额']
+    # The same reading layout is available for standalone and grouped documents.
+    general='[第 2 页]\n第一章 说明\n第一段 <示例>。\n\n- 第一项\n- 第二项\n\n列一\t列二'
+    views=page.evaluate("""([item,text])=>{
+     const file=item.attachments[0];item.bundle_body.texts[file.id]=text;
+     return [StellarBundles.renderBody(item),renderArchivedBody({kind:'file',filename:'report.pdf',text})].map(html=>{
+      const root=document.createElement('div');root.innerHTML=html;
+      const view=root.querySelector('.extracted-document');
+      return [view.querySelector('.bundle-page').textContent,view.querySelector('.extracted-heading').textContent,
+       view.querySelector('.extracted-paragraph').textContent,view.querySelectorAll('.extracted-list-line').length,
+       view.querySelector('.extracted-aligned').textContent];
+     });
+    }""",[bundle,general])
+    assert views==[['页码 2','第一章 说明','第一段 <示例>。',2,'列一\t列二']]*2
     service.archive.update(ident,text='用户编辑后的正文 <保留>');page.reload()
     expect(body.locator('.bundle-reading-text').first).to_have_text('用户编辑后的正文 <保留>')
     assert not errors,errors

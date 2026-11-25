@@ -35,6 +35,21 @@ class PageText(HTMLParser):
         return re.sub(r'\n[ \t]*\n+', '\n\n', ''.join(p.parts)).strip()
 
 
+def word_text(node):
+    """Keep Word paragraph, table cell and line boundaries in extracted text."""
+    tag = node.tag.rsplit('}', 1)[-1]
+    if tag == 't':
+        return node.text or ''
+    if tag in ('br', 'cr'):
+        return '\n'
+    if tag == 'tab':
+        return '\t'
+    children = [word_text(child) for child in node]
+    if tag == 'tr':
+        return '\t'.join(value.rstrip('\n') for value in children if value) + '\n'
+    return ''.join(children) + ('\n' if tag == 'p' else '')
+
+
 def extract(name, data):
     if str(name).lower().endswith('.stellar.zip'):
         from .bundles import load,assemble
@@ -99,6 +114,8 @@ def extract(name, data):
                         rows.append(' | '.join(cells))
                     sheets.append(name+'\n'+'\n'.join(rows))
                 return '\n\n'.join(sheets), ''
+            if suffix == '.docx' and 'word/document.xml' in z.namelist():
+                return word_text(ET.fromstring(z.read('word/document.xml'))).rstrip('\n'), ''
             names = [n for n in z.namelist() if n == 'word/document.xml' or re.match(r'ppt/slides/slide\d+\.xml$', n) or re.match(r'xl/(sharedStrings|worksheets/sheet\d+)\.xml$', n) or n == 'content.xml']
             names.sort(key=lambda n: [int(v) if v.isdigit() else v for v in re.split(r'(\d+)', n)])
             return '\n\n'.join(' '.join(ET.fromstring(z.read(n)).itertext()) for n in names), ''

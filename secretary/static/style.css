@@ -228,3 +228,12 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .invoice-field>span:last-child,.invoice-line{white-space:pre-wrap;overflow-wrap:anywhere}
 .invoice-reading .bundle-page{display:block;margin-bottom:.45rem}
 @media(max-width:600px){.invoice-field{grid-template-columns:1fr;gap:0;margin:.5rem 0}}
+
+.extracted-document{max-width:78ch;white-space:normal}
+.extracted-paragraph,.extracted-aligned,.extracted-list-line,.source-verbatim{white-space:pre-wrap;tab-size:4;overflow-wrap:anywhere}
+.extracted-paragraph,.extracted-aligned{margin:.45em 0 .8em}
+.extracted-aligned,.source-verbatim{font-family:ui-monospace,monospace;font-size:.94em}
+.extracted-list-line{padding-inline-start:1.4em;text-indent:-1.4em;margin:.25em 0}
+.extracted-heading,.extracted-document .bundle-page{margin:1em 0 .35em;font-size:1em}
+.invoice-product{margin-top:.55em;white-space:pre-wrap}
+.invoice-total{margin-top:.6em;font-weight:600;white-space:pre-wrap}

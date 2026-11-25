@@ -2,26 +2,62 @@
 (()=>{
  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const valid=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
- function readingText(value,pdf){
+ function readingText(value,name){
+  const pdf=/\.pdf$/i.test(name);
+  if(/\.(?:py|js|json|ya?ml|xml|csv|tsv|log)$/i.test(name))return '<div class="source-verbatim">'+esc(value)+'</div>';
   // Keep line and column boundaries intact. Only reduce runs of empty lines.
   let text=value.replace(/\r\n?/g,'\n').replace(/\n(?:[ \t]*\n){2,}/g,'\n\n');
   if(pdf && /发票号码[：:]/.test(text) && /开票日期[：:]/.test(text)){
    // Vertical labels in invoice PDFs are often extracted as five separate lines.
-   for(const title of ['购买方信息','销售方信息']){
+   for(const title of ['购买方信息','销售方信息','备注']){
     const vertical=new RegExp('^'+[...title].join('[ \\t]*\\n[ \\t]*')+'$','gm');
     text=text.replace(vertical,title);
    }
    return '<div class="invoice-reading">'+text.split('\n').filter(Boolean).map(line=>{
     if(/^\[第 \d+ 页\]$/.test(line))return '<small class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+line.match(/\d+/)[0]+'</small>';
-    if(/^(购买方信息|销售方信息)$/.test(line))return '<h5>'+esc(line)+'</h5>';
+    if(/^(购买方信息|销售方信息|备注)$/.test(line))return '<h5>'+esc(line)+'</h5>';
+    if(/^合[ \t]*计\s+[¥￥]/.test(line)||/^价税合计/.test(line))return '<div class="invoice-total">'+esc(line)+'</div>';
+    if(/^\*[^*]+\*/.test(line))return '<div class="invoice-product">'+esc(line)+'</div>';
     const field=line.match(/^(发票号码|开票日期|名称|统一社会信用代码\/纳税人识别号)[：:]\s*(.+)$/);
     if(field)return '<div class="invoice-field"><span>'+esc(field[1])+'</span><span>'+esc(field[2])+'</span></div>';
     return '<div class="invoice-line">'+esc(line)+'</div>';
    }).join('')+'</div>';
   }
-  const plain=esc(text);
-  return pdf?plain.replace(/^\[第 (\d+) 页\]$/gm,(_,page)=>'<strong class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+page+'</strong>'):plain;
+  const blocks=[];
+  let lines=[],fence=null;
+  function flush(){
+   if(!lines.length)return;
+   const aligned=lines.some(line=>/\t|\S {2,}\S/.test(line));
+   blocks.push('<p class="'+(aligned?'extracted-aligned':'extracted-paragraph')+'">'+esc(lines.join('\n'))+'</p>');
+   lines=[];
+  }
+  for(const line of text.split('\n')){
+   if(fence){
+    lines.push(line);
+    if(line.trim().startsWith(fence)){
+     blocks.push('<div class="source-verbatim">'+esc(lines.join('\n'))+'</div>');lines=[];fence=null;
+    }
+    continue;
+   }
+   const delimiter=line.match(/^ {0,3}(`{3,}|~{3,})/);
+   if(delimiter){flush();fence=delimiter[1];lines.push(line);continue}
+   if(!line.trim()){flush();continue}
+   const page=pdf && line.match(/^\[第 (\d+) 页\](.*)$/);
+   if(page){
+    flush();blocks.push('<h5 class="bundle-page">'+esc(StellarI18n.t('页码'))+' '+page[1]+esc(page[2])+'</h5>');
+   }else if(/^(?:#{1,6}\s+|第[一二三四五六七八九十百\d]+[章节]\s*\S|[一二三四五六七八九十]+、).{0,70}$/.test(line)){
+    flush();blocks.push('<h5 class="extracted-heading">'+esc(line)+'</h5>');
+   }else if(/^\s*(?:[-•●]|\d+[.)、])\s+\S/.test(line)){
+    flush();blocks.push('<div class="extracted-list-line">'+esc(line)+'</div>');
+   }else{lines.push(line)}
+  }
+  if(fence)blocks.push('<div class="source-verbatim">'+esc(lines.join('\n'))+'</div>');else flush();
+  return '<div class="extracted-document">'+blocks.join('')+'</div>';
  }
+ function fileBody(item){
+  return '<section class="archived-body bundle-body"><h3>'+esc(StellarI18n.t('正文'))+'</h3><div class="bundle-reading-text">'+readingText(item.text,item.filename)+'</div><details class="bundle-raw" data-reader-key="raw"><summary data-reader-key="raw-toggle">'+esc(StellarI18n.t('查看原始文本'))+' · '+item.text.length.toLocaleString()+' '+esc(StellarI18n.t('字符'))+'</summary><div class="bundle-reading-text">'+esc(item.text)+'</div></details></section>';
+ }
+
  function renderBody(item){
   const {note,edited,texts}=item.bundle_body;
   const t=StellarI18n.t;
@@ -35,7 +71,7 @@
    const text=texts[file.id];
    return '<article class="bundle-body-file" data-reader-key="file-'+file.id+'"><div class="bundle-file-heading"><span class="muted">'+esc(t('附件'))+' '+(index+1)+'</span><strong>'+esc(file.name)+'</strong></div>'+
     (pageLinks?'<div class="bundle-page-links">'+pageLinks+'</div>':'')+
-    (text?'<details data-reader-key="text-'+file.id+'"><summary data-reader-key="toggle-'+file.id+'">'+esc(t('展开提取文字'))+'</summary><div class="bundle-reading-text">'+readingText(text,pdf)+'</div></details>':'<p class="muted">'+esc(t('暂无提取文字'))+'</p>')+
+    (text?'<details data-reader-key="text-'+file.id+'"><summary data-reader-key="toggle-'+file.id+'">'+esc(t('展开提取文字'))+'</summary><div class="bundle-reading-text">'+readingText(text,file.name)+'</div></details>':'<p class="muted">'+esc(t('暂无提取文字'))+'</p>')+
     (file.warning?'<p class="warning">'+esc(file.warning)+'</p>':'')+'</article>';
   }).join('');
   return '<section class="archived-body bundle-body"><h3>'+esc(t('归档内容'))+'</h3>'+
@@ -119,5 +155,5 @@
   try{const result=await options.api(path+'/'+action,{});await options.onSaved(path.split('/')[3]);options.toast(StellarI18n.t(result.conflict?'归档附件已更新，本机编辑文件仍保留，请先核对版本。':action==='save'?(result.changed?'文件修改已保存，已有摘要可能过期；可手动重新整理。':'没有检测到文件内容变化，请先在外部程序中保存。'):action==='open'?(button.classList.contains('image-open')?'已在默认程序中打开图片':'已在默认程序中打开编辑副本'):'已在文件夹中显示编辑文件'))}
   catch(error){options.toast(StellarI18n.message(error.message))}finally{button.disabled=false}
  })}
- globalThis.StellarBundles={render,renderAll,renderBody,preserveReading,chatImages,bind};
+ globalThis.StellarBundles={render,renderAll,renderBody,fileBody,preserveReading,chatImages,bind};
 })();
