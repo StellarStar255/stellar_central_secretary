@@ -142,6 +142,16 @@ with tempfile.TemporaryDirectory() as temp:
      });
     }""",[bundle,general])
     assert views==[['页码 2','第一章 说明','第一段 <示例>。',2,'列一\t列二']]*2
+    block='~~~text\nline one\n\n \t\n\n~~~literal\n\n\nline two\n~~~~'
+    previews=page.evaluate(r"""([item,block])=>{
+     const text='Introduction\n\n'+block+'\n\nEnd';
+     const file=item.all_attachments[0];file.name='notes.md';item.bundle_body.texts[file.id]=text;
+     return [StellarBundles.renderBody(item),renderArchivedBody({kind:'file',filename:file.name,text})].map(html=>{
+      const root=document.createElement('div');root.innerHTML=html;
+      return root.querySelector('.source-verbatim').textContent;
+     });
+    }""",[bundle,block])
+    assert previews==[block,block]
     service.archive.update(ident,text='用户编辑后的正文 <保留>');page.reload()
     expect(body.locator('.bundle-reading-text').first).to_have_text('用户编辑后的正文 <保留>')
     assert not errors,errors

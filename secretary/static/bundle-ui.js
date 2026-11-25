@@ -5,8 +5,7 @@
  function readingText(value,name){
   const pdf=/\.pdf$/i.test(name);
   if(/\.(?:py|js|json|ya?ml|xml|csv|tsv|log)$/i.test(name))return '<div class="source-verbatim">'+esc(value)+'</div>';
-  // Keep line and column boundaries intact. Only reduce runs of empty lines.
-  let text=value.replace(/\r\n?/g,'\n').replace(/\n(?:[ \t]*\n){2,}/g,'\n\n');
+  let text=value.replace(/\r\n?/g,'\n');
   if(pdf && /发票号码[：:]/.test(text) && /开票日期[：:]/.test(text)){
    // Vertical labels in invoice PDFs are often extracted as five separate lines.
    for(const title of ['购买方信息','销售方信息','备注']){
@@ -34,7 +33,8 @@
   for(const line of text.split('\n')){
    if(fence){
     lines.push(line);
-    if(line.trim().startsWith(fence)){
+    const closing=line.match(/^ {0,3}(`+|~+)[ \t]*$/);
+    if(closing && closing[1].startsWith(fence)){
      blocks.push('<div class="source-verbatim">'+esc(lines.join('\n'))+'</div>');lines=[];fence=null;
     }
     continue;

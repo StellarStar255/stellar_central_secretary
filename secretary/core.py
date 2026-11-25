@@ -44,10 +44,15 @@ def word_text(node):
         return '\n'
     if tag == 'tab':
         return '\t'
-    children = [word_text(child) for child in node]
     if tag == 'tr':
-        return '\t'.join(value.rstrip('\n') for value in children if value) + '\n'
-    return ''.join(children) + ('\n' if tag == 'p' else '')
+        def cells(parent):
+            for child in parent:
+                if child.tag.rsplit('}', 1)[-1] == 'tc':
+                    yield word_text(child).rstrip('\n')
+                else:
+                    yield from cells(child)
+        return '\t'.join(cells(node)) + '\n'
+    return ''.join(word_text(child) for child in node) + ('\n' if tag == 'p' else '')
 
 
 def extract(name, data):

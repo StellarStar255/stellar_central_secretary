@@ -84,6 +84,14 @@ class ArchiveTest(unittest.TestCase):
         with zipfile.ZipFile(data,'w') as z: z.writestr('word/document.xml', '<document><p><t>Research</t><t> notes</t></p><p><t>Next paragraph</t></p><tbl><tr><tc><p><t>A</t></p></tc><tc><p><t>B</t></p></tc></tr></tbl></document>')
         self.assertEqual(extract('a.docx',data.getvalue())[0], 'Research notes\nNext paragraph\nA\tB')
 
+    def test_word_table_preserves_empty_columns(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data,'w') as doc:
+            doc.writestr('word/document.xml', '<tbl><tr><trPr/><tc/><tc><p><t>A</t></p></tc>'
+                         '<tc/><tc><p/></tc><sdt><sdtContent><tc><p><t>B</t></p></tc>'
+                         '</sdtContent></sdt><tc/></tr></tbl>')
+        self.assertEqual(extract('table.docx', data.getvalue())[0], '\tA\t\t\tB\t')
+
 
 class ManualLoginTest(unittest.TestCase):
     def test_background_launch_defers_window_creation(self):
