@@ -205,6 +205,7 @@ struct CaptureView: View {
     @State private var loadingPhotos = false
     @State private var importing = false
     @State private var sharedFiles: [URL] = []
+    @State private var showingSummarySettings = false
     @State private var saving = false
     @FocusState private var editing: Bool
     var body: some View {
@@ -212,29 +213,24 @@ struct CaptureView: View {
             Form {
                 Section { ConnectionBanner() }
                 if !sharedFiles.isEmpty {
-                    Section("其他 App 分享的文件") {
+                    Section("选择文件，合为一份归档") {
                         ForEach(sharedFiles, id: \.self) { url in
                             VStack(alignment: .leading) {
-                                Text(verbatim: url.lastPathComponent)
-                                Button("发送到当前电脑") {
-                                    let workspace = model.workspaceID
-                                    saving = true
-                                    Task {
-                                        defer { saving = false }
-                                        do {
-                                            let file = ChatAttachment(name: url.lastPathComponent, data: try Data(contentsOf: url))
-                                            if await model.enqueue(text: "", files: [file], workspace: workspace, id: url.deletingLastPathComponent().lastPathComponent, noteReference: try SharedInbox.noteReference(for: url)) {
-                                                try FileManager.default.removeItem(at: url.deletingLastPathComponent())
-                                                sharedFiles.removeAll { $0 == url }
-                                            }
-                                        } catch { model.error = "无法读取文件" }
+                                Button {
+                                    if model.captureEditor.inboxSelection.contains(url) {
+                                        model.captureEditor.inboxSelection.removeAll { $0 == url }
+                                    } else {
+                                        model.captureEditor.inboxSelection.append(url)
                                     }
+                                } label: {
+                                    Label(url.lastPathComponent, systemImage: model.captureEditor.inboxSelection.contains(url) ? "checkmark.circle.fill" : "circle")
                                 }.disabled(saving)
                             }.swipeActions {
                                 Button("删除", role: .destructive) {
                                     do {
                                         try FileManager.default.removeItem(at: url.deletingLastPathComponent())
                                         sharedFiles.removeAll { $0 == url }
+                                        model.captureEditor.inboxSelection.removeAll { $0 == url }
                                     } catch { model.error = "无法移除待发送内容" }
                                 }.disabled(saving)
                             }
@@ -256,15 +252,40 @@ struct CaptureView: View {
                     if loadingPhotos { ProgressView("正在读取附件…") }
                     Button {
                         editing = false;saving = true
-                        let id=model.workspaceID,value=text,files=model.captureEditor.files
+                        let workspace = model.workspaceID, note = text
+                        let selected = model.captureEditor.inboxSelection
+                        let attachments = model.captureEditor.files
                         Task {
-                            if await model.enqueue(text:value,files:files,workspace:id),model.workspaceID==id { model.captureEditor=CaptureEditor() }
-                            saving = false
+                            defer { saving = false }
+                            do {
+                                var files = attachments
+                                for url in selected {
+                                    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                                    guard files.count < ChatAttachment.maxCount, size > 0,
+                                          files.reduce(0, { $0 + $1.data.count }) + size <= SharedInbox.maxBytes else {
+                                        model.error = "附件最多 8 个，合计最多 10 MB。"
+                                        return
+                                    }
+                                    files.append(ChatAttachment(name: url.lastPathComponent, data: try Data(contentsOf: url)))
+                                }
+                                let single = selected.count == 1 && attachments.isEmpty && note.isEmpty ? selected.first : nil
+                                let requestID = single?.deletingLastPathComponent().lastPathComponent ?? UUID().uuidString
+                                let reference = try single.map { try SharedInbox.noteReference(for: $0) }
+                                guard await model.enqueue(text: note, files: files, workspace: workspace, id: requestID, noteReference: reference) else { return }
+                                if workspace == model.workspaceID { model.captureEditor = CaptureEditor() }
+                                for url in selected {
+                                    try FileManager.default.removeItem(at: url.deletingLastPathComponent())
+                                    sharedFiles.removeAll { $0 == url }
+                                }
+                            } catch { model.error = "无法读取或移除分享的文件" }
                         }
                     } label: {
                         Label(LocalizedStringKey(model.online ? "保存到知识库":"暂存，连接后发送"),systemImage:"tray.and.arrow.down").frame(maxWidth:.infinity)
-                    }.disabled(saving || loadingPhotos || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.captureEditor.files.isEmpty))
+                    }.disabled(saving || loadingPhotos || (text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && model.captureEditor.files.isEmpty && model.captureEditor.inboxSelection.isEmpty))
                 } footer: { Text("只添加图片或文件也可归档。附件最多 8 个，合计最多 10 MB。") }
+                Section {
+                    Button("手机归档自动摘要") { showingSummarySettings = true }
+                }
                 if !model.error.isEmpty { Section { Text(PhoneLanguage.text(model.error,in:interfaceLocale)).foregroundStyle(.orange) } }
                 if !model.currentDrafts.isEmpty {
                     Section("待发送 · \(model.currentDrafts.count)") {
@@ -301,6 +322,7 @@ struct CaptureView: View {
                     }
                 }
             }.navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            .sheet(isPresented: $showingSummarySettings) { PrivacyView() }
             .task(id:"\(scene)-\(model.selectedTab)") {
                 guard scene == .active, model.selectedTab == "archive" else { return }
                 do { sharedFiles = try SharedInbox.files() } catch { model.error = "无法读取文件" }

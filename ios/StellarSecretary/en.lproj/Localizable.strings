@@ -295,3 +295,6 @@
 
 "其他 App 分享的文件" = "Files from other apps";
 "发送到当前电脑" = "Send to current computer";
+
+"选择文件，合为一份归档" = "Select files for one archive";
+"无法读取或移除分享的文件" = "Could not read or remove a shared file.";

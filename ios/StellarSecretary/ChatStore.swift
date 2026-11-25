@@ -89,6 +89,7 @@ struct ChatCache: Codable {
 }
 
 struct CaptureEditor {
+    var inboxSelection: [URL] = []
     var text = ""
     var files: [ChatAttachment] = []
 }

@@ -298,6 +298,18 @@ assert.equal(vm.runInContext('currentChat().messages.length',context),2);
 vm.runInContext(`mergeChats({conversations:[{id:'extension-fixture',title:'Current',updated:1,messages:[{id:'extension-event',role:'assistant',text:'Saved',externalArchive:true,items:['a'.repeat(32)]}]}]});`,context);
 assert.equal(vm.runInContext('currentChat().messages.length',context),2);
 assert(vm.runInContext("externalArchiveCard('a'.repeat(32))",context).includes('class="source"'));
+const previousReceiptItems=vm.runInContext('allItems',context);
+const previousHistoryLoaded=vm.runInContext('historyLoaded',context);
+vm.runInContext(`historyLoaded=true;allItems=[{id:'a'.repeat(32),title:'测试预约',kind:'file',category:'测试',state:'saved',summary:''}];
+currentChat().messages.push({id:'mobile-fixture',role:'assistant',text:'这份手机资料已存在，可直接查看。',externalArchive:true,items:['a'.repeat(32)]});
+allItems[0].summary_progress={active:true,operation:'summary',stage:'queued'};renderChat(false)`,context);
+assert(elements.get('#messages').innerHTML.includes('<span class="archive-status">排队中</span>'));
+vm.runInContext("allItems[0].summary_progress.stage='waiting_model';renderChat(false)",context);
+assert(elements.get('#messages').innerHTML.includes('<span class="archive-status">正在整理</span>'));
+vm.runInContext("allItems[0].summary_progress.active=false;allItems[0].state='ready';allItems[0].summary='预约摘要示例';renderChat(false)",context);
+assert(elements.get('#messages').innerHTML.includes('<span class="archive-status">已整理</span>'));
+assert.equal(elements.get('#messages').innerHTML.split('预约摘要示例').length-1,1);
+context.previousReceiptItems=previousReceiptItems;context.previousHistoryLoaded=previousHistoryLoaded;vm.runInContext('allItems=previousReceiptItems;historyLoaded=previousHistoryLoaded',context);
 context.beforeExtensionFixture=beforeExtensionFixture;vm.runInContext('conversations=beforeExtensionFixture.conversations;activeId=beforeExtensionFixture.activeId',context);stored.set('stellar.conversations.v1',storedBeforeExtensionFixture);
 console.log('PASS: external capture receipt survives newer local chat and merges once as compact card');
 

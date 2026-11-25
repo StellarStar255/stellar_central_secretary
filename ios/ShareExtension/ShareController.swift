@@ -55,7 +55,7 @@ final class ShareController: UIViewController {
                     if let pair = self.destination {
                         self.finish("\(file.lastPathComponent)\n\n当前电脑：\(pair.displayName)")
                         self.sendButton.isHidden = false
-                        self.done.setTitle("仅保存在手机", for: .normal)
+                        self.done.setTitle("留在手机，稍后合并归档", for: .normal)
                     } else {
                         self.finish("已保存到手机。请在知识秘书中选择已配对的电脑。")
                     }
