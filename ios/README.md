@@ -12,6 +12,8 @@ Native SwiftUI companion for iOS 17 or later. The Mac keeps the library and perf
 
 Credentials are saved in the phone Keychain; the QR contains a short-lived invitation and the server certificate fingerprint. Only the fingerprint-matching TLS server is trusted. Desktop APIs, settings, model credentials and arbitrary file downloads are not exposed by the companion listener. Pairing and revocation are available only through the desktop UI. The listener is off by default.
 
+From the iOS share sheet, choose Stellar Secretary to send a file to the selected paired Mac or keep it on the phone. If delivery fails, retry from the extension or open Archive later.
+
 ## App Review demo
 
 On the unpaired welcome screen, tap **演示模式 / Demo**. Reviewers can search the sample library, open a record, and save a note or link under **Archive**. Under **Chat**, tap **Ask** to see a quoted answer and open its source. Demo changes are discarded when the demo closes. It does not connect to a computer or call an AI service.
@@ -60,7 +62,7 @@ Each computer keeps its own library and chats. Phone list/chat caches, attachmen
 - A short app switch reuses a working pinned TLS session. After at least 20 seconds in the background (the gateway HTTP idle deadline), the app rebuilds its TLS session, radio relays and service discovery using the saved pairing. It cancels the previous connection attempt and ignores late results from that attempt. A live upload or question is allowed to finish before the pending rebuild; queued captures remain on the phone.
 - Reopening the app starts discovery and reconnects with the saved credentials. A working transport remains selected during uploads and questions. The mobile gateway reuses its port on restart when available, and refreshes discovery when interfaces change.
 - Pending captures are stored on the phone with data protection, excluded from backup, scoped to the paired server ID and retried on connection. Stable request IDs prevent replayed requests from creating duplicates.
-- Keep the Mac awake and the desktop service running. The first trial does not provide cloud sync, remote access, full offline search, background delivery while the app is closed, system share-sheet extensions, or reminder notifications.
+- Keep the Mac awake and the desktop service running. The first trial does not provide cloud sync, remote access, full offline search, background delivery while the app is closed, or reminder notifications.
 - A locally saved file is not guaranteed to survive deleting the app. Do not uninstall with unsent captures.
 - Removing a phone on the desktop immediately revokes new requests. Turning off phone connection stops discovery and new connections; already running requests may finish.
 
