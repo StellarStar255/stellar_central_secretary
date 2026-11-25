@@ -43,6 +43,11 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
 }};
 context.HTMLDialogElement=class {show(){}showModal(){}};
 vm.createContext(context);for(const file of ['i18n-data.js','i18n.js','drafts.js','model-proxy-ui.js','local-paths.js','app.js'])vm.runInContext(fs.readFileSync('secretary/static/'+file,'utf8'),context);
+context.timetableText='【组合资料概览】图片以缩略图读取。\n\n第9周课程表。周一第3节为实验。周一第6节课程标注“非本周”。周二有自习，具体开始时间未显示。';
+const timetable=vm.runInContext('archiveSummaryText(timetableText)',context);
+assert(timetable.includes('<h4>周一</h4><p>第3节为实验。</p><p>第6节课程标注“非本周”。</p>'));
+assert(timetable.includes('<h4>周二</h4><p>有自习，具体开始时间未显示。</p>'));
+assert(timetable.indexOf('summary-scope')>timetable.indexOf('具体开始时间'));
 const sample='用户：\n解释一下 ETF\n\nChatGPT：\n## 基金\n\n**重点**\n\n1. 第一项\n2. 第二项\n\n```text\n用户：\n<script>alert(1)</script>\n```\n\n用户：\n继续\n\nClaude：\n[原件](https://example.com)';
 context.readerSample=sample;
 assert.equal(vm.runInContext('parseArchivedConversation(readerSample).length',context),4);

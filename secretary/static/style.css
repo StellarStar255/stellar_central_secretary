@@ -237,3 +237,9 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .extracted-heading,.extracted-document .bundle-page{margin:1em 0 .35em;font-size:1em}
 .invoice-product{margin-top:.55em;white-space:pre-wrap}
 .invoice-total{margin-top:.6em;font-weight:600;white-space:pre-wrap}
+
+#detail-dialog .archive-summary-reading{max-height:none;overflow:visible;white-space:normal;background:transparent;padding:0;line-height:1.6;overflow-wrap:anywhere;font-size:calc(.95rem * var(--content-font-scale,1))}
+.archive-summary-reading p,.archive-summary-reading ul,.archive-summary-reading ol{max-width:72ch;margin:.4em 0 .65em}
+.archive-summary-reading h4{margin:1em 0 .3em;font-size:1em}
+.archive-summary-reading .summary-scope,.archive-vision-reading summary{color:var(--muted);font-size:.9em}
+.archive-vision-reading summary{cursor:pointer;padding:.4em 0}
