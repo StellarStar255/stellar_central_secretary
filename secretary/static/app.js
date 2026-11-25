@@ -429,7 +429,7 @@ async function refreshNow(){
  let changed=false;
  for(const chat of conversations.filter(chat=>chat.id===activeId))for(const m of chat.messages){
   if(m.role==='assistant'&&!m.pending&&m.archiveOnly&&m.items?.length&&m.items.every(id=>allItems.some(item=>item.id===id))){
-   const text=m.items.map(id=>allItems.find(i=>i.id===id)).filter(Boolean).map(item=>archiveReply({item,created:true})).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
+   const text=m.items.map(id=>allItems.find(i=>i.id===id)).filter(Boolean).map(item=>archiveReply({item,created:!m.reusedItemIds?.includes(item.id),updated:false})).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
    if(text&&text!==m.text){m.text=text;chat.updated=Date.now();changed=true}
   }
  }
@@ -758,6 +758,7 @@ async function confirmLogin(id){
 }
 
 function archiveReply(result){const i=result.item;
+ if(result.created===false&&result.updated===false)return t('这份资料已经在知识库里了，可以直接打开查看。');
  if(i.local_path_target)return t('本地位置已保存，双击卡片可打开。');
  if(i.kind==='note'&&i.user_context?.startsWith('【日期解析】')&&!i.summary)return t('已归档：')+'\n\n'+i.user_context.split('\n').slice(2).join('\n');
  if(i.state==='saved')return t('已归档并建立搜索索引，未调用 AI；需要时可在资料详情中点击「重新整理」。');
@@ -1027,6 +1028,7 @@ $('#composer-form').onsubmit=async event=>{
    const attachments=[];for(const file of files)attachments.push(await StellarUploads.encode(file,(name,percent)=>{$('#composer-status').textContent=t('正在上传：')+name+' '+percent+'%'}));
    const result=await api('/api/ingest',{text,attachments,links:urls,defer_summary:asking||archiveOnly,archive_only:archiveOnly});await StellarUploads.cleanup(attachments);results.push(result);response.items.push(result.item.id);
    updateMessage(chat,userMessage,{images:(result.item.attachments||[]).filter(file=>file.media.startsWith('image/')).map(file=>({item_id:result.item.id,id:file.id,name:file.name}))});
+   if(result.created===false&&result.updated===false)response.reusedItemIds=[result.item.id];
    await refresh();response.archiveOnly=!asking;
    let answer=archiveReply(result);
    if(asking){if(urls.length){updateMessage(chat,response,{text:t('链接已归为一档，正在读取可访问的来源…')});const deadline=Date.now()+180000;while(Date.now()<deadline){const item=await api('/api/items/'+result.item.id);if(!item.append_busy)break;await new Promise(resolve=>setTimeout(resolve,500))}if((await api('/api/items/'+result.item.id)).append_busy)throw Error(t('链接仍在后台读取，资料已保存，可稍后在归档中查看。'))}updateMessage(chat,response,{text:t('已归档，正在结合本次文字与附件回答…')});const data=await api('/api/ask',{question:groupQuestion||t('请概览本次链接、图片和附件'),item_ids:[result.item.id]});answer=data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
@@ -1038,6 +1040,7 @@ $('#composer-form').onsubmit=async event=>{
   await refresh();
   // Commands and declarative text are notes; explicit questions use retrieval.
   const shouldAsk=!archiveOnly&&mode!=='note'&&text&&(mode==='ask'||!urls.length&&!files.length||/[?？]|总结|分析|比较|查找|找一下|哪些|什么|如何|\b(?:summari[sz]e|analy[sz]e|compare|find|which|what|how|why)\b/i.test(remaining));
+  response.reusedItemIds=results.filter(result=>result.created===false&&result.updated===false).map(result=>result.item.id);
   response.archiveOnly=!shouldAsk&&results.length>0&&!errors.length;
   let answer=results.map(archiveReply).filter((v,i,a)=>a.indexOf(v)===i).join('\n\n');
   if(shouldAsk){updateMessage(chat,response,{text:(answer?answer+'\n\n':'')+t('正在检索知识库，整理答案…')});const data=await api('/api/ask',{question:remaining||text});answer+=(answer?'\n\n':'')+data.answer;response.sources=data.sources;response.answerEvidence=data.answer_evidence}
@@ -1221,7 +1224,7 @@ window.addEventListener('message',event=>{
  $('#first-run-tutorial').close();
 });
 document.addEventListener('visibilitychange',()=>void openFirstRunTutorial().catch(()=>{}));
-(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。')m.archiveOnly=true;if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));await openFirstRunTutorial();await openLinkedMemory();scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
+(async()=>{for(const c of conversations)for(const m of c.messages||[]){if(m.text==='这份资料已经在知识库里了，可以直接打开查看。'&&m.items?.length===1){m.archiveOnly=true;m.reusedItemIds=m.items;}if(m.pending&&!m.requestId){m.pending=false;m.error=true;m.text=t('上次请求因页面关闭而中断。归档资料可在知识库中查看；提问请重新发送。')}}renderSidebar();renderChat();updateSend();try{await loadStatus();try{await loadSharedChats();resumeQuestionJobs()}catch(e){toast(t('对话同步未完成，已保留浏览器记录：')+e.message)}updateModelLabel();await refresh();await globalThis.StellarOpenPanel(new URLSearchParams(globalThis.location?.search||'').get('panel'));await openFirstRunTutorial();await openLinkedMemory();scheduleArchivePoll(activeWork?1000:10000)}catch(e){toast(t('无法连接本地服务：')+e.message)}})();
 
 let updateTimer;
 function renderUpdate(s){

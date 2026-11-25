@@ -32,6 +32,7 @@ const context={URL,AbortController,console,crypto:require('crypto').webcrypto,se
  else if(path.startsWith('/api/items/')&&options?.method==='POST'){archive.find(i=>i.id===path.split('/').pop()).state='processing';data={ok:true}}
  else if(path.startsWith('/api/items'))data=archive;
  else if(path==='/api/dashboard')data={items:archive,total:archive.length,categories:[...new Set(archive.map(item=>item.category))]};
+ else if(path==='/api/ingest'&&body.url&&archive.some(item=>item.url===body.url)){data={created:false,updated:false,item:archive.find(item=>item.url===body.url)}}
  else if(path==='/api/ingest'){const item={id:'a'+archive.length,title:body.url||'笔记',url:body.url||'',kind:body.url?'link':'note',category:'未分类',state:'pending',text:body.text||'',summary:'',tags:[],created:new Date().toISOString()};archive.push(item);data={created:true,item}}
  else if(path==='/api/conversations')data=body||{conversations:[],activeId:''};
  else if(path==='/api/proxy/check')data={ok:true,message:'代理端口可以连接'};
@@ -177,6 +178,9 @@ async function flush(){for(let i=0;i<12;i++)await new Promise(r=>setImmediate(r)
   const ingests=calls.slice(before).filter(call=>call.path==='/api/ingest');
   assert.deepEqual(ingests.map(call=>call.body),[{url:bareLink,context:'',archive_only:archiveOnly}]);
   assert.equal(elements.get('#input-mode').value,'library');
+  const existing=archive.find(item=>item.url===bareLink);
+  if(!archiveOnly){existing.summary='已有摘要';existing.state='ready'}
+  else {assert.equal(archive.filter(item=>item.url===bareLink).length,1);assert(elements.get('#messages').innerHTML.includes('这份资料已经在知识库里了，可以直接打开查看。'))}
  }
  assert.equal(countAsk(),asksBeforeLinks);
  elements.get('#archive-only').checked=false;
