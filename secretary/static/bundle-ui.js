@@ -22,10 +22,8 @@
     return '<div class="invoice-line">'+esc(line)+'</div>';
    }).join('')+'</div>';
   }
-  if(/\.(?:md|markdown|txt)$/i.test(name)&&text.includes('|')){
-   const formatted=archiveTableText(text);
-   if(formatted.includes('<table>'))return formatted;
-  }
+  if(/\.(?:md|markdown)$/i.test(name))return archiveReadingText(text,true);
+  if(/\.txt$/i.test(name)&&/(?:\*\*[^*\n]+\*\*|^ {0,3}#{1,6}\s|^\s*\|?\s*:?-{3,}:?\s*\|)/m.test(text))return archiveReadingText(text,true);
   const blocks=[];
   let lines=[],fence=null;
   function flush(){

@@ -261,6 +261,7 @@ const inputUrl='https://chatgpt.com/c/test';
 const markdownTable=vm.runInContext('readerMarkdown("| 需求 | 普通基金 | ETF |\\n| --- | --- | --- |\\n| **定投** | 更方便 | 取决于券商 |")',context);
 assert(markdownTable.includes('<table>')&&markdownTable.includes('<th scope="col">需求</th>')&&markdownTable.includes('<strong>定投</strong>'));
 assert(vm.runInContext('readerMarkdown("需求\\t普通基金\\tETF\\n定投\\t更方便\\t券商功能")',context).includes('<table>'));
+assert.equal(vm.runInContext('readerInline("*斜体*、~~旧文~~、__粗体__ 和 file_name_id")',context),'<em>斜体</em>、<del>旧文</del>、<strong>粗体</strong> 和 file_name_id');
 const chartFixture={version:1,background:'#111',tree:{tag:'svg',attrs:{viewBox:'0 0 600 240',width:600,height:240},children:[{tag:'path',attrs:{d:'M0 100 L300 50 L600 10',stroke:'#e99a65','stroke-width':2},children:[]},{tag:'text',attrs:{x:20,y:200,fill:'white'},text:'2018 <标签>',children:[]}]}};
 context.chartFixture=chartFixture;
 const chartMarkup=vm.runInContext('readerMarkdown("```stellar-chart\\n"+JSON.stringify(chartFixture)+"\\n```")',context);

@@ -2,12 +2,14 @@ const {t,ui}=globalThis.StellarI18n;
 /* Local, escaped rendering only: archived HTML is never inserted as markup. */
 const readerEscape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function readerInline(text){
- const pattern=/(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+ const pattern=/(`[^`\n]+`|\*\*[^*\n]+\*\*|(?<!\w)__[^_\n]+__(?!\w)|(?<!\*)\*(?![\s*])[^*\n]*?(?<!\s)\*(?!\*)|(?<![\w_])_(?![\s_])[^_\n]*?(?<!\s)_(?![\w_])|~~[^~\n]+~~|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
  let html='',offset=0;
  for(const match of text.matchAll(pattern)){
   html+=readerEscape(text.slice(offset,match.index));const token=match[0];
   if(token.startsWith('`'))html+='<code>'+readerEscape(token.slice(1,-1))+'</code>';
-  else if(token.startsWith('**'))html+='<strong>'+readerEscape(token.slice(2,-2))+'</strong>';
+  else if(token.startsWith('**')||token.startsWith('__'))html+='<strong>'+readerEscape(token.slice(2,-2))+'</strong>';
+  else if(token.startsWith('~~'))html+='<del>'+readerEscape(token.slice(2,-2))+'</del>';
+  else if(token.startsWith('*')||token.startsWith('_'))html+='<em>'+readerEscape(token.slice(1,-1))+'</em>';
   else{const split=token.indexOf('](');html+='<a target="_blank" rel="noopener noreferrer" href="'+readerEscape(token.slice(split+2,-1))+'">'+readerEscape(token.slice(1,split))+'</a>'}
   offset=match.index+token.length;
  }
@@ -60,37 +62,25 @@ function archiveTableMarkup(table,lines,start){
  const source=lines.slice(start,table.end+1).join('\n');
  return '<div class="archive-table">'+table.html+'<button type="button" class="secondary" data-copy-table="'+readerEscape(source)+'">'+readerEscape(t('复制 Markdown'))+'</button></div>';
 }
-function archiveTableText(text){
- if(!text.includes('|'))return readerEscape(text);
- const lines=text.split(/\r\n?|\n/),blocks=[];
- let plainStart=0,fence='';
- for(let i=0;i<lines.length;i++){
-  const marker=lines[i].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-  if(marker){
-   if(!fence)fence=marker[1];
-   else if(marker[1].startsWith(fence)&&!marker[2].trim())fence='';
-   continue;
-  }
-  if(fence)continue;
-  const table=readPipeTable(lines,i);
-  if(!table)continue;
-  blocks.push(readerEscape(lines.slice(plainStart,i).join('\n')));
-  blocks.push(archiveTableMarkup(table,lines,i));
-  i=table.end;plainStart=i+1;
- }
- if(!blocks.length)return readerEscape(text);
- blocks.push(readerEscape(lines.slice(plainStart).join('\n')));
- return blocks.join('');
+function archiveReadingText(text,preserveFences=false){
+ return '<div class="reader-prose archive-markdown">'+readerMarkdown(text,true,preserveFences)+'</div>';
 }
-function readerMarkdown(text,archived=false){
+function readerMarkdown(text,archived=false,preserveFences=false){
  const lines=text.replace(/\r\n?/g,'\n').split('\n');let html='',paragraph=[],list=null;
  const flushParagraph=()=>{if(paragraph.length){html+='<p>'+paragraph.map(readerInline).join('<br>')+'</p>';paragraph=[]}};
  const closeList=()=>{if(list){html+='</'+list+'>';list=null}};
  for(let i=0;i<lines.length;i++){
   const line=lines[i];
-  if(/^\s*```/.test(line)){
+  const fence=line.match(/^ {0,3}(`{3,}|~{3,})/);
+  if(fence){
    flushParagraph();closeList();const code=[];
-   while(++i<lines.length&&!/^\s*```/.test(lines[i]))code.push(lines[i]);
+   const closing=new RegExp('^ {0,3}'+fence[1][0]+'{'+fence[1].length+',}\\s*$');
+   while(++i<lines.length&&!closing.test(lines[i]))code.push(lines[i]);
+   if(preserveFences){
+    const literal=[line,...code];
+    if(i<lines.length)literal.push(lines[i]);
+    html+='<pre class="source-verbatim">'+readerEscape(literal.join('\n'))+'</pre>';continue;
+   }
    html+=line.trim()==='```stellar-chart'?readerChart(code.join('\n')):'<pre><code>'+readerEscape(code.join('\n'))+'</code></pre>';continue;
   }
   const table=readPipeTable(lines,i);
@@ -106,7 +96,7 @@ function readerMarkdown(text,archived=false){
   const heading=line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
   if(heading){flushParagraph();closeList();const level=Math.min(heading[1].length+1,6);html+=`<h${level}>${readerInline(heading[2])}</h${level}>`;continue}
   if(/^\s*(?:---+|\*\*\*+)\s*$/.test(line)){flushParagraph();closeList();html+='<hr>';continue}
-  const bullet=line.match(/^\s*(?:([-*+])\s+|\d+[.．、)]\s*)(.+)$/);
+  const bullet=line.match(/^\s*(?:([-*+])\s+|\d+[.．、)]\s+)(.+)$/);
   if(bullet){flushParagraph();const type=bullet[1]?'ul':'ol';if(list!==type){closeList();html+='<'+type+'>';list=type}html+='<li>'+readerInline(bullet[2])+'</li>';continue}
   if(/^\s*>\s?/.test(line)){flushParagraph();closeList();html+='<blockquote>'+readerInline(line.replace(/^\s*>\s?/,''))+'</blockquote>';continue}
   closeList();paragraph.push(line);
@@ -159,8 +149,8 @@ function renderArchivedBody(item){
  if(item.bundle_body)return StellarBundles.renderBody(item);
  if(item.kind==='file' && item.text && item.filename && !item.bundle_error && !item.filename.endsWith('.stellar.zip'))return StellarBundles.fileBody(item);
  const text=item.text||'',turns=item.kind==='file'||item.kind==='note'?[]:parseArchivedConversation(text);
- if(!turns.length)return ui`<h3>正文 <span class="muted">${text.length.toLocaleString()} 字符</span></h3><div class="detail-text archived-body">${archiveTableText(text||t('还没有正文。点击「补充 / 编辑正文」，或使用浏览器采集扩展。'))}</div>`;
- return ui`<section class="archive-conversation archived-body" aria-label="已归档的对话"><div class="reader-heading"><h3>会话记录</h3><span>${turns.length} 条消息 · 点击角色可收起</span></div>${turns.map((turn,index)=>`<details class="reader-turn reader-${turn.role}" open><summary><span class="reader-avatar" aria-hidden="true">${turn.role==='user'?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.2"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>':'✳'}</span><span>${readerEscape(turn.label)}</span><span class="reader-turn-number">${String(index+1).padStart(2,'0')}</span><span class="reader-chevron" aria-hidden="true">⌄</span></summary><div class="reader-message ${turn.role==='assistant'?'reader-prose':''}">${turn.role==='user'?archiveTableText(turn.text):readerMarkdown(turn.text,true)}</div></details>`).join('')}<details class="reader-original"><summary>查看原始文本 · ${text.length.toLocaleString()} 字符</summary><div>${readerEscape(text)}</div></details></section>`;
+ if(!turns.length)return ui`<h3>正文 <span class="muted">${text.length.toLocaleString()} 字符</span></h3><div class="detail-text archived-body">${archiveReadingText(text||t('还没有正文。点击「补充 / 编辑正文」，或使用浏览器采集扩展。'))}</div>`;
+ return ui`<section class="archive-conversation archived-body" aria-label="已归档的对话"><div class="reader-heading"><h3>会话记录</h3><span>${turns.length} 条消息 · 点击角色可收起</span></div>${turns.map((turn,index)=>`<details class="reader-turn reader-${turn.role}" open><summary><span class="reader-avatar" aria-hidden="true">${turn.role==='user'?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.2"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>':'✳'}</span><span>${readerEscape(turn.label)}</span><span class="reader-turn-number">${String(index+1).padStart(2,'0')}</span><span class="reader-chevron" aria-hidden="true">⌄</span></summary><div class="reader-message ${turn.role==='assistant'?'reader-prose':''}">${turn.role==='user'?archiveReadingText(turn.text):readerMarkdown(turn.text,true)}</div></details>`).join('')}<details class="reader-original"><summary>查看原始文本 · ${text.length.toLocaleString()} 字符</summary><div>${readerEscape(text)}</div></details></section>`;
 }
 
 const $ = s => document.querySelector(s);
