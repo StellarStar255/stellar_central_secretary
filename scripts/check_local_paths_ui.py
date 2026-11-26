@@ -2,10 +2,10 @@
 import os, sys, tempfile, threading, subprocess
 from types import SimpleNamespace
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch, Mock
 from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service, handler
 from secretary import local_paths
 
@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as root:
     service.archive.update(item, summary='Preserved summary', state='ready')
     before = service.archive.get(item)
     conversation, _ = service.archive.add('Conversation paths', f'用户：\n{folder}\n\n助手：\n位置是 `{folder}`', url='https://example.com/conversation')
-    server = ThreadingHTTPServer(('127.0.0.1', 0), handler(service))
+    server = LocalHTTPServer(('127.0.0.1', 0), handler(service))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         run = Mock()
@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory() as root:
                 page.locator(f'#recent-items [data-id="{item}"]').click()
                 paths = page.locator('.archived-body .local-path')
                 expect(paths).to_have_count(3)
-                expect(page.locator('.archived-body')).to_have_text(text)
+                assert page.locator('.archived-body').inner_text() == text, 'Displayed paths and line breaks must match the archive'
                 paths.nth(0).click()
                 assert run.call_count == 0 and launch.call_count == 0, 'A single click must not open anything'
                 paths.nth(0).dblclick()
