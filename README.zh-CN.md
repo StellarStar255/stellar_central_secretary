@@ -2,9 +2,9 @@
 
 [English](README.md) · **简体中文**
 
-版本 **v0.1.158** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.158.md)
+版本 **v0.1.159** · [MIT License](LICENSE) · [发布说明](docs/releases/v0.1.159.md)
 
-**macOS 安装包已使用 Developer ID 签名，并通过 Apple 公证。** [下载 Mac 版](https://github.com/StellarStar255/stellar_central_secretary/releases/tag/v0.1.158)
+**macOS 安装包已使用 Developer ID 签名，并通过 Apple 公证。** [下载 Mac 版](https://github.com/StellarStar255/stellar_central_secretary/releases/tag/v0.1.159)
 
 HEIC/HEIF 照片支持本地缩略图、应用内查看和视觉总结（需支持图片输入的模型）。原件完整保留，预览和分析使用本地生成的兼容 JPEG；已入库附件无需重新上传，旧摘要可通过“重新总结”更新图片内容。
 

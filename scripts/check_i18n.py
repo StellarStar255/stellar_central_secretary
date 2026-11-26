@@ -1,9 +1,9 @@
 """Validate display-language changes, data isolation and both tutorial languages."""
 import os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from playwright.sync_api import sync_playwright,expect
 ROOT=Path(__file__).resolve().parent.parent;sys.path.insert(0,str(ROOT))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 
 with tempfile.TemporaryDirectory() as temp:
@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as temp:
  item,_=service.archive.add('知识库','这段原文叫模型与设置，必须保持原样。')
  service.archive.update(item,summary='保留这段中文摘要',tags=['中文标签'],state='ready')
  before=service.archive.export()
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with sync_playwright() as p:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)

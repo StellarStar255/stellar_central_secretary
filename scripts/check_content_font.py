@@ -1,8 +1,8 @@
 """Real keyboard shortcuts must resize content, never browser chrome or controls."""
 import os,sys,tempfile,threading,time
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
 
@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as temp:
  item,_=service.archive.add('Synthetic record','Original saved body. '*30)
  service.archive.update(item,summary='Synthetic saved summary.',state='ready');before=service.archive.get(item)
  service.chat_history({'conversations':[{'id':'example','title':'Synthetic conversation','updated':1,'messages':[{'id':'message','role':'assistant','text':'Synthetic discussion text for content-only resizing.'}]}],'activeId':'example'})
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with sync_playwright() as pw:
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
@@ -38,11 +38,12 @@ with tempfile.TemporaryDirectory() as temp:
     except Exception:
      print({'writes':writes,'saved':service.archive.settings()['content_font_scale'],'client':page.evaluate('({css:document.documentElement.style.getPropertyValue("--content-font-scale"),cached:localStorage.getItem("stellar.content-font-scale"),value:contentFontScale,pending:contentFontChanging,revision:contentFontRevision})'),'errors':errors});raise
     assert abs(pixels('.message-body')-baseline*1.1)<.01,(pixels('.message-body'),baseline)
-    page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click()
-    assert abs(pixels('#detail-dialog .detail-text')-13*1.1)<.01
+    page.locator('#library-open').click();page.locator('#items .library-row[data-id="'+item+'"]').click();page.locator('#preview-full').click()
+    expect(page.locator('#detail-dialog .archived-body')).to_be_visible()
+    assert abs(pixels('#detail-dialog .archived-body .archive-markdown p')-13*1.1)<.01
     action=pixels('#edit-content');page.keyboard.press('Meta+Equal');saved(120)
-    assert abs(pixels('#detail-dialog .detail-text')-13*1.2)<.01 and pixels('#edit-content')==action
-    page.keyboard.press('Meta+Digit0');saved(100);assert abs(pixels('#detail-dialog .detail-text')-13)<.01
+    assert abs(pixels('#detail-dialog .archived-body .archive-markdown p')-13*1.2)<.01 and pixels('#edit-content')==action
+    page.keyboard.press('Meta+Digit0');saved(100);assert abs(pixels('#detail-dialog .archived-body .archive-markdown p')-13)<.01
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click()
     page.locator('#message-input').fill('Unsent draft');page.keyboard.press('Shift+Equal');assert service.archive.settings()['content_font_scale']==100
     assert page.locator('#message-input').input_value().endswith('+'),'plain + must remain a typing key'
@@ -55,7 +56,8 @@ with tempfile.TemporaryDirectory() as temp:
     for _ in range(20):page.keyboard.press('Meta+Minus')
     saved(70);assert abs(pixels('.message-body')-baseline*.7)<.01
     page.keyboard.press('Meta+Digit0');saved(100)
-    assert service.archive.get(item)==before and not errors,errors
+    after=service.archive.get(item);assert after['last_viewed']
+    assert {**after,'last_viewed':before['last_viewed']}==before and not errors,errors
     print('PASS: real Cmd + / = / - / 0 and Ctrl alternative; content-only resizing in chat and detail; unchanged controls/composer/browser zoom; persistence; plain typing; rollback; bounds; source preserved')
    finally:browser.close()
  finally:server.shutdown();server.server_close();service.close()
