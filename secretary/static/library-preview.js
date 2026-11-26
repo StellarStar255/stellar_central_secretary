@@ -47,7 +47,7 @@
  }
  function sync(values){items=values;if(selected&&!items.some(item=>item.id===selected)){clear();return}markSelection();if(editing)return;const current=items.find(item=>item.id===selected);if(current&&((!cached&&loadingId!==selected)||(cached&&cached.updated!==current.updated))){cached=null;void select(selected,false)}}
  function bind(options){({api,toast,openDetails,openOriginal,link,describe,onSaved}=options);clear();$('#preview-close').onclick=()=>{clear();$('#search').focus()};$('#preview-trash').onclick=()=>selected&&StellarArchiveActions.trash(selected);$('#preview-full').onclick=()=>selected&&openDetails(selected);
-  $('#preview-content').ondblclick=event=>{
+  $('#library-preview').ondblclick=event=>{
    if(!selected||!cached||$('#preview-full').disabled)return;
    if(event.target.closest('button,a,input,textarea,select,summary,details,[role="button"],[contenteditable]'))return;
    event.preventDefault();event.stopPropagation();

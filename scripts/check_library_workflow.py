@@ -58,6 +58,11 @@ with tempfile.TemporaryDirectory() as folder:
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
     expect(page.locator('#edit-title')).to_contain_text('Robot camera source');page.locator('#detail-dialog .dialog-head button').click()
     page.locator('#preview-summary').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();page.locator('#detail-dialog .dialog-head button').click()
+    # The panel gutter is outside the scrolling preview content.
+    page.locator('#library-preview').dblclick(position={'x':5,'y':80})
+    expect(page.locator('#edit-title')).to_contain_text('Robot camera source')
+    expect(page.locator('#detail-dialog')).to_be_visible()
+    page.locator('#detail-dialog .dialog-head button').click()
     before_rename=service.archive.get(linked)
     page.locator('#preview-title').dblclick();expect(page.locator('#preview-title-input')).to_have_value('Robot camera source');expect(page.locator('#detail-dialog')).not_to_be_visible()
     page.locator('#preview-title-input').fill('Uncommitted draft');page.evaluate('refresh()');expect(page.locator('#preview-title-input')).to_have_value('Uncommitted draft')
