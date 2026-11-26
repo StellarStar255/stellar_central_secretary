@@ -1,16 +1,16 @@
 """Exercise quick-note autosave and compatibility with existing note images."""
 import base64,io,os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
 stream=io.BytesIO();Image.new('RGB',(12,12),'#77aacc').save(stream,format='PNG');encoded=base64.b64encode(stream.getvalue()).decode()
 with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False);item,_=service.archive.add('Fixture','Original body.')
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch.object(service,'queue') as queue,patch('secretary.attachment_editor.launch') as launch,sync_playwright() as pw:
    browser=pw.chromium.launch(headless=True,**({'executable_path':os.environ.get('CHROME_PATH') or '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'} if os.environ.get('CHROME_PATH') or sys.platform=='darwin' else {}))
@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory() as root:
     page.locator('[data-viewer="zoom"]').click();expect(page.locator('[data-viewer="zoom"]')).to_have_text('100%')
     page.screenshot(path='/tmp/secretary-image-viewer.png');page.keyboard.press('Escape');assert launch.call_count==0
     service.archive.update(item,summary='AI-generated summary',tags=['AI tag']);page.evaluate('refresh()');expect(page.locator('#note-text')).to_have_value(saved['note'])
-    page.reload();page.locator('#library-open').click();page.locator('#search').fill('PersonalMemoUnique');expect(page.locator('#items .library-row')).to_have_count(1);page.locator('#items [data-id="'+item+'"]').click();page.locator('#preview-full').click();expect(page.locator('#note-images img')).to_have_count(2)
+    page.reload();page.locator('#library-open').click();page.locator('#search').fill('PersonalMemoUnique');expect(page.locator('#items mark').first).to_have_text('PersonalMemoUnique');expect(page.locator('#items .library-row')).to_have_count(1);page.locator('#items [data-id="'+item+'"]').click();page.locator('#preview-full').click();expect(page.locator('#note-images img')).to_have_count(2)
     page.wait_for_function("()=>document.querySelector('#note-images img')?.naturalWidth>0");page.screenshot(path='/tmp/secretary-quick-notes-zh.png');page.locator('[data-note-remove]').first.click();expect(page.locator('#note-images img')).to_have_count(1);expect(page.locator('#note-status')).to_have_text('已保存');page.locator('[data-note-remove]').click();expect(page.locator('#note-images img')).to_have_count(0);expect(page.locator('#note-status')).to_have_text('已保存');assert not service.archive.get(item)['note_images']
     page.locator('#detail-dialog .dialog-head button').click();page.locator('#library-dialog .dialog-head button').click();page.locator('#settings-open').click();page.locator('#ui-language').select_option('en');expect(page.locator('html')).to_have_attribute('lang','en');page.locator('#settings-dialog .dialog-head button').click();page.locator('#library-open').click();page.locator('#items [data-id="'+item+'"]').click();page.locator('#preview-full').click()
     expect(page.locator('.quick-note h3')).to_have_text('My quick notes');expect(page.locator('#note-status')).to_have_text('Saved');expect(page.locator('#note-save')).to_have_text('Save notes');assert not errors,errors;queue.assert_not_called()

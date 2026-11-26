@@ -79,6 +79,44 @@ with tempfile.TemporaryDirectory() as folder:
     expect(body.locator('blockquote')).to_have_text('引用')
     expect(body.locator('pre code')).to_have_text('**原样代码**')
     expect(page.locator('#detail-content table th').first).to_have_text('实际场景')
+    dialog=page.locator('#detail-dialog')
+    toggle=page.locator('#detail-reader-toggle')
+    normal=dialog.bounding_box()
+    position=dialog.evaluate('el=>{el.scrollTop=150;return el.scrollTop}')
+    assert position>0
+    for exit_by in ('Escape','button'):
+     toggle.click()
+     expect(toggle).to_have_attribute('aria-expanded','true')
+     screen=dialog.bounding_box()
+     assert screen['width']==1440 and screen['height']==1000,screen
+     expect(page.locator('#note-text')).to_be_hidden()
+     expect(page.locator('.reader-item-title')).to_have_text('Robot camera source')
+     expect(body.locator('table')).to_be_visible()
+     reader_edit=page.locator('#detail-reader-edit')
+     reader_scroll=dialog.evaluate('el=>{el.scrollTop=90;return el.scrollTop}')
+     reader_edit.click()
+     field=page.locator('#detail-edit')
+     expect(field).to_have_value(archive_text)
+     expect(page.locator('#detail-title')).to_have_value('Robot camera source')
+     field.fill(archive_text+'\n\n**全屏编辑验证**')
+     if exit_by=='Escape':
+      page.keyboard.press('Escape')
+      assert service.archive.get(linked)['text']==archive_text
+     else:
+      page.locator('#save-body-only').click()
+      expect(body.locator('strong').last).to_have_text('全屏编辑验证')
+      assert service.archive.get(linked)['text'].endswith('**全屏编辑验证**')
+      reader_edit.click()
+      field.fill(archive_text)
+      page.locator('#save-body-only').click()
+     expect(field).to_have_count(0)
+     expect(toggle).to_have_attribute('aria-expanded','true')
+     assert abs(dialog.evaluate('el=>el.scrollTop')-reader_scroll)<=1
+     if exit_by=='Escape':page.keyboard.press('Escape')
+     else:toggle.click()
+     expect(toggle).to_have_attribute('aria-expanded','false')
+     assert dialog.bounding_box()==normal and abs(dialog.evaluate('el=>el.scrollTop')-position)<=1
+     expect(page.locator('#note-text')).to_be_visible()
     page.locator('#edit-content').click()
     expect(page.locator('#detail-edit')).to_have_value(archive_text)
     expect(page.locator('#edit-title')).to_contain_text('Robot camera source');page.locator('#detail-dialog .dialog-head button').click()

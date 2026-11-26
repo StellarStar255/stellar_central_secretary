@@ -1145,6 +1145,28 @@ function canRefreshDetail(id){
   (!$('#tag-editor')||$('#tag-editor').hidden)&&!StellarNotes.isDirty(id)&&!globalThis.StellarAttachmentOrder?.isBusy(id));
 }
 let detailRequestRevision=0;
+let detailReadingPosition=null;
+function setDetailReading(expanded){
+ const dialog=$('#detail-dialog'),button=$('#detail-reader-toggle'),body=dialog.querySelector('.archived-body');
+ if(expanded===Boolean(detailReadingPosition))return;
+ if(expanded){
+  detailReadingPosition={dialog:dialog.scrollTop,body:body?.scrollTop||0};
+  dialog.classList.add('expanded-reading');
+  dialog.scrollTop=0;
+ }else{
+  dialog.classList.remove('expanded-reading');
+  if(body)body.scrollTop=detailReadingPosition.body;
+  dialog.scrollTop=detailReadingPosition.dialog;
+  detailReadingPosition=null;
+ }
+ button.setAttribute('aria-expanded',String(expanded));
+}
+$('#detail-reader-edit').onclick=()=>$('#edit-content').click();
+$('#detail-reader-toggle').onclick=()=>setDetailReading(!detailReadingPosition);
+$('#detail-dialog').addEventListener('cancel',event=>{
+ if(detailReadingPosition){event.preventDefault();setDetailReading(false);$('#detail-reader-toggle').focus({preventScroll:true})}
+});
+$('#detail-dialog').addEventListener('close',()=>setDetailReading(false));
 async function detail(id,recordView=false,background=false){
  const revision=++detailRequestRevision;
  if(selectedId!==id&&!StellarDrafts.isFlushing()&&!await StellarDrafts.flush())return;
@@ -1154,8 +1176,9 @@ async function detail(id,recordView=false,background=false){
  if(recordView)void api('/api/items/'+id+'/view',{}).catch(()=>{});
  const visionOpen=selectedId===id&&$('#detail-dialog').open?$('.archive-vision-reading')?.open:undefined;
  const restoreReading=selectedId===id&&$('#detail-dialog').open?globalThis.StellarBundles?.preserveReading($('#detail-dialog')):null;
+ if(selectedId!==id)setDetailReading(false);
  selectedId=id;detailVersion=item.updated;
- $('#detail-content').innerHTML=ui`<h1><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="open">默认程序打开</button>`:""}${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="reveal">在文件夹中显示</button>${item.file_editing?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="save" ${item.append_busy?'disabled':''}>保存修改回归档</button>`:''}`:''}<button class="secondary" id="append-material" ${item.append_busy?'disabled':''}>追加资料</button><button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.can_open_file&&item.file_editing?ui`<p class="muted">先在外部程序保存，再点击保存修改回归档。修改前版本保留在本机，摘要不会自动重跑。</p>`:''}${StellarBundles.renderAll(item)}${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render({...item,attachments:[]}):''}${item.user_context?ui`<h3>你的链接说明</h3><div id="link-context" class="detail-text">${esc(item.user_context)}</div>`:''}${StellarNotes.render(item)}${globalThis.StellarCompanyAI?StellarCompanyAI.render(item):''}<div id="detail-summary-progress" class="summary-progress">${summaryProgress(item)}</div><h3>资料摘要</h3><div class="detail-text archive-summary-reading">${archiveSummaryText(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${globalThis.StellarPDF?.sources(item)||''}${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><details class="archive-vision-reading" ${(visionOpen??(item.vision_text.length<=200))?'open':''}><summary>${esc(t('查看图片解读'))}</summary><div class="archive-summary-reading">${archiveSummaryText(item.vision_text)}</div></details>`:''}${renderArchivedBody(item)}${globalThis.StellarAdditions?StellarAdditions.render(item):''}`;
+ $('#detail-content').innerHTML=ui`<h1><span class="reader-item-title">${esc(item.title)}</span><button type="button" id="edit-title" class="detail-title-button" title="点击修改标题" ${item.state==='processing'||isReading(item)?'disabled':''}>${esc(item.title)} <span aria-hidden="true">✎</span></button></h1><form id="title-editor" hidden><label for="rename-title">修改标题</label><input id="rename-title" maxlength="300" required><div class="detail-actions"><button class="primary" id="save-title" type="submit">保存标题</button><button class="secondary" id="cancel-title" type="button">取消</button></div></form><p>${esc(displayCategory(item.category))} · ${date(item.created)} · ${itemState(item)}</p><div class="tags editable-tags" aria-label="资料标签">${item.tags.map((tag,index)=>`<span class="tag"><span>${esc(tag)}</span><button type="button" data-remove-tag="${index}" aria-label="${esc(t('删除标签：')+tag)}" title="${esc(t('删除标签：')+tag)}">×</button></span>`).join('')}<button type="button" id="add-tag" class="tag-add">＋ 添加标签</button></div><form id="tag-editor" hidden><label for="tag-input">新标签</label><div class="tag-entry"><input id="tag-input" maxlength="60" placeholder="输入标签，按 Enter 添加" autocomplete="off"><button type="submit" class="primary" id="save-tag">添加</button><button type="button" class="secondary" id="cancel-tag">取消</button></div><p class="muted">标签参与搜索；手动修改后，重新整理会保留这些标签。</p></form><div class="detail-actions">${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="open">默认程序打开</button>`:""}${item.url?ui`<a class="primary" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">打开原链接 ↗</a><button class="secondary" id="copy-url">复制链接</button>`:''}${item.filename?ui`<a class="secondary" href="/api/items/${id}/file">下载原文件</a><button class="secondary" id="reparse-file" ${item.state==='processing'?'disabled':''}>重新解析原文件</button>`:''}${/\.pdf$/i.test(item.filename||'')?ui`<a class="secondary" id="open-pdf-browser" href="/api/items/${id}/preview" target="_blank" rel="noopener noreferrer">浏览器打开 PDF ↗</a><button class="secondary" id="full-pdf-summary" ${item.state==='processing'?'disabled':''}>生成全文摘要</button>`:''}${item.can_open_file?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="reveal">在文件夹中显示</button>${item.file_editing?ui`<button type="button" class="secondary" data-editor-path="/api/items/${id}/editor" data-editor-action="save" ${item.append_busy?'disabled':''}>保存修改回归档</button>`:''}`:''}<button class="secondary" id="append-material" ${item.append_busy?'disabled':''}>追加资料</button><button class="secondary" id="edit-content">补充 / 编辑正文</button><button class="secondary" id="retry-ai" ${item.state==='processing'||isReading(item)?'disabled':''}>重新整理</button></div>${item.can_open_file&&item.file_editing?ui`<p class="muted">先在外部程序保存，再点击保存修改回归档。修改前版本保留在本机，摘要不会自动重跑。</p>`:''}${StellarBundles.renderAll(item)}${item.error?`<p class="warning">${esc(StellarI18n.message(item.error))}</p>`:''}${captureControls(item)}${globalThis.StellarBundles?StellarBundles.render({...item,attachments:[]}):''}${item.user_context?ui`<h3>你的链接说明</h3><div id="link-context" class="detail-text">${esc(item.user_context)}</div>`:''}${StellarNotes.render(item)}${globalThis.StellarCompanyAI?StellarCompanyAI.render(item):''}<div id="detail-summary-progress" class="summary-progress">${summaryProgress(item)}</div><h3>资料摘要</h3><div class="detail-text archive-summary-reading">${archiveSummaryText(item.summary||t('尚未生成 AI 摘要。正文和原件可独立保存、搜索及下载。'))}</div>${globalThis.StellarPDF?.sources(item)||''}${item.vision_text?ui`<h3>图片解读（AI 生成，请核对原图）</h3><details class="archive-vision-reading" ${(visionOpen??(item.vision_text.length<=200))?'open':''}><summary>${esc(t('查看图片解读'))}</summary><div class="archive-summary-reading">${archiveSummaryText(item.vision_text)}</div></details>`:''}${renderArchivedBody(item)}${globalThis.StellarAdditions?StellarAdditions.render(item):''}`;
  const cancelTitle=()=>{if(typeof titleSaving!=='undefined'&&titleSaving)return;StellarDrafts.cancel($('#title-editor'));$('#title-editor').hidden=true;$('#edit-title').hidden=false;$('#edit-content').disabled=isReading(item);$('#edit-title').focus()};
  globalThis.StellarLocalPaths?.bind($('.archived-body'),item,{api,toast});
  globalThis.StellarCompanyAI?.bind(item,{api,toast,onSaved:()=>detail(id)});
@@ -1191,14 +1214,25 @@ async function detail(id,recordView=false,background=false){
  $('#retry-ai').onclick=()=>busy($('#retry-ai'),async()=>{await api('/api/items/'+id,{});toast(item.text||item.user_context?t('已加入整理队列'):t('请先补充正文'));await refresh()});
  $('#edit-content').disabled=isReading(item);
  $('#edit-content').onclick=()=>{
+  const reading=detailReadingPosition,scroll=$('#detail-dialog').scrollTop;
+  const restorePosition=()=>{
+   if(reading&&reading===detailReadingPosition&&selectedId===id){
+    $('#detail-dialog').scrollTop=scroll;
+    $('#detail-reader-edit').focus({preventScroll:true});
+   }
+  };
   $('#edit-title').disabled=true;const editor=document.createElement('section');editor.id='body-editor';editor.dataset.draftForm='true';
   editor.innerHTML=t('<label>标题<input id="detail-title"></label><label>正文<textarea class="edit-text" id="detail-edit"></textarea></label><button class="primary" id="save-content">保存并重新整理</button><button class="secondary" id="save-body-only">保存正文</button><button class="secondary" id="cancel-body">取消</button>');$('#detail-content').append(editor);
   const title=editor.querySelector('#detail-title'),text=editor.querySelector('#detail-edit');title.value=item.title;text.value=item.text;StellarDrafts.track(title,id+':body-title');StellarDrafts.track(text,id+':body');text.focus();$('#edit-content').disabled=true;let saving=null;
   const saveBody=()=>saving??=(async()=>{StellarDrafts.status(editor,'正在保存…');for(const control of editor.querySelectorAll('input,textarea,button'))control.disabled=true;try{await api('/api/items/'+id,{title:title.value,text:text.value,expected_text:StellarDrafts.base(text),expected_title:StellarDrafts.base(title),defer_summary:true});StellarDrafts.saved(editor);return true}catch(error){StellarDrafts.status(editor,'保存失败：'+error.message,true);toast(error.message);return false}finally{for(const control of editor.querySelectorAll('input,textarea,button'))control.disabled=false;saving=null}})();
   StellarDrafts.register(editor,saveBody);
-  editor.querySelector('#save-body-only').onclick=()=>void saveBody();
-  editor.querySelector('#save-content').onclick=()=>busy($('#save-content'),async()=>{if(await saveBody()){await api('/api/items/'+id,{});await detail(id);await refresh();toast(t('正文已保存并重新索引'))}});
-  const cancel=()=>{if(saving)return;StellarDrafts.cancel(editor);editor.remove();$('#edit-title').disabled=false;$('#edit-content').disabled=false};editor.querySelector('#cancel-body').onclick=cancel;
+  editor.querySelector('#save-body-only').onclick=async()=>{
+   if(await saveBody()&&detailReadingPosition&&selectedId===id&&editor.isConnected){
+    await detail(id);restorePosition();await refresh();
+   }
+  };
+  editor.querySelector('#save-content').onclick=()=>busy($('#save-content'),async()=>{if(await saveBody()){await api('/api/items/'+id,{});await detail(id);restorePosition();await refresh();toast(t('正文已保存并重新索引'))}});
+  const cancel=()=>{if(saving)return;StellarDrafts.cancel(editor);editor.remove();$('#edit-title').disabled=false;$('#edit-content').disabled=false;restorePosition()};editor.querySelector('#cancel-body').onclick=cancel;
   editor.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancel()}});
  };
 
