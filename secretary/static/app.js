@@ -458,6 +458,7 @@ function highlightMatches(value){const text=String(value||''),words=[...new Set(
 function libraryRow(item){const view=libraryPresentation(item);return `<article class="library-result" data-result-id="${item.id}"><button class="library-row" data-id="${item.id}"><span class="file-icon">${item.kind==='file'?'▧':item.kind==='link'?'↗':'✎'}</span><div class="library-info"><strong>${highlightMatches(item.title)}</strong><div class="library-meta"><span>${esc(view.source)}</span><span>${esc(displayCategory(item.category))}</span>${view.partial?`<span class="coverage-badge" title="${esc(view.scope||t('仅整理了部分内容'))}">${t('部分内容')}</span>`:''}</div><p>${highlightMatches(item.search_snippet||view.summary)}</p></div><small class="library-state">${itemState(item)}<br>${date(item.created)}</small></button><div class="source-matches">${(item.source_matches||[]).map(hit=>`<button type="button" class="secondary" data-origin-item="${item.id}" data-origin="${esc(JSON.stringify(hit.origin))}">${esc(hit.origin.name)}${hit.origin.page?' · p.'+hit.origin.page:''}</button>`).join('')}</div><div class="library-flags">${['favorite','pinned'].map(flag=>`<button class="secondary" data-flag="${flag}" data-item="${item.id}" data-active="${Boolean(item[flag])}" aria-pressed="${Boolean(item[flag])}" title="${t(flag==='favorite'?(item[flag]?'取消收藏':'收藏'):(item[flag]?'取消置顶':'置顶'))}">${t(flag==='favorite'?(item[flag]?'★ 已收藏':'☆ 收藏'):(item[flag]?'已置顶':'置顶'))}</button>`).join('')}</div>${view.scope||item.summary_progress?`<details class="library-extra"><summary>${t('采集与处理详情')}</summary>${view.scope?`<p>${esc(view.scope)}</p>`:''}${item.summary_progress?`<div class="summary-progress" data-summary-id="${item.id}"></div>`:''}</details>`:''}</article>`}
 let libraryRequestRevision=0;let lastLibraryMarkup='',libraryOffset=0,libraryQueryKey='',libraryResults=[],lastRenderedLibraryKey='',lastRenderedLibraryOffset=0;
 const libraryFacets={kind:$('#kind-filter'),category:$('#category-filter'),favorite:$('#favorite-filter'),state:$('#state-filter'),days:$('#date-filter')};
+let librarySearchComposing=false;
 const librarySearchHistory=$('#library-search-history')?.replaceChildren?bindLibrarySearchHistory():null;
 function bindLibrarySearchHistory(){
  const input=$('#search'),field=$('#library-search-field'),menu=$('#library-search-history'),
@@ -511,6 +512,7 @@ function bindLibrarySearchHistory(){
   if(previous>=0&&options.children.length)selectOption(Math.min(previous,options.children.length-1));
  }
  function show(all=false){
+  if(librarySearchComposing)return;
   showingAll=all;
   const query=normalize(input.value);
   const words=query.split(' ').filter(Boolean);
@@ -521,21 +523,23 @@ function bindLibrarySearchHistory(){
    if(term.includes(query)||words.every(word=>term.includes(word)))return 2;
    return words.length>1&&words.some(word=>term.includes(word))?1:0;
   };
-  const history=all||!query?recent:recent.filter(score).sort((a,b)=>score(b)-score(a));
-  const matches=history.slice(0,5);
-  if(!all&&query&&query===normalize(lastResult)){
-   for(const title of resultTitles){
-    if(matches.length===5)break;
-    if(score(title)&&!matches.some(value=>normalize(value)===normalize(title)))matches.push(title);
-   }
+  // Stable scoring keeps recent searches first among equally relevant suggestions.
+  const candidates=new Map();
+  function add(value,fromHistory){
+   const key=normalize(value),rank=all||!query?1:score(value);
+   if(rank&&!candidates.has(key))candidates.set(key,{value,rank,fromHistory});
   }
-  const hasTitles=matches.length>Math.min(history.length,5);
-  const heading=t(hasTitles?'搜索建议':'近期搜索');
+  for(const value of recent)add(value,true);
+  if(!all&&query&&query===normalize(lastResult)){
+   for(const title of resultTitles)add(title,false);
+  }
+  const matches=[...candidates.values()].sort((a,b)=>b.rank-a.rank).slice(0,5);
+  const heading=t(matches.some(match=>!match.fromHistory)?'搜索建议':'近期搜索');
   menu.querySelector('.search-history-heading span').textContent=heading;
   options.setAttribute('aria-label',heading);
-  $('#library-search-clear').hidden=!history.length;
+  $('#library-search-clear').hidden=!matches.some(match=>match.fromHistory);
   options.replaceChildren();
-  for(const [index,value] of matches.entries()){
+  for(const [index,{value,fromHistory}] of matches.entries()){
    const option=document.createElement('div');
    option.id='library-search-option-'+index;
    option.setAttribute('role','option');
@@ -555,7 +559,7 @@ function bindLibrarySearchHistory(){
    option.addEventListener('pointerdown',event=>event.preventDefault());
    option.onclick=()=>choose(value);
    option.append(label);
-   if(index<history.length)option.append(removeButton);
+   if(fromHistory)option.append(removeButton);
    options.append(option);
   }
   expanded(matches.length>0);
@@ -567,26 +571,27 @@ function bindLibrarySearchHistory(){
  };
  input.addEventListener('focus',()=>{if(!input.value.trim())show()});
  input.addEventListener('click',()=>{if(menu.hidden){editing=true;show()}});
- input.addEventListener('dblclick',()=>{input.select();dismiss()});
+ input.addEventListener('dblclick',()=>{if(!librarySearchComposing){input.select();dismiss()}});
  function changed(){
   draft=true;submit=false;editing=true;show();
  }
- input.addEventListener('input',event=>{if(!event.isComposing)changed()});
- input.addEventListener('compositionstart',dismiss);
- input.addEventListener('compositionend',changed);
+ input.addEventListener('input',event=>{if(!librarySearchComposing&&!event.isComposing)changed()});
+ input.addEventListener('compositionstart',()=>{librarySearchComposing=true;clearTimeout(searchTimer);dismiss()});
+ input.addEventListener('compositionend',()=>{librarySearchComposing=false;changed()});
  input.addEventListener('blur',commit);
  field.addEventListener('focusout',event=>{if(!field.contains(event.relatedTarget))dismiss()});
- $('#library-dialog').addEventListener('close',()=>{commit();dismiss()});
+ $('#library-dialog').addEventListener('close',()=>{librarySearchComposing=false;commit();dismiss()});
  input.addEventListener('keydown',event=>{
-  if(event.isComposing||event.keyCode===229){event.stopPropagation();return}
+  if(librarySearchComposing||event.isComposing||event.keyCode===229){event.stopPropagation();return}
   if(event.metaKey||event.ctrlKey||event.altKey)return;
   if(event.shiftKey&&['Delete','Backspace'].includes(event.key)&&active>=0&&!menu.hidden&&options.children[active].querySelector('button'))remove(options.children[active].dataset.value);
   else if(event.key==='Enter'&&active>=0&&!menu.hidden)choose(options.children[active].dataset.value);
   else if(event.key==='Enter'){
    dismiss();
-   if(!draft||input.value.trim()===lastResult){commit();return}
-   submit=true;searchNow();
-  }else if(event.key==='Escape'&&(editing||!menu.hidden))dismiss();
+   if(!draft)return;
+   if(input.value.trim()===lastResult)commit();
+   else {submit=true;searchNow()}
+  }else if(event.key==='Escape'&&(!menu.hidden||editing&&input.value.trim()!==lastResult))dismiss();
   else if((event.key==='ArrowDown'||event.key==='ArrowUp')&&!menu.hidden){
    const size=options.children.length,step=event.key==='ArrowDown'?1:-1;
    selectOption(active<0?(step>0?0:size-1):(active+step+size)%size);
@@ -602,11 +607,12 @@ function bindLibrarySearchHistory(){
  }};
 }
 async function renderLibrary(){
+ if(librarySearchComposing)return;
  const filters={q:$('#search').value.trim(),sort:$('#sort-filter').value};
  for(const [name,select] of Object.entries(libraryFacets))filters[name]=select.value;
  const key=JSON.stringify(filters);if(key!==libraryQueryKey){libraryQueryKey=key;libraryOffset=0}
  const revision=++libraryRequestRevision,offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
- if(revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
+ if(librarySearchComposing||filters.q!==$('#search').value.trim()||revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
  if(data.total&&offset>=data.total){libraryOffset=Math.floor((data.total-1)/100)*100;return renderLibrary()}
  const items=data.items.filter(item=>!globalThis.StellarArchiveActions?.isDeleted(item.id));libraryResults=items;
  librarySearchHistory?.accept(filters.q,items);
@@ -648,7 +654,7 @@ async function toggleLibrary(){
 }
 $('#library-open').onclick=$('#library-shortcut').onclick=()=>openLibrary().catch(e=>toast(e.message));
 function queueLibrarySearch(event){
- if(event.isComposing)return;
+ if(librarySearchComposing||event.isComposing)return;
  clearTimeout(searchTimer);searchTimer=setTimeout(()=>renderLibrary().catch(e=>toast(e.message)),180);
 }
 $('#search').oninput=$('#search').oncompositionend=queueLibrarySearch;

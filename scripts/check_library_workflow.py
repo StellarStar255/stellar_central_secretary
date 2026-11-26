@@ -179,6 +179,18 @@ with tempfile.TemporaryDirectory() as folder:
     page.locator('#library-open').click()
     expect(history).to_be_hidden()
     expect(page.locator('#library-search-toggle')).to_be_hidden()
+    # Hold a real search response until after Escape dismisses the pending suggestions.
+    delayed=[]
+    pattern='**/api/library?q=Robot+cam&*'
+    page.route(pattern,lambda route:delayed.append(route),times=1)
+    with page.expect_request(lambda request:'q=Robot+cam&' in request.url):
+     search.fill('Robot cam')
+    search.press('Escape')
+    expect(page.locator('#library-dialog')).to_be_visible()
+    delayed[0].continue_()
+    expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked)
+    page.evaluate('refresh()')
+    expect(history).to_be_hidden()
     search.fill('Robot ca')
     title_option=history.get_by_role('option',name='Robot camera source',exact=True)
     expect(title_option).to_be_visible()
@@ -195,6 +207,26 @@ with tempfile.TemporaryDirectory() as folder:
     page.keyboard.insert_text('Robot ca')
     expect(search).to_have_value('Robot ca')
     expect(title_option).to_be_visible()
+    # Five partial history matches must leave room for the exact archive title.
+    recent=['Robot query '+str(i) for i in range(5)]
+    page.evaluate("entries=>localStorage.setItem('stellar.library-search-history',JSON.stringify(entries))",recent)
+    page.reload()
+    page.locator('#library-open').click()
+    search.fill('Robot camera source')
+    expect(history.get_by_role('option').first).to_have_attribute('title','Robot camera source')
+    expect(history.get_by_role('option')).to_have_count(5)
+    expect(title_option.locator('button')).to_have_count(0)
+    search.press('ArrowDown')
+    search.press('ArrowDown')
+    chosen=history.locator('[aria-selected=true]').get_attribute('title')
+    service.archive.update(linked,title='Robot camera source revised')
+    page.evaluate('refresh()')
+    service.archive.update(linked,title='Robot camera source')
+    expect(history.locator('[aria-selected=true]')).to_have_attribute('title',chosen)
+    search.press('Enter')
+    expect(search).to_have_value(chosen)
+    expect(page.locator('#items .library-row')).to_have_count(0)
+    page.wait_for_function("value=>JSON.parse(localStorage.getItem('stellar.library-search-history'))[0]===value",arg=chosen)
     past=[f'Past search {i}' for i in range(19)]+['Long record '+('abc '*60).strip()]
     page.evaluate("entries=>localStorage.setItem('stellar.library-search-history',JSON.stringify(entries))",past)
     page.reload()
@@ -216,8 +248,12 @@ with tempfile.TemporaryDirectory() as folder:
     page.reload()
     page.locator('#library-open').click()
     expect(history.get_by_role('option')).to_have_count(2)
+    ime_queries=[]
+    page.on('request',lambda request:ime_queries.append(request.url) if '/api/library?' in request.url else None)
     before=page.locator('#result-count').inner_text()
     assert search.evaluate("""input=>{
+      input.value='r';
+      input.dispatchEvent(new InputEvent('input',{bubbles:true}));
       input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
       input.value='ri';
       input.dispatchEvent(new InputEvent('input',{bubbles:true,isComposing:true,data:'ri'}));
@@ -226,6 +262,8 @@ with tempfile.TemporaryDirectory() as folder:
         {key:'Enter',keyCode:229}
       ].every(event=>input.dispatchEvent(new KeyboardEvent('keydown',{...event,bubbles:true,cancelable:true})));
     }"""), 'IME keys must keep their default action'
+    page.evaluate('refresh()')
+    assert not any('q=ri&' in url for url in ime_queries), 'Search requested unfinished IME text'
     expect(search).to_have_value('ri')
     expect(search).not_to_have_attribute('aria-activedescendant')
     expect(history).to_be_hidden()
