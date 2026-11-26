@@ -67,7 +67,9 @@ with tempfile.TemporaryDirectory() as folder:
     expect(page.locator('#preview-text table strong')).to_have_text('工厂排产')
     context.grant_permissions(['clipboard-read','clipboard-write'],origin=base)
     page.locator('#preview-text [data-copy-table]').click()
-    assert page.evaluate('navigator.clipboard.readText()')==table
+    expect(page.locator('#toast')).to_have_text('已复制')
+    clipboard=page.evaluate('navigator.clipboard.readText()')
+    assert clipboard.replace('\r\n','\n')==table,repr(clipboard)
     assert page.locator('#preview-text td').last.evaluate('el=>el.getBoundingClientRect().height>2*parseFloat(getComputedStyle(el).lineHeight)')
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
     body=page.locator('#detail-content .archived-body')
