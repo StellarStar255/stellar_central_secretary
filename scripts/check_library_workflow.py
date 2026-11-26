@@ -29,7 +29,8 @@ with tempfile.TemporaryDirectory() as folder:
   with sync_playwright() as pw,patch.object(ai,'summary_fields',side_effect=fake_summary):
    browser=pw.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
    try:
-    page=browser.new_page(viewport={'width':1440,'height':1000},timezone_id='Asia/Shanghai')
+    context=browser.new_context(viewport={'width':1440,'height':1000},timezone_id='Asia/Shanghai')
+    page=context.new_page()
     errors=[];request_failures=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
     page.on('requestfailed',lambda request:request_failures.append((request.url,request.failure)))
@@ -40,7 +41,9 @@ with tempfile.TemporaryDirectory() as folder:
     page.locator('#search').evaluate("node=>node.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,repeat:true,bubbles:true,cancelable:true}))")
     expect(page.locator('#library-dialog')).to_be_visible()
     expect(page.locator('#items .library-row')).to_have_count(100);expect(page.locator('#library-next')).to_be_enabled();page.locator('#library-next').click();expect(page.locator('#items .library-row')).to_have_count(6)
+    expect(page.locator('#library-page')).to_have_text('2 / 2')
     page.locator('#search').fill('robot camera');expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked);expect(page.locator('#items .library-row').first.locator('mark')).to_have_count(4)
+    expect(page.locator('#library-page')).to_have_text('1 / 2')
     expect(page.locator('#items .library-row').first.locator('p')).not_to_contain_text('网页已加载');expect(page.locator('#items .library-row').first.locator('.coverage-badge')).to_have_text('部分内容')
     row=page.locator('#items .library-row').first
     with page.expect_popup() as opened:row.dblclick(delay=60)
@@ -195,6 +198,27 @@ with tempfile.TemporaryDirectory() as folder:
     title_option=history.get_by_role('option',name='Robot camera source',exact=True)
     expect(title_option).to_be_visible()
     expect(title_option.locator('button')).to_have_count(0)
+    search.press('ArrowDown')
+    expect(title_option).to_have_attribute('aria-selected','true')
+    search.press('Shift+Backspace')
+    expect(search).to_have_value('Robot ca')
+    expect(title_option).to_have_attribute('aria-selected','true')
+    search.press('Escape')
+    # Reopen suggestions before the new filter response arrives.
+    held=[]
+    page.route('**/api/library?*kind=file*',lambda route:held.append(route),times=1)
+    with page.expect_request(lambda req:'/api/library?' in req.url and 'kind=file' in req.url):
+     page.locator('#kind-filter').select_option('file')
+    search.click()
+    try:
+     assert not title_option.is_visible(), 'Previous filter still offers a link under Files'
+    finally:
+     held[0].continue_()
+    expect(page.locator('#items .library-row')).to_have_count(0)
+    page.locator('#kind-filter').select_option('')
+    expect(page.locator('#items .library-row').first).to_have_attribute('data-id',linked)
+    search.click()
+    expect(title_option).to_be_visible()
     search.press('Escape')
     page.evaluate('refresh()')
     expect(history).to_be_hidden()
@@ -250,6 +274,7 @@ with tempfile.TemporaryDirectory() as folder:
     expect(history.get_by_role('option')).to_have_count(2)
     ime_queries=[]
     page.on('request',lambda request:ime_queries.append(request.url) if '/api/library?' in request.url else None)
+    expect(page.locator('#items .library-row').first).to_be_visible()
     before=page.locator('#result-count').inner_text()
     assert search.evaluate("""input=>{
       input.value='r';
@@ -278,6 +303,17 @@ with tempfile.TemporaryDirectory() as folder:
     search.press('Enter')
     expect(search).to_have_value('日报例会')
     expect(history).to_be_hidden()
+    page.locator('#library-dialog .dialog-head button').click()
+    page.locator('#library-open').click()
+    expect(search).to_be_focused()
+    expect(search).to_have_value('日报例会')
+    expect(history).to_be_hidden()
+    page.locator('#library-search-toggle').click()
+    history.locator('#library-search-clear').focus()
+    page.keyboard.press('Escape')
+    expect(history).to_be_hidden()
+    expect(page.locator('#library-dialog')).to_be_visible()
+    expect(search).to_be_focused()
     page.locator('#library-search-toggle').click()
     monthly=history.get_by_role('option',name='月度总结',exact=True)
     expect(monthly.locator('.search-history-remove')).to_be_hidden()
@@ -330,6 +366,24 @@ with tempfile.TemporaryDirectory() as folder:
     search.fill('absent search fixture')
     expect(page.locator('#library-empty-default')).to_be_visible()
     expect(page.locator('#library-clear-filters')).to_be_hidden()
+    search.press('Enter')
+    history_key='stellar.library-search-history'
+    page.wait_for_function("key=>JSON.parse(localStorage.getItem(key))[0]==='absent search fixture'",arg=history_key)
+    second=context.new_page()
+    second.goto(base)
+    second.locator('#library-open').click()
+    second_history=second.locator('#library-search-history')
+    expect(second_history).to_be_visible()
+    second_history.locator('#library-search-clear').click()
+    search.fill('fresh cross-window search')
+    search.press('Enter')
+    page.wait_for_function("key=>JSON.parse(localStorage.getItem(key))[0]==='fresh cross-window search'",arg=history_key)
+    assert page.evaluate('key=>JSON.parse(localStorage.getItem(key))',history_key)==['fresh cross-window search'], 'Cleared history returned from another window'
+    expect(second.locator('#library-search-toggle')).to_be_visible()
+    second.locator('#library-search-toggle').click()
+    expect(second_history.get_by_role('option')).to_have_count(1)
+    expect(second_history.get_by_role('option')).to_have_attribute('title','fresh cross-window search')
+    second.close()
     assert not errors,errors
     print('PASS: search history and one-click removal of all active filters with query and sort preserved')
    except Exception:

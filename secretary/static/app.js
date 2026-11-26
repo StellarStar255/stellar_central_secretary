@@ -466,15 +466,18 @@ function bindLibrarySearchHistory(){
  const normalize=value=>value.trim().replace(/\s+/g,' ').toLowerCase();
  let recent=[],active=-1,draft=false,submit=false,lastResult='',showingAll=false,editing=false;
  let resultTitles=[];
- try{
-  const saved=JSON.parse(localStorage.getItem(storage)||'[]');
-  if(Array.isArray(saved))recent=saved.filter(value=>typeof value==='string'&&value.trim()&&value.length<=300).slice(0,20);
- }catch{}
+ function readRecent(){
+  try{
+   const saved=JSON.parse(localStorage.getItem(storage)||'[]');
+   return Array.isArray(saved)?saved.filter(value=>typeof value==='string'&&value.trim()&&value.length<=300).slice(0,20):[];
+  }catch{return recent}
+ }
+ recent=readRecent();
  function persist(){try{localStorage.setItem(storage,JSON.stringify(recent))}catch{}toggle.hidden=recent.length===0}
  function remember(value){
   draft=submit=false;
   if(!value||value.length>300)return;
-  recent=[value,...recent.filter(entry=>normalize(entry)!==normalize(value))].slice(0,20);
+  recent=[value,...readRecent().filter(entry=>normalize(entry)!==normalize(value))].slice(0,20);
   persist();
  }
  function commit(){if(draft&&input.value.trim()===lastResult)remember(lastResult)}
@@ -505,7 +508,7 @@ function bindLibrarySearchHistory(){
  }
  function remove(value){
   const key=normalize(value),previous=active;
-  recent=recent.filter(entry=>normalize(entry)!==key);
+  recent=readRecent().filter(entry=>normalize(entry)!==key);
   if(normalize(input.value)===key)draft=submit=false;
   persist();
   show(showingAll);
@@ -564,6 +567,17 @@ function bindLibrarySearchHistory(){
   }
   expanded(matches.length>0);
  }
+ window.addEventListener('storage',event=>{
+  if(event.storageArea!==localStorage||(event.key!==storage&&event.key!==null))return;
+  const selected=options.children[active]?.dataset.value,query=normalize(input.value);
+  const latest=readRecent();
+  if(recent.some(value=>normalize(value)===query)&&!latest.some(value=>normalize(value)===query))draft=submit=false;
+  recent=latest;toggle.hidden=!recent.length;
+  if(menu.hidden)return;
+  show(showingAll);
+  const index=[...options.children].findIndex(option=>option.dataset.value===selected);
+  if(index>=0)selectOption(index);
+ });
  toggle.hidden=recent.length===0;
  toggle.onclick=()=>{if(!menu.hidden){dismiss();return}input.focus();editing=false;show(true)};
  $('#library-search-clear').onclick=()=>{
@@ -579,12 +593,19 @@ function bindLibrarySearchHistory(){
  input.addEventListener('compositionstart',()=>{librarySearchComposing=true;clearTimeout(searchTimer);dismiss()});
  input.addEventListener('compositionend',()=>{librarySearchComposing=false;changed()});
  input.addEventListener('blur',commit);
+ field.addEventListener('keydown',event=>{
+  if(event.target===input||event.key!=='Escape'||menu.hidden)return;
+  event.preventDefault();event.stopPropagation();input.focus();dismiss();
+ });
  field.addEventListener('focusout',event=>{if(!field.contains(event.relatedTarget))dismiss()});
  $('#library-dialog').addEventListener('close',()=>{librarySearchComposing=false;commit();dismiss()});
  input.addEventListener('keydown',event=>{
   if(librarySearchComposing||event.isComposing||event.keyCode===229){event.stopPropagation();return}
   if(event.metaKey||event.ctrlKey||event.altKey)return;
-  if(event.shiftKey&&['Delete','Backspace'].includes(event.key)&&active>=0&&!menu.hidden&&options.children[active].querySelector('button'))remove(options.children[active].dataset.value);
+  if(event.shiftKey&&['Delete','Backspace'].includes(event.key)&&active>=0&&!menu.hidden){
+   const option=options.children[active];
+   if(option.querySelector('.search-history-remove'))remove(option.dataset.value);
+  }
   else if(event.key==='Enter'&&active>=0&&!menu.hidden)choose(options.children[active].dataset.value);
   else if(event.key==='Enter'){
    dismiss();
@@ -598,7 +619,11 @@ function bindLibrarySearchHistory(){
   }else return;
   event.preventDefault();event.stopPropagation();
  });
- return {accept(query,items){
+ return {invalidateTitles(query){
+  if(!resultTitles.length)return;
+  resultTitles=[];
+  if(editing&&!menu.hidden&&query===lastResult)show();
+ },accept(query,items){
   const titles=items.map(item=>item.title).filter(Boolean);
   const changed=query!==lastResult||titles.length!==resultTitles.length||titles.some((value,index)=>value!==resultTitles[index]);
   lastResult=query;resultTitles=titles;
@@ -611,6 +636,7 @@ async function renderLibrary(){
  const filters={q:$('#search').value.trim(),sort:$('#sort-filter').value};
  for(const [name,select] of Object.entries(libraryFacets))filters[name]=select.value;
  const key=JSON.stringify(filters);if(key!==libraryQueryKey){libraryQueryKey=key;libraryOffset=0}
+ if(key!==lastRenderedLibraryKey||libraryOffset!==lastRenderedLibraryOffset)librarySearchHistory?.invalidateTitles(filters.q);
  const revision=++libraryRequestRevision,offset=libraryOffset,data=await api('/api/library?'+new URLSearchParams({...filters,offset,limit:100}));
  if(librarySearchComposing||filters.q!==$('#search').value.trim()||revision!==libraryRequestRevision||key!==libraryQueryKey||offset!==libraryOffset)return;
  if(data.total&&offset>=data.total){libraryOffset=Math.floor((data.total-1)/100)*100;return renderLibrary()}
