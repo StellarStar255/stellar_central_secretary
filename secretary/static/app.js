@@ -38,11 +38,51 @@ function readerChart(raw){
  }catch{return t('<p class="reader-chart-unavailable">图表快照无法显示，请打开原链接查看。</p>')}
 }
 function readerTable(rows){
- const width=Math.max(...rows.map(row=>row.length));
+ const width=rows.reduce((max,row)=>Math.max(max,row.length),0);
  const cell=value=>readerInline(String(value||'').replace(/&#124;|\\\|/g,'|'));
  return t('<div class="reader-table-scroll" role="region" aria-label="数据表格" tabindex="0"><table><thead><tr>')+Array.from({length:width},(_,i)=>'<th scope="col">'+cell(rows[0][i])+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(1).map(row=>'<tr>'+Array.from({length:width},(_,i)=>'<td>'+cell(row[i])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
 }
-function readerMarkdown(text){
+function readPipeTable(lines,start){
+ const header=lines[start],rule=lines[start+1];
+ if(!header.includes('|')||!rule?.includes('|')||!/^\s*\|?\s*:?-{3}/.test(rule))return null;
+ const cells=line=>line.trim().replace(/^\|/,'').replace(/(?<!\\)\|$/,'').split(/(?<!\\)\|/).map(value=>value.trim());
+ const columns=cells(header),separator=cells(rule);
+ if(columns.length<1||columns.length!==separator.length||!separator.every(value=>/^:?-{3,}:?$/.test(value)))return null;
+ const rows=[columns];
+ let end=start+1;
+ while(lines[end+1]?.includes('|')){
+  const row=cells(lines[end+1]);
+  rows.push(row);end++;
+ }
+ return {end,html:readerTable(rows)};
+}
+function archiveTableMarkup(table,lines,start){
+ const source=lines.slice(start,table.end+1).join('\n');
+ return '<div class="archive-table">'+table.html+'<button type="button" class="secondary" data-copy-table="'+readerEscape(source)+'">'+readerEscape(t('复制 Markdown'))+'</button></div>';
+}
+function archiveTableText(text){
+ if(!text.includes('|'))return readerEscape(text);
+ const lines=text.split(/\r\n?|\n/),blocks=[];
+ let plainStart=0,fence='';
+ for(let i=0;i<lines.length;i++){
+  const marker=lines[i].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if(marker){
+   if(!fence)fence=marker[1];
+   else if(marker[1].startsWith(fence)&&!marker[2].trim())fence='';
+   continue;
+  }
+  if(fence)continue;
+  const table=readPipeTable(lines,i);
+  if(!table)continue;
+  blocks.push(readerEscape(lines.slice(plainStart,i).join('\n')));
+  blocks.push(archiveTableMarkup(table,lines,i));
+  i=table.end;plainStart=i+1;
+ }
+ if(!blocks.length)return readerEscape(text);
+ blocks.push(readerEscape(lines.slice(plainStart).join('\n')));
+ return blocks.join('');
+}
+function readerMarkdown(text,archived=false){
  const lines=text.replace(/\r\n?/g,'\n').split('\n');let html='',paragraph=[],list=null;
  const flushParagraph=()=>{if(paragraph.length){html+='<p>'+paragraph.map(readerInline).join('<br>')+'</p>';paragraph=[]}};
  const closeList=()=>{if(list){html+='</'+list+'>';list=null}};
@@ -53,12 +93,9 @@ function readerMarkdown(text){
    while(++i<lines.length&&!/^\s*```/.test(lines[i]))code.push(lines[i]);
    html+=line.trim()==='```stellar-chart'?readerChart(code.join('\n')):'<pre><code>'+readerEscape(code.join('\n'))+'</code></pre>';continue;
   }
-  const pipeRow=value=>{let row=value.trim().replace(/^\|/,'').replace(/(?<!\\)\|$/,'').split(/(?<!\\)\|/);return row.map(v=>v.trim())};
-  const separator=lines[i+1]&&pipeRow(lines[i+1]);
-  if(line.includes('|')&&separator?.length>=2&&separator.every(v=>/^:?-{3,}:?$/.test(v))){
-   flushParagraph();closeList();const rows=[pipeRow(line)];i++;
-   while(i+1<lines.length&&lines[i+1].trim()&&lines[i+1].includes('|'))rows.push(pipeRow(lines[++i]));
-   html+=readerTable(rows);continue;
+  const table=readPipeTable(lines,i);
+  if(table){
+   flushParagraph();closeList();html+=archived?archiveTableMarkup(table,lines,i):table.html;i=table.end;continue;
   }
   if(line.includes('\t')&&lines[i+1]?.includes('\t')){
    flushParagraph();closeList();const rows=[line.trim().split('\t')];
@@ -122,8 +159,8 @@ function renderArchivedBody(item){
  if(item.bundle_body)return StellarBundles.renderBody(item);
  if(item.kind==='file' && item.text && item.filename && !item.bundle_error && !item.filename.endsWith('.stellar.zip'))return StellarBundles.fileBody(item);
  const text=item.text||'',turns=item.kind==='file'||item.kind==='note'?[]:parseArchivedConversation(text);
- if(!turns.length)return ui`<h3>正文 <span class="muted">${text.length.toLocaleString()} 字符</span></h3><div class="detail-text archived-body">${readerEscape(text||t('还没有正文。点击「补充 / 编辑正文」，或使用浏览器采集扩展。'))}</div>`;
- return ui`<section class="archive-conversation archived-body" aria-label="已归档的对话"><div class="reader-heading"><h3>会话记录</h3><span>${turns.length} 条消息 · 点击角色可收起</span></div>${turns.map((turn,index)=>`<details class="reader-turn reader-${turn.role}" open><summary><span class="reader-avatar" aria-hidden="true">${turn.role==='user'?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.2"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>':'✳'}</span><span>${readerEscape(turn.label)}</span><span class="reader-turn-number">${String(index+1).padStart(2,'0')}</span><span class="reader-chevron" aria-hidden="true">⌄</span></summary><div class="reader-message ${turn.role==='assistant'?'reader-prose':''}">${turn.role==='user'?readerEscape(turn.text):readerMarkdown(turn.text)}</div></details>`).join('')}<details class="reader-original"><summary>查看原始文本 · ${text.length.toLocaleString()} 字符</summary><div>${readerEscape(text)}</div></details></section>`;
+ if(!turns.length)return ui`<h3>正文 <span class="muted">${text.length.toLocaleString()} 字符</span></h3><div class="detail-text archived-body">${archiveTableText(text||t('还没有正文。点击「补充 / 编辑正文」，或使用浏览器采集扩展。'))}</div>`;
+ return ui`<section class="archive-conversation archived-body" aria-label="已归档的对话"><div class="reader-heading"><h3>会话记录</h3><span>${turns.length} 条消息 · 点击角色可收起</span></div>${turns.map((turn,index)=>`<details class="reader-turn reader-${turn.role}" open><summary><span class="reader-avatar" aria-hidden="true">${turn.role==='user'?'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.2"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>':'✳'}</span><span>${readerEscape(turn.label)}</span><span class="reader-turn-number">${String(index+1).padStart(2,'0')}</span><span class="reader-chevron" aria-hidden="true">⌄</span></summary><div class="reader-message ${turn.role==='assistant'?'reader-prose':''}">${turn.role==='user'?archiveTableText(turn.text):readerMarkdown(turn.text,true)}</div></details>`).join('')}<details class="reader-original"><summary>查看原始文本 · ${text.length.toLocaleString()} 字符</summary><div>${readerEscape(text)}</div></details></section>`;
 }
 
 const $ = s => document.querySelector(s);
@@ -276,6 +313,12 @@ function bindInlineCitations(chat){
  }
 }
 document.addEventListener('click',event=>{
+ const copyTable=event.target.closest?.('[data-copy-table]');
+ if(copyTable){
+  if(!navigator.clipboard){toast(t('复制失败'));return}
+  navigator.clipboard.writeText(copyTable.dataset.copyTable).then(()=>toast(t('已复制'))).catch(()=>toast(t('复制失败')));
+  return;
+ }
  const cancel=event.target.closest?.('[data-cancel-question]');
  if(cancel&&activeQuestion&&cancel.dataset.cancelQuestion===activeQuestion.id){
   const request=activeQuestion;if(request.cancelRequested)return;request.cancelRequested=true;

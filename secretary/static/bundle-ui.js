@@ -22,6 +22,10 @@
     return '<div class="invoice-line">'+esc(line)+'</div>';
    }).join('')+'</div>';
   }
+  if(/\.(?:md|markdown|txt)$/i.test(name)&&text.includes('|')){
+   const formatted=archiveTableText(text);
+   if(formatted.includes('<table>'))return formatted;
+  }
   const blocks=[];
   let lines=[],fence=null;
   function flush(){

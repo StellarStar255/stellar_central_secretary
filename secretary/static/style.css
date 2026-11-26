@@ -243,3 +243,5 @@ dialog{overscroll-behavior:contain}.dialog-head{display:flex;justify-content:spa
 .archive-summary-reading h4{margin:1em 0 .3em;font-size:1em}
 .archive-summary-reading .summary-scope,.archive-vision-reading summary{color:var(--muted);font-size:.9em}
 .archive-vision-reading summary{cursor:pointer;padding:.4em 0}
+
+.archive-table{white-space:normal;min-width:0;margin:.75em 0}.archive-table .reader-table-scroll{margin:0 0 .4em}.archive-table td,.archive-table th{overflow-wrap:anywhere}.archive-table button{font-size:.8em;padding:4px 9px}

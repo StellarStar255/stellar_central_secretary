@@ -14,7 +14,9 @@ class LibraryTestServer(LocalHTTPServer):
 with tempfile.TemporaryDirectory() as folder:
  service=Service(folder);service.archive.configure('codex',False)
  server=LibraryTestServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
- linked,_=service.archive.add('Robot camera source','Original robot camera details',url=base+'/tutorial?lang=en#fixture')
+ table='| 实际场景 | 求解器在做什么 |\n| --- | --- |\n| **工厂排产** | '+'在指定机器上按顺序生产。'*16+' |'
+ archive_text='Original robot camera details\n\n'+table
+ linked,_=service.archive.add('Robot camera source',archive_text,url=base+'/tutorial?lang=en#fixture')
  service.archive.update(linked,summary='【网页已加载内容归档】 仅包含已加载内容。\n\nUseful robot camera overview.',tags=['网页片段'],state='ready')
  created_fixture='2025-01-02T03:04:05+00:00';updated_fixture='2026-02-03T04:05:06+00:00'
  with service.archive.db() as db:db.execute('UPDATE items SET created=?,updated=? WHERE id=?',(created_fixture,updated_fixture,linked))
@@ -55,7 +57,15 @@ with tempfile.TemporaryDirectory() as folder:
     expect(page.locator('#preview-timestamps [data-record-updated]')).to_have_text('2026-02-03 12:05:06')
     assert 'Invalid Date' not in page.evaluate('()=>StellarLibraryPreview.timestamps({created:"invalid",updated:""})')
     page.screenshot(path='/tmp/stellar-preview-timestamps.png')
+    expect(page.locator('#preview-text table strong')).to_have_text('工厂排产')
+    context.grant_permissions(['clipboard-read','clipboard-write'],origin=base)
+    page.locator('#preview-text [data-copy-table]').click()
+    assert page.evaluate('navigator.clipboard.readText()')==table
+    assert page.locator('#preview-text td').last.evaluate('el=>el.getBoundingClientRect().height>2*parseFloat(getComputedStyle(el).lineHeight)')
     page.locator('#preview-source').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();expect(page.locator('#library-dialog')).to_be_visible()
+    expect(page.locator('#detail-content table th').first).to_have_text('实际场景')
+    page.locator('#edit-content').click()
+    expect(page.locator('#detail-edit')).to_have_value(archive_text)
     expect(page.locator('#edit-title')).to_contain_text('Robot camera source');page.locator('#detail-dialog .dialog-head button').click()
     page.locator('#preview-summary').dblclick();expect(page.locator('#detail-dialog')).to_be_visible();page.locator('#detail-dialog .dialog-head button').click()
     # The panel gutter is outside the scrolling preview content.
