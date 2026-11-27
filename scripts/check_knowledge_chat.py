@@ -2,8 +2,8 @@
 import json,sys,tempfile,threading
 from pathlib import Path
 from unittest.mock import patch
-from http.server import ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
 calls=[]
@@ -14,7 +14,7 @@ def model(prompt,backend,**kwargs):
 with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False)
  item,_=service.archive.add('离线部署指南','Ollama RAM requirement: 16 GB. Runs on Apple Silicon.')
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch('secretary.ai.run',side_effect=model),sync_playwright() as p:
    browser=p.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)

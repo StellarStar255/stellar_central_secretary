@@ -1,5 +1,5 @@
 """Reproduce the reported automatic-mode schedule question/follow-up with synthetic data."""
-import base64,io,json,os,sys,tempfile,threading
+import base64,io,json,os,sys,tempfile,threading,time
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
@@ -10,6 +10,10 @@ from playwright.sync_api import sync_playwright,expect
 calls=[]
 def model(prompt,backend,**kwargs):
  payload=json.loads(prompt.split('\n',1)[1]);calls.append((payload,kwargs))
+ if payload.get('question') in ('刚才记错了，是八月十三','示例人物生日'):
+  if 'passages' not in payload:return json.dumps({'queries':['示例人物生日'],'followup':True})
+  number=next(p['source'] for p in payload['passages'] if '示例人物生日' in p['text'])
+  return f'按对话中的更正为八月十三，原归档写的是八月十二。[{number}]'
  if 'passages' not in payload:return json.dumps({'queries':['课程表'],'followup':bool(payload['history'])})
  assert len(kwargs.get('images',[]))==1
  assert payload['visual_evidence'][0]['status']=='image_attached_for_rechecking'
@@ -71,6 +75,9 @@ with tempfile.TemporaryDirectory() as root:
     ('查查妈妈生日是不是八月十二','auto','ask'),('示例人物生日是哪天？','auto','ask'),
     (birthday,'library','library'),(birthday,'ask','ask')):
     assert page.evaluate('([text,mode])=>resolveInputMode(text,mode,false,true)',[message,mode])==expected
+   for message,expected in [('示例人物生日今年是阳历哪天','ask'),('示例人物 生日','ask'),
+                            ('今天是示例人物生日','note'),('示例人物生日 农历八月十二','note')]:
+    assert page.evaluate('text=>resolveInputMode(text,"auto",false,false)',message)==expected
    page.locator('#input-mode').select_option('auto')
    questions=[]
    page.on('request',lambda request:questions.append(request.url) if '/api/ask' in request.url else None)
@@ -78,6 +85,32 @@ with tempfile.TemporaryDirectory() as root:
    expect(page.locator('.message.assistant').last).to_contain_text(birthday)
    assert len(service.archive.export())==len(before)+1
    assert any(item['text']==birthday for item in service.archive.export()) and not questions
+   page.locator('#new-chat').click()
+   question='示例人物生日'
+   model_calls=len(calls)
+   page.locator('#message-input').fill(question)
+   started=time.monotonic();page.locator('#send-button').click()
+   expect(page.locator('.answer-timing')).to_contain_text('直接读取归档')
+   expect(page.locator('.message.assistant .message-body')).to_contain_text('农历2001年8月12日')
+   expect(page.locator('.source')).to_have_count(1)
+   print(f'Birthday lookup, send to visible answer and citation: {time.monotonic()-started:.3f}s')
+   page.locator('.source').click()
+   expect(page.locator('#detail-dialog')).to_contain_text(birthday)
+   page.locator('#detail-dialog .dialog-head button').first.click()
+   page.reload()
+   expect(page.locator('.source')).to_have_count(1)
+   page.locator('#message-input').fill(question);page.locator('#send-button').click()
+   expect(page.locator('.source')).to_have_count(2)
+   expect(page.locator('.answer-timing').last).to_contain_text('直接读取归档')
+   assert len(calls)==model_calls and len(service.archive.export())==len(before)+1
+   correction='刚才记错了，是八月十三'
+   for index,message in enumerate((correction,question),3):
+    page.locator('#message-input').fill(message);page.locator('#send-button').click()
+    expect(page.locator('.source')).to_have_count(index)
+    expect(page.locator('.message.assistant .message-body').last).to_contain_text('八月十三')
+   assert calls[-1][0]['question']==question
+   assert any(turn['question']==correction for turn in calls[-1][0]['history'])
+   assert len(service.archive.export())==len(before)+1
    page.screenshot(path='/tmp/secretary-schedule-chat-fixed.png')
    assert not errors,errors
    browser.close()

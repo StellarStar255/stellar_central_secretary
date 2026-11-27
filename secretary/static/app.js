@@ -994,6 +994,7 @@ function answerTiming(message){
  const timing=message.timings;if(!timing||!Number.isFinite(Number(timing.total_seconds)))return '';
  const seconds=key=>Math.max(0,Number(timing[key])||0).toFixed(1);
  if(timing.cache_hit)return `<details class="answer-timing"><summary>${esc(t('复用近期回答'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('问题与资料未变化，可点击重新核对强制生成。'))}</p></details>`;
+ if(timing.birthday_match)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('生日日期来自归档原文。'))}</p></details>`;
  if(timing.archive_match)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('安排内容一致，直接读取当前归档，未调用模型。'))}</p></details>`;
  if(timing.local_reply)return `<details class="answer-timing"><summary>${esc(t('本地即时回复'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('未调用模型，也未检索知识库。'))}</p></details>`;
  const labels=[['queue_seconds','排队'],['planning_seconds','检索规划'],['retrieval_seconds','本地检索'],['expansion_seconds','补读上下文'],['image_seconds','准备图片'],['answer_seconds','模型回答']];
@@ -1095,6 +1096,10 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';
  if(!question&&!hasFiles&&isBirthdayNote(text))return 'note';
+ if(!hasFiles&&/(?:生日|出生日期)/.test(text)){
+  if(/(?:生日|出生日期)[^。！？?\n]*(?:哪天|哪一天|几月几[日号]|什么时候|还[有剩]几天|多少天)/.test(text))return 'ask';
+  if(!/^(?:今天|明天|昨天|祝你|祝愿|我想|准备)|(?:是|庆祝|庆贺|要过|去过).+生日/.test(text)&&/^[\p{L}\p{N}·]{1,40}\s*(?:的\s*)?(?:生日|出生日期)(?:呢)?[?？]?$/u.test(text.trim()))return 'ask';
+ }
  if(followup&&!hasFiles&&!/https?:\/\//i.test(text))return 'ask';
  if(!hasFiles&&!/https?:\/\//i.test(text))return question||/[?？]\s*$|(?:是什么|有哪些|有什么|在哪里|怎么样|怎么办|吗|呢)[^\n]{0,24}$/.test(text)?'ask':'note';
  return mode;

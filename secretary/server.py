@@ -1113,6 +1113,11 @@ class Service:
             if archived:
                 timings['archive_match']=True
                 return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'],'archive')
+            from . import archived_birthdays
+            birthday=measured('retrieval_seconds',lambda:archived_birthdays.lookup(self.archive,question,turns))
+            if birthday:
+                timings['birthday_match']=True
+                return result(*birthday,[],'archive')
         with self.archive.db() as db:
             available=db.execute("SELECT 1 FROM chunks c JOIN items i ON i.id=c.item_id WHERE i.trashed_at='' LIMIT 1").fetchone()
         if not available:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],[],'no_match')
