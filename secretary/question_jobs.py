@@ -112,7 +112,7 @@ class QuestionJobs:
                 if previous is None:raise ValueError('对话已删除，无法开始问答')
             except Exception:
                 self.service.question_progress.update(key,'error');raise
-            self.jobs[key]={'chat_id':chat_id,'message_id':message_id,'fingerprint':fingerprint,'ended':None}
+            self.jobs[key]={'chat_id':chat_id,'message_id':message_id,'fingerprint':fingerprint,'ended':None,'finished':threading.Event()}
             self.pool.submit(copy_context().run,self.run,key,payload,previous)
         return {'request_id':key}
 
@@ -139,7 +139,9 @@ class QuestionJobs:
             try:self.patch(job['chat_id'],job['message_id'],key,values)
             finally:service.question_progress.update(key,state)
         finally:
-            with self.lock:self.jobs[key]['ended']=time.monotonic()
+            with self.lock:
+                self.jobs[key]['ended']=time.monotonic()
+                self.jobs[key]['finished'].set()
 
     def execute(self,key,payload,job):
         from .company_ai import ApprovalRequired
@@ -168,6 +170,16 @@ class QuestionJobs:
     def get(self,body):
         key=body.get('progress_id');QuestionProgress.validate(key)
         chat_id,message_id=body.get('chat_id'),body.get('message_id')
+        waited=False
+        if body.get('wait') is True:
+            with self.lock:
+                job=self.jobs.get(key)
+                finished=job['finished'] if job and job['chat_id']==chat_id and job['message_id']==message_id and job['ended'] is None else None
+            if finished is not None:
+                # Wake immediately when the durable chat result is ready. A bounded
+                # wait also delivers streaming progress and pending approval prompts.
+                finished.wait(.65)
+                waited=True
         # This is a local authenticated API, with target checks to prevent attaching
         # an unrelated request to a different conversation.
         with self.service.lock:
@@ -180,7 +192,7 @@ class QuestionJobs:
             from .company_ai import ApprovalRequired
             if not self.service.company_model_status().get('approved'):raise ApprovalRequired(value['requestApproval'])
         progress=self.service.question_progress.snapshot(key)
-        return {'message':value,'progress':progress}
+        return {'message':value,'progress':progress,'waited':waited}
 
     def active_count(self):
         with self.lock:return sum(job['ended'] is None for job in self.jobs.values())

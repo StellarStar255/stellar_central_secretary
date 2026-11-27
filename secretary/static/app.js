@@ -950,8 +950,10 @@ function watchQuestionProgress(chat,message,progressId){
 function jobResponse(message){return {answer:message.text,sources:message.sources||[],catalog:message.catalog,timings:message.timings,answer_evidence:message.answerEvidence,retrieval_notice:message.retrievalNotice||'',local_reply:message.localReply}}
 async function receiveQuestionJob(chat,message,request){
  while(true){
+  let retryDelay=700;
   try{
-   const data=await api('/api/ask/job',{progress_id:request.id,chat_id:chat.id,message_id:message.id});
+   const data=await api('/api/ask/job',{progress_id:request.id,chat_id:chat.id,message_id:message.id,wait:true});
+   if(data.waited)retryDelay=50;
    Object.assign(request.progress,data.progress,{offline:false,started:Date.now()-(data.progress.elapsed_seconds||0)*1000});
    if(data.message.requestState!=='running'){
     updateMessage(chat,message,data.message);
@@ -963,7 +965,7 @@ async function receiveQuestionJob(chat,message,request){
    if(error.status||error.terminal||error.cancelled){if(error.cancelledReview||error.status===400)void api('/api/ask/cancel',{progress_id:request.id}).catch(()=>{});throw error;}
    request.progress.offline=true;
   }
-  await new Promise(resolve=>setTimeout(resolve,700));
+  await new Promise(resolve=>setTimeout(resolve,retryDelay));
  }
 }
 async function askWithProgress(chat,message,payload){
@@ -1092,6 +1094,7 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  if(!hasFiles&&globalThis.StellarLocalPaths?.note(text))return 'note';
  const first=text.split('\n').find(line=>line.trim())?.trim()||'';
  if(!hasFiles&&isSocialMessage(text))return 'ask';
+ if(!hasFiles&&/^(?:(?:请)?(?:列出|搜索)(?:所有|全部)?(?:包含|含有)[「“"]|(?:list|show) (?:all )?(?:records|items) containing ")/i.test(first))return 'ask';
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';

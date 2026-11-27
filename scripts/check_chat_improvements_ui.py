@@ -54,6 +54,18 @@ with tempfile.TemporaryDirectory() as root:
     page.evaluate('async()=>{await sharedChatSaves;await pullSharedChats();renderChat(false)}');expect(page.locator('.catalog-pager')).to_contain_text('41–60 / 65')
     page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('61–65 / 65');expect(page.locator('.source')).to_have_count(5)
     page.locator('#new-chat').click();page.locator('#input-mode').select_option('library')
+    send('列出包含「罗马史唯一记录」的资料')
+    expect(page.locator('.catalog-pager')).to_contain_text('1–20 / 65')
+    page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('21–40 / 65')
+    page.reload();expect(page.locator('.catalog-pager')).to_contain_text('21–40 / 65')
+    page.wait_for_function('()=>historyLoaded')
+    keep=set(page.evaluate('()=>currentChat().messages.at(-1).sources.map(s=>s.item_id)'))
+    for item in service.archive.list(q='罗马史唯一记录'):
+     if item['id'] not in keep:service.archive.trash_item(item['id'],item['updated'])
+    page.locator('[data-catalog]').last.click();expect(page.locator('.catalog-pager')).to_contain_text('1–20 / 20')
+    expect(page.locator('[data-catalog]').last).to_be_disabled()
+    assert set(page.evaluate('()=>currentChat().messages.at(-1).sources.map(s=>s.item_id)'))==keep
+    page.locator('#new-chat').click();page.locator('#input-mode').select_option('library')
     send('她今天有课吗？')
     expect(page.locator('.streaming-answer')).to_contain_text('周四14:00有课',timeout=10000)
     assert not page.locator('[data-recheck]').count(),'Partial text must not become a completed answer'

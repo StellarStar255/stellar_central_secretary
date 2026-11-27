@@ -494,10 +494,10 @@ class Archive:
         self.get(item_id)
         with self.lock,self.db() as db:db.execute('UPDATE items SET last_viewed=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),item_id))
         return {'ok':True}
-    def list(self, q='', category='', kind='', include_trashed=False):
+    def list(self, q='', category='', kind='', include_trashed=False, *, literal=False):
         # Library filters require every whitespace-separated keyword, across fields.
         # Conversational retrieval below keeps its broader relevance ranking.
-        keywords=list(dict.fromkeys(q.casefold().split()))
+        keywords=[q.casefold()] if literal and q else list(dict.fromkeys(q.casefold().split()))
         source_hits=self.retrieve(q,100) if keywords else []
         columns="id,title,kind,url,filename,company_data,summary,tags,category,state,error,created,updated,last_viewed,favorite,pinned,trashed_at,length(text) AS text_length,CASE WHEN kind='note' THEN local_path_target(text) ELSE '' END AS local_path_target,note,user_context,additions,(group_links!='[]') AS has_group_links"
         with self.db() as db:
@@ -514,7 +514,7 @@ class Archive:
                 fields=[str(row.get(key) or '') for key in ('title','summary','filename','url','category','note','user_context')]
                 fields.extend(row['tags']);fields.append(selected);fields.append(searchable_text(body));fields.append(visual);fields.append(additions.index_text(batches));fields.append(links.source(group_values))
                 source='\n'.join(fields)
-                haystack=(source+'\n'+search_aliases(source)).casefold()
+                haystack=source.casefold() if literal else (source+'\n'+search_aliases(source)).casefold()
                 if not all(keyword in haystack for keyword in keywords):continue
                 readable=searchable_text(body)+'\n'+selected+'\n'+visual+'\n'+row.get('note','')+'\n'+additions.index_text(batches)
                 hits=[readable.casefold().find(word) for word in keywords if word in readable.casefold()]

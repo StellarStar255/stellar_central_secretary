@@ -1,13 +1,27 @@
 """Complete keyword-based record enumeration, independent of QA excerpt limits."""
-def page(archive,queries,offset=0,limit=20):
+import re
+
+
+def literal_keyword(question):
+    """Accept an explicit quoted search term only when nothing else was requested."""
+    value=question.strip().rstrip('？?。')
+    match=re.fullmatch(r'(?:请)?(?:列出|查找|搜索)(?:所有|全部)?(?:包含|含有)(?:「([^「」]+)」|“([^“”]+)”|"([^"]+)")的(?:资料|记录)',value)
+    if not match:
+        match=re.fullmatch(r'(?:list|find|show) (?:all )?(?:records|items) containing "([^"]+)"',value,re.I)
+    if match:
+        term=next(part for part in match.groups() if part is not None).strip()
+        if 0<len(term)<=200:return term
+    return None
+
+
+def page(archive,queries,offset=0,limit=20,*,literal=False):
     if not isinstance(queries,list) or not 1<=len(queries)<=3 or any(not isinstance(q,str) or not q.strip() or len(q)>200 for q in queries):raise ValueError('资料清单检索词无效')
     if type(offset) is not int or offset<0 or type(limit) is not int or not 1<=limit<=50:raise ValueError('资料清单页码无效')
     queries=list(dict.fromkeys(q.strip() for q in queries));found={}
     for query in queries:
-        for item in archive.list(q=query):found.setdefault(item['id'],item)
+        for item in archive.list(q=query,literal=literal):found.setdefault(item['id'],item)
     notice=''
-    if not found:
-        import re
+    if not found and not literal:
         subjects=[]
         for query in queries:
             words=re.split(r'\s+|[、，,;；|]',query)
@@ -23,8 +37,10 @@ def page(archive,queries,offset=0,limit=20):
                 for item in archive.list(q=query):found.setdefault(item['id'],item)
             if found:notice='完整主题词未命中，已按主体关键词补查；请核对清单范围。'
     matches=sorted(found.values(),key=lambda i:(i['created'],i['id']),reverse=True)
+    if offset>=len(matches):
+        offset=max(0,len(matches)-1)//limit*limit
     selected=matches[offset:offset+limit]
     sources=[{'number':index+1,'item_id':item['id'],'title':item['title'],'url':item['url'],'revision':item['updated'],
               'text':item.get('search_snippet',''),'origin':{}} for index,item in enumerate(selected)]
     return {'answer':'按关键词匹配，共找到 '+str(len(matches))+' 条资料。清单可翻页查看；这是关键词匹配范围，不代表全部语义相关资料。',
-            'sources':sources,'catalog':{'queries':queries,'total':len(matches),'offset':offset,'limit':limit},'retrieval_notice':notice}
+            'sources':sources,'catalog':{'queries':queries,'total':len(matches),'offset':offset,'limit':limit,**({'literal':True} if literal else {})},'retrieval_notice':notice}

@@ -171,14 +171,14 @@ class Service:
     def catalog_page(self,body):
         from .catalog import page
         if not body.get('chat_id'):
-            return page(self.archive,body.get('queries'),body.get('offset',0),body.get('limit',20))
+            return page(self.archive,body.get('queries'),body.get('offset',0),body.get('limit',20),literal=body.get('literal') is True)
         with self.lock:
             saved=self.question_jobs.read();data=json.loads(json.dumps(saved))
             chat=next((c for c in data['conversations'] if c['id']==body['chat_id']),None)
             message=next((m for m in (chat or {}).get('messages',[]) if m['id']==body.get('message_id') and m['role']=='assistant'),None)
             if not message or not message.get('catalog') or message.get('pending') or message.get('requestState')=='running' or message.get('requestId')!=body.get('request_id') or message.get('requestVersion',0)!=body.get('request_version',0):
                 raise ValueError('资料清单已更新，请刷新后重试。')
-            result=page(self.archive,message['catalog']['queries'],body.get('offset',0),message['catalog']['limit'])
+            result=page(self.archive,message['catalog']['queries'],body.get('offset',0),message['catalog']['limit'],literal=message['catalog'].get('literal') is True)
             message.update(text=result['answer'],sources=result['sources'],catalog=result['catalog'])
             chat['updated']=max(int(time.time()*1000),chat.get('updated',0)+1)
             if message.get('requestId'):
@@ -1108,6 +1108,14 @@ class Service:
         # Exact standalone text asks only to confirm the saved record. Old topic
         # conditions do not transform this into a conflict or timetable analysis.
         if not force_refresh:
+            from . import catalog
+            keyword=catalog.literal_keyword(question) if not turns else None
+            if keyword:
+                stage('retrieving')
+                response=measured('retrieval_seconds',lambda:catalog.page(self.archive,[keyword],literal=True))
+                timings['total_seconds']=round(time.monotonic()-started,3)
+                response.update(timings=timings,answer_evidence=answer_evidence('catalog'))
+                return response
             from .archived_arrangements import lookup
             with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
             if archived:
@@ -1140,6 +1148,8 @@ class Service:
                 timings['queue_seconds']=round(time.monotonic()-waiting,3)
                 queries=knowledge_chat.quick_plan(question,turns)
                 timings['fast_followup']=queries is not None
+                if queries is None and not turns and not force_refresh:
+                    queries=measured('retrieval_seconds',lambda:knowledge_chat.definition_plan(self.archive,question))
                 if queries is None:queries=measured('planning_seconds',lambda:planning(turns,backend))
                 if getattr(queries,'catalog',False):
                     from .catalog import page

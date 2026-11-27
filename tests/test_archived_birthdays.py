@@ -106,3 +106,13 @@ class BirthdayTests(unittest.TestCase):
         self.assertNotIn('阳历3月2日', exact[0])
         # A shortened name matching multiple records requires disambiguation.
         self.assertIsNone(lookup(self.archive, '林妈妈生日'))
+
+    def test_previous_statement_repeated_as_archive_is_not_a_correction(self):
+        history = [{'question':'小林妈妈生日 阴历二〇〇一年八月十二', 'answer':'按你提供的信息。', 'source_ids':[]}]
+        with patch.object(self.service, 'model_backend', side_effect=ValueError('model path')):
+            answer = self.service.ask_library('小林妈妈生日', history=history)
+            self.assertEqual(answer['timings']['model_calls'], 0)
+            self.assertEqual(answer['sources'][0]['item_id'], self.item['id'])
+            history[0]['question'] = '小林妈妈生日 农历2001年8月13日'
+            with self.assertRaisesRegex(ValueError, 'model path'):
+                self.service.ask_library('小林妈妈生日', history=history)

@@ -67,12 +67,16 @@ def date_identity(value):
     return calendar, year, bool(leap), month, day
 
 
-def depends_on_conversation(subject, item_ids, turns):
+def depends_on_conversation(subject, item_ids, turns, record, archived_date):
     related = False
     for turn in turns:
         statement = turn['question']
         mentions_subject = subject in statement
         cited = item_ids.intersection(turn['source_ids'])
+        fact = record.fullmatch(arrangement_text(statement.removeprefix(CONDITION_PREFIX)))
+        if fact and date_identity(fact[1]) == archived_date:
+            related = True
+            continue
         if statement.startswith(CONDITION_PREFIX):
             if cited or mentions_subject or re.search(r'生日|出生日期|农历|阳历', statement):
                 return True
@@ -107,8 +111,6 @@ def lookup(archive, question, turns=()):
             "ORDER BY updated DESC LIMIT 9", (search,)).fetchall()
         if not rows or len(rows) > 8:
             return None
-        if depends_on_conversation(subject, {row['id'] for row in rows}, turns):
-            return None
         dates = set()
         original_dates = []
         for row in rows:
@@ -123,6 +125,8 @@ def lookup(archive, question, turns=()):
             dates.add(identity)
             original_dates.append(fact[1])
         if len(dates) != 1:
+            return None
+        if depends_on_conversation(subject, {row['id'] for row in rows}, turns, record, dates.pop()):
             return None
         item = rows[0]
         chunk = db.execute('SELECT * FROM chunks WHERE item_id=? AND position=0 LIMIT 1', (item['id'],)).fetchone()

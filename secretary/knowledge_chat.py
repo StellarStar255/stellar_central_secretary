@@ -32,6 +32,24 @@ class SearchPlan(list):
         super().__init__(queries);self.focus_ids=list(focus_ids);self.raw_query=raw_query;self.quick=quick;self.chat_answer=chat_answer;self.catalog=catalog
 
 
+def definition_plan(archive, question):
+    """Skip model planning for a named definition backed by a literal local hit."""
+    value=question.strip().rstrip('？?').strip()
+    match=re.fullmatch(r'(?:什么是\s*(.{2,60})|(.{2,60}?)\s*是什么|what is\s+(.{2,60}))',value,re.I)
+    if not match:return None
+    topic=next(group.strip() for group in match.groups() if group)
+    if not re.fullmatch(r'[\w][\w .+#-]{0,58}[\w+#]',topic):return None
+    if re.search(r'以及|区别|关系|为什么|怎么|\b(?:and|why|how|or)\b',topic,re.I):return None
+    key=topic.casefold()
+    # Chinese text can adjoin an English term without whitespace.
+    left=r'(?<![a-z0-9_])' if key[0].isascii() else ''
+    right=r'(?![a-z0-9_])' if key[-1].isascii() else ''
+    term=re.compile(left+re.escape(key)+right)
+    if any(term.search(hit[field].casefold()) for hit in archive.retrieve(topic,8) for field in ('title','text')):
+        return SearchPlan([topic,question],raw_query=question)
+    return None
+
+
 def quick_plan(question,turns):
     """A bounded shortcut for explicit references to already cited material.
 

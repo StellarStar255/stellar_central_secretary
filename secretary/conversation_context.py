@@ -21,7 +21,9 @@ def for_sources(value,source_ids):
 
 def live_history(archive,value):
     """Do not send answers or conditions derived from removed sources again."""
+    ids={item for turn in value for item in turn['source_ids']}
+    if not ids:return value
     with archive.db() as db:
-        ids={item for turn in value for item in turn['source_ids']}
-        live={item for item in ids if db.execute("SELECT 1 FROM items WHERE id=? AND trashed_at=''",(item,)).fetchone()}
+        slots=','.join('?' for _ in ids)
+        live={row[0] for row in db.execute("SELECT id FROM items WHERE trashed_at='' AND id IN ("+slots+")",tuple(ids))}
     return [turn for turn in value if set(turn['source_ids']).issubset(live)]

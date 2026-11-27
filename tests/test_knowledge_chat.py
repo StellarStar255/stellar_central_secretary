@@ -36,6 +36,53 @@ class KnowledgeChatTest(unittest.TestCase):
         self.assertEqual(answering['question'],'它的内存要求呢？')
         self.assertEqual(self.service.runtime()['answering'],0)
 
+    def test_named_definitions_skip_planning_only_with_evidence(self):
+        item,_=self.service.archive.add('测试资料','SQLite 是一种嵌入式数据库。')
+        for question in ('什么是SQLite？','What is SQLite?'):
+            with patch('secretary.ai.run',return_value='嵌入式数据库。[1]') as model:
+                result=self.service.ask_library(question)
+                self.assertEqual(model.call_count,1)
+                self.assertEqual(result['sources'][0]['item_id'],item)
+                self.assertIn('"passages"',model.call_args.args[0])
+        for question in ('SQLite 和其他数据库的区别是什么？','什么是未知术语？'):
+            self.assertIsNone(knowledge_chat.definition_plan(self.service.archive,question))
+        with patch('secretary.ai.run',side_effect=['{"queries":["SQLite"]}','复核。[1]']) as model:
+            self.service.ask_library('什么是SQLite？',force_refresh=True)
+            self.assertEqual(model.call_count,2)
+
+    def test_explicit_keyword_catalog_remains_local_and_pageable(self):
+        for i in range(23):self.service.archive.add('SQLite 笔记',f'SQLite 测试记录 {i}')
+        with patch.object(self.service,'model_backend',side_effect=AssertionError('Local search only')):
+            for q in ('列出所有包含「SQLite」的资料','List all records containing "SQLite"'):
+                result=self.service.ask_library(q)
+                self.assertEqual(result['timings']['model_calls'],0)
+                self.assertEqual(result['catalog']['total'],23)
+                self.assertEqual(len(result['sources']),20)
+                next_page=self.service.catalog_page(dict(result['catalog'],offset=20))
+                self.assertEqual(len(next_page['sources']),3)
+            for q in ('列出包含「SQLite 历史」的资料','列出包含「SQLite 记录」的资料'):
+                self.assertEqual(self.service.ask_library(q)['catalog']['total'],0)
+
+    def test_catalog_reloads_last_available_page_after_removals(self):
+        ids=[self.service.archive.add('库存',f'库存记录 {i}')[0] for i in range(24)]
+        page=self.service.ask_library('列出包含「库存记录」的资料')['catalog']
+        for key in ids[:6]:
+            self.service.archive.trash_item(key,self.service.archive.get(key)['updated'])
+        result=self.service.catalog_page(dict(page,offset=20))
+        self.assertEqual(result['catalog']['offset'],0)
+        self.assertEqual({hit['item_id'] for hit in result['sources']},set(ids[6:]))
+        self.assertEqual(result['catalog']['total'],18)
+
+    def test_definition_uses_whole_original_term_in_one_field(self):
+        self.service.archive.add('Graph API','Gateway deployment. Graph APIs are listed below.')
+        for question in ('What is Graph API Gateway?', 'What is Graph APIs are lis?'):
+            self.assertIsNone(knowledge_chat.definition_plan(self.service.archive,question))
+        self.assertIsNotNone(knowledge_chat.definition_plan(self.service.archive,'什么是Graph API？'))
+        with patch('secretary.ai.run',side_effect=['{"queries":["Graph API"]}','网关配置。[1]']) as model:
+            result=self.service.ask_library('What is Graph API Gateway?')
+            self.assertEqual(model.call_count,2)
+            self.assertTrue(result['sources'])
+
     def test_empty_library_does_not_call_model(self):
         with patch('secretary.ai.run') as model:
             result=self.service.ask_library('如何部署？')

@@ -111,6 +111,12 @@ with tempfile.TemporaryDirectory() as root:
    assert calls[-1][0]['question']==question
    assert any(turn['question']==correction for turn in calls[-1][0]['history'])
    assert len(service.archive.export())==len(before)+1
+   page.locator('#new-chat').click()
+   before_catalog=len(calls)
+   page.locator('#message-input').fill('列出所有包含「示例人物生日」的资料');page.locator('#send-button').click()
+   expect(page.locator('.message.assistant .message-body')).to_contain_text('共找到 1 条资料')
+   expect(page.locator('.source')).to_have_count(1)
+   assert len(calls)==before_catalog and len(service.archive.export())==len(before)+1
    page.screenshot(path='/tmp/secretary-schedule-chat-fixed.png')
    assert not errors,errors
    browser.close()

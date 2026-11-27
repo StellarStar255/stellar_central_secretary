@@ -3,6 +3,7 @@ import json,os,sys,tempfile,threading,time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary import model_api
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
@@ -27,7 +28,7 @@ with tempfile.TemporaryDirectory() as root:
  s=Service(root);s.archive.configure('api',False)
  model_api.write(root,model_api.prepare(root,{'base_url':f'http://127.0.0.1:{model.server_port}/v1','model':'synthetic','use_key':False,'streaming':True}))
  item=s.archive.add('课程表','课程表：周二下午无课。')[0]
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(s));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(s));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with sync_playwright() as p:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
