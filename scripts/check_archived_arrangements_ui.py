@@ -1,9 +1,9 @@
 """Verify repeated archived arrangements use the real background path, without AI."""
 import os,sys,tempfile,threading,time
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from secretary import ai
 from playwright.sync_api import sync_playwright,expect
@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory() as root:
         {'id':'old-condition','role':'user','text':'这个课程表就是她的，依据这张表判断','knowledgeQuestion':True},
         {'id':'old-condition-answer','role':'assistant','text':'已按指定条件核对课程表。','sources':[{'number':1,'item_id':table,'title':'Synthetic timetable'}]}
     ]}]})
-    server=ThreadingHTTPServer(('127.0.0.1',0),handler(service))
+    server=LocalHTTPServer(('127.0.0.1',0),handler(service))
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         with patch.object(ai,'run',side_effect=AssertionError('Exact archive matches must not call AI')),sync_playwright() as pw:

@@ -2,9 +2,9 @@
 import base64,io,json,os,sys,tempfile,threading
 from pathlib import Path
 from unittest.mock import patch
-from http.server import ThreadingHTTPServer
 from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
 calls=[]
@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as root:
  for title in ('罗马皇位继承','消费贷款','泰山登山'):
   service.archive.add(title,'今天下午讨论这个问题，有没有新的安排？')
  before=service.archive.export()
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch('secretary.ai.run',side_effect=model),sync_playwright() as p:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),headless=True)
@@ -63,8 +63,23 @@ with tempfile.TemporaryDirectory() as root:
    expect(page.locator('.answer-timing').last).to_contain_text('省去检索规划请求')
    assert service.archive.export()==before
    assert len([call for call in calls if call[1].get('images')])==5
+   birthday='示例人物生日 农历2001年8月12日'
+   for message,mode,expected in (
+    (birthday,'auto','note'),('妈妈的生日是农历十月廿三','auto','note'),
+    ('帮我确认妈妈的生日是农历十月廿三','auto','ask'),(birthday+'吗？','auto','ask'),
+    ('出生日期为：2001-08-12','auto','note'),('如果她生日是八月十二','auto','ask'),
+    ('查查妈妈生日是不是八月十二','auto','ask'),('示例人物生日是哪天？','auto','ask'),
+    (birthday,'library','library'),(birthday,'ask','ask')):
+    assert page.evaluate('([text,mode])=>resolveInputMode(text,mode,false,true)',[message,mode])==expected
+   page.locator('#input-mode').select_option('auto')
+   questions=[]
+   page.on('request',lambda request:questions.append(request.url) if '/api/ask' in request.url else None)
+   page.locator('#message-input').fill(birthday);page.locator('#send-button').click()
+   expect(page.locator('.message.assistant').last).to_contain_text(birthday)
+   assert len(service.archive.export())==len(before)+1
+   assert any(item['text']==birthday for item in service.archive.export()) and not questions
    page.screenshot(path='/tmp/secretary-schedule-chat-fixed.png')
    assert not errors,errors
    browser.close()
-   print('PASS: screenshot questions and declarative clarification, legacy accidental-archive recovery, persistent dialogue after reload, archive-only warning/return button, source cards, saved image supplied and zero new archives; deterministic model replies')
+   print('PASS: screenshot questions and declarative clarification, legacy accidental-archive recovery, persistent dialogue after reload, archive-only warning/return button, source cards, saved image supplied and automatic birthday archiving; deterministic model replies')
  finally:server.shutdown();server.server_close();service.close()

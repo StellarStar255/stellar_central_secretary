@@ -872,7 +872,7 @@ function archiveReply(result){const i=result.item;
 function updateInputMode(){
  const mode=$('#input-mode').value,archive=$('#archive-only').checked===true,note=mode==='note',library=mode==='library',dialogue=mode==='auto'&&hasKnowledgeContext();
  $('#message-input').placeholder=t(archive||note?'归档模式：输入要保存的文字或添加附件…':library||dialogue?'继续提问、补充条件或纠正上一条回答…':'发送消息、粘贴图片或链接，或拖入文件…');
- $('#composer-hint').textContent=t(archive?'仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。':note?'归档模式：当前文字保存为笔记，不进行问答。':mode==='group'?'组合归档：本次文字、链接和附件保存为一份资料。':library?'知识库对话：结合最近对话检索已存资料，回答附来源。只发送链接或附件会直接归档。':dialogue?'对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。':'自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。');
+ $('#composer-hint').textContent=t(archive?'仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。':note?'归档模式：当前文字保存为笔记，不进行问答。':mode==='group'?'组合归档：本次文字、链接和附件保存为一份资料。':library?'知识库对话：结合最近对话检索已存资料，回答附来源。只发送链接或附件会直接归档。':dialogue?'对话进行中：可以继续追问。写明日期的生日备注会自动归档。':'自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。');
  $('#composer-hint').classList.toggle('archive-mode-hint',archive||note);
  $('#resume-conversation').hidden=!(archive||note);
  $('#send-button').title=t(archive||note?'仅保存当前消息，不进行问答':'发送 (Enter)');
@@ -1072,6 +1072,13 @@ function bindArchiveRecovery(chat){
  });
 }
 const inputLinkPattern=/https?:\/\/[^\s<>"，。！？；）)]+/gi;
+function isBirthdayNote(text){
+ const value=text.trim();
+ if(/[?？\n]|是不是|是否|有没有|记得|确认|核实|查询|查查|算算|算一下|帮我|请问|你知道|你说|如果|假如|假设/.test(value))return false;
+ const date=/^(?:农历|阴历|公历|阳历|新历)?\s*(?:(?:\d{4}|[〇零一二三四五六七八九]{4})年\s*)?(?:闰?[\d一二三四五六七八九十正冬腊]{1,3}月\s*[\d初一二三四五六七八九十廿卅]{1,3}[日号]?|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})[。！!]?$/;
+ const fields=/^[\p{L}\p{N} ·]{0,40}?(?:出生日期|生日)\s*(?:[是在为]\s*)?[:：]?\s*(.+)$/u.exec(value);
+ return !!fields&&date.test(fields[1]);
+}
 function resolveInputMode(text,mode,hasFiles=false,followup=false){
  if(mode==='library'){
   if(hasFiles&&!text.trim())return 'auto';
@@ -1087,6 +1094,7 @@ function resolveInputMode(text,mode,hasFiles=false,followup=false){
  const question=/^(?:(?:请|请帮我|帮我)\s*)?(?:为什么|为何|怎么|如何|什么|哪些|请问|能否|是否|有没有|总结|分析|比较|查找|找一下|查下|查一下|解释|看看|看下|看一下|告诉我)|^(?:(?:please|can you|could you)\s+)?(?:what|how|why|which|where|when|who|is|are|do|does|can|could|should|would|summari[sz]e|analy[sz]e|compare|find|explain|describe|tell me|check|look at)\b/i.test(first);
  const command=/^\s*(?:```|[\[{]|(?:\$|PS>?)\s+|(?:sudo\s+)?(?:cd|tar|ssh|scp|rsync|curl|wget|python[\d.]*|pip[\d.]*|git|docker|kubectl|npm|npx|node|uv|conda|export|echo|ls|cat|find|awk|sed|rg|grep|chmod|mkdir|cp|mv|rm|powershell|cmd|Set-Location|Get-ChildItem|Compress-Archive)(?:\s|$))/im.test(text);
  if(command&&!question)return 'note';
+ if(!question&&!hasFiles&&isBirthdayNote(text))return 'note';
  if(followup&&!hasFiles&&!/https?:\/\//i.test(text))return 'ask';
  if(!hasFiles&&!/https?:\/\//i.test(text))return question||/[?？]\s*$|(?:是什么|有哪些|有什么|在哪里|怎么样|怎么办|吗|呢)[^\n]{0,24}$/.test(text)?'ask':'note';
  return mode;

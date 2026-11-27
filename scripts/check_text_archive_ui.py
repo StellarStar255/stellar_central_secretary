@@ -1,15 +1,15 @@
 """Archive synthetic command/knowledge text through the real composer; never execute it."""
 import os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 from playwright.sync_api import sync_playwright,expect
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 
 with tempfile.TemporaryDirectory() as root:
  service=Service(root);service.archive.configure('codex',False)
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch.object(service,'ask',side_effect=AssertionError('Text questions must use the conversation pipeline')),patch.object(service,'ask_library',return_value={'answer':'Synthetic question answer.','sources':[]}) as ask,patch('secretary.server.fetch_page',side_effect=AssertionError('Command URLs must not be fetched')) as fetch,sync_playwright() as pw:
    executable=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None)

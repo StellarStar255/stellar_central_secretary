@@ -1301,7 +1301,7 @@
   "仅归档已开启：当前消息只保存，不会回答。关闭此开关可继续对话。": "Archive only is on: this message will be saved, without an answer. Turn it off to continue the conversation.",
   "归档模式：当前文字保存为笔记，不进行问答。": "Archive mode: text is saved as a note, without an answer.",
   "组合归档：本次文字、链接和附件保存为一份资料。": "Grouped archive: save this text, links and attachments as one item.",
-  "对话进行中：补充、纠正和追问都会继续回答；保存笔记请明确选择归档。": "Conversation active: clarifications, corrections and follow-ups receive answers. Choose archive explicitly to save a note.",
+  "对话进行中：可以继续追问。写明日期的生日备注会自动归档。": "Conversation active: you can ask follow-up questions. Birthday notes with a date are archived automatically.",
   "自动识别：开始问答后持续对话；普通资料和命令可归档，不会执行命令。": "Auto-detect: once a conversation starts, keep talking. Material and commands can be archived; commands are never executed.",
   "仅保存当前消息，不进行问答": "Save this message without answering",
   "切回对话": "Back to conversation",

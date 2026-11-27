@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from secretary import ai,model_api
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 from playwright.sync_api import sync_playwright,expect
 
@@ -33,7 +34,7 @@ with tempfile.TemporaryDirectory() as root:
  model_api.write(root,model_api.prepare(root,{'base_url':f'http://127.0.0.1:{model.server_port}/v1','model':'synthetic','use_key':False,'streaming':True}))
  for i in range(65):service.archive.add('罗马史资料 '+str(i),'罗马史唯一记录 '+str(i))
  course,_=service.archive.add('课程表','课程表：周四14:00有课。这个段落用于验证引用能定位到原文中的具体内容。')
- server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+ server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch('secretary.answer_cache.current_time',return_value={'date':'2026-11-12','time':'12:00','utc_offset':'+0800'}),sync_playwright() as p:
    browser=p.chromium.launch(executable_path=os.environ.get('CHROME_PATH') or ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' if sys.platform=='darwin' else None),headless=True)
