@@ -1148,6 +1148,13 @@ class Service:
                 timings['queue_seconds']=round(time.monotonic()-waiting,3)
                 queries=knowledge_chat.quick_plan(question,turns)
                 timings['fast_followup']=queries is not None
+                preselected=None
+                notice=[]
+                if queries is None and not force_refresh:
+                    candidate=measured('retrieval_seconds',lambda:knowledge_chat.grounded_lookup(self.archive,question,turns,self.semantic,notice))
+                    if candidate:
+                        queries,preselected=candidate
+                        timings['local_plan']=True
                 if queries is None and not turns and not force_refresh:
                     queries=measured('retrieval_seconds',lambda:knowledge_chat.definition_plan(self.archive,question))
                 if queries is None:queries=measured('planning_seconds',lambda:planning(turns,backend))
@@ -1161,9 +1168,8 @@ class Service:
                     timings['answer_seconds']=timings.pop('planning_seconds',0)
                     timings['general_chat']=True
                     return result(queries.chat_answer,[],['通用对话回复，未检索知识库。'],'general',turns)
-                notice=[]
                 stage('retrieving')
-                passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
+                passages=preselected if preselected is not None else measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
                 if not passages and timings['fast_followup']:
                     timings['fast_followup']=False
                     queries=measured('planning_seconds',lambda:planning(turns,backend))

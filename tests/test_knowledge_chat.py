@@ -83,6 +83,37 @@ class KnowledgeChatTest(unittest.TestCase):
             self.assertEqual(model.call_count,2)
             self.assertTrue(result['sources'])
 
+    def test_grounded_new_questions_skip_only_planning(self):
+        person,_=self.service.archive.add('示例甲的个人资料','示例甲的出生日期：1995年8月12日。')
+        visit,_=self.service.archive.add('医院门诊预约','就诊日期：2026年11月28日，预约时间：10:30–11:00。')
+        project,_=self.service.archive.add('青杉计划','负责人：示例乙。')
+        history=[dict(question='示例甲的生日',answer='档案中有出生日期。[1]',source_ids=[person])]
+        for question,expected in [('我的生日呢？',person),('明天看病是几点？',visit),('「青杉计划」的负责人是谁？',project)]:
+            def reply(prompt,*args,**kwargs):
+                data=json.loads(prompt.split('\n',1)[1])
+                hits=[p for p in data['passages'] if p['title']==self.service.archive.get(expected)['title']]
+                self.assertTrue(hits)
+                if question=='我的生日呢？':
+                    self.assertEqual(data['history'][-1]['question'],'示例甲的生日')
+                if question=='明天看病是几点？':
+                    self.assertIn('current_time',data)
+                    self.assertNotIn('示例甲的个人资料',[p['title'] for p in data['passages']])
+                return '已核对。['+str(hits[0]['source'])+']'
+            with patch('secretary.ai.run',side_effect=reply) as model:
+                result=self.service.ask_library(question,history)
+                self.assertTrue(result['timings']['local_plan'])
+                self.assertEqual(model.call_count,1)
+                self.assertEqual(result['sources'][0]['item_id'],expected)
+
+    def test_weak_evidence_or_recheck_uses_normal_planner(self):
+        self.service.archive.add('预约', '门诊暂未公布时间。')
+        for q in ('我的生日呢？','明天看病是几点？','明天挂号需要带什么？','「青杉计划」的地点在哪里？'):
+            self.assertIsNone(knowledge_chat.grounded_lookup(self.service.archive,q,[],None,[]))
+        self.service.archive.add('就诊安排','明天看病时间为下午三点。')
+        with patch('secretary.ai.run',side_effect=['{"queries":["就诊安排"]}','下午三点。[1]']) as model:
+            self.service.ask_library('明天看病是几点？',force_refresh=True)
+            self.assertEqual(model.call_count,2)
+
     def test_empty_library_does_not_call_model(self):
         with patch('secretary.ai.run') as model:
             result=self.service.ask_library('如何部署？')

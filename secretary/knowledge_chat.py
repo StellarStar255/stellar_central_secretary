@@ -50,6 +50,49 @@ def definition_plan(archive, question):
     return None
 
 
+def grounded_lookup(archive, question, turns, semantic, notice):
+    """Try one local retrieval before sending a short factual lookup to a planner."""
+    from .archived_birthdays import QUESTION
+    from .conversation_context import CONDITION_PREFIX
+    value=question.strip().rstrip('？?')
+    birthday=QUESTION.fullmatch(value)
+    if birthday and birthday[1]=='我':
+        previous=next((turn for turn in reversed(turns) if not turn['question'].startswith(CONDITION_PREFIX)),None)
+        named=QUESTION.fullmatch(previous['question'].strip()) if previous else None
+        if not named or named[1] in ('我','他','她') or not previous['source_ids']:return None
+        # The last named person is a candidate, not the user's established identity.
+        queries=SearchPlan(['我的生日',named[1]+' 出生日期',question],previous['source_ids'],question)
+        passages=retrieve(archive,queries,semantic=semantic,notice=notice)
+        prior=[p for p in passages if p['item_id'] in previous['source_ids']]
+        if any(re.search(r'生日|出生|身份证',p['text']) for p in prior):
+            relevant=[p for p in passages if p['item_id'] in previous['source_ids'] or
+                      re.search(r'我(?:的)?(?:生日|出生日期)|本人(?:的)?(?:生日|出生日期)|我叫|我的姓名',p['title']+' '+p['text'])]
+            return queries,relevant
+        return None
+    field=re.fullmatch(r'(?:请问)?(?:「([^「」]{2,60})」|《([^《》]{2,60})》)(?:的)?(负责人|联系人|截止日期|截止时间|地点|地址|时间)(?:是|在)?(?:谁|哪里|哪天|几点|什么时候|什么地方)',value)
+    if field:
+        topic=field[1] or field[2]
+        label=field[3]
+        queries=SearchPlan([topic+' '+label,topic,question],raw_query=question)
+        passages=retrieve(archive,queries,semantic=semantic,notice=notice)
+        relevant=[p for p in passages if topic.casefold() in (p['title']+'\n'+p['text']).casefold()]
+        if any(label in p['text'] for p in relevant):
+            return queries,relevant
+        return None
+    if not re.fullmatch(r'(?:我(?:的)?\s*)?(?:今天|明天|后天)(?:的)?(?:看病|就诊|挂号|复诊|看医生|门诊)(?:时间)?(?:是|在)?(?:几点(?:钟)?|什么时候)',value):
+        return None
+    queries=SearchPlan(['就诊时间','预约挂号','复诊 看病 复查',question],raw_query=question)
+    passages=retrieve(archive,queries,semantic=semantic,notice=notice)
+    visit=re.compile(r'看病|就诊|挂号|复诊|看医生|门诊|医院.{0,24}预约')
+    clock=re.compile(r'(?<!\d)(?:[01]?\d|2[0-3])[:：][0-5]\d|(?:上午|下午|晚上)\s*[一二三四五六七八九十两\d]+点')
+    candidates={p['item_id'] for p in passages if visit.search(p['title']+' '+p['text'])}
+    selected=[p for p in passages if p['item_id'] in candidates]
+    dated={p['item_id'] for p in selected if re.search(r'今天|明天|后天|周[一二三四五六日天]|\d{1,2}月\d{1,2}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}',p['text'])}
+    if any(p['item_id'] in dated and clock.search(p['text']) for p in selected):
+        return queries,selected
+    return None
+
+
 def quick_plan(question,turns):
     """A bounded shortcut for explicit references to already cited material.
 
@@ -217,7 +260,7 @@ def answer(question,turns,passages,backend,images=None,visual_status=None):
              '旧周课表的空白不能推成当前周无课；除非资料明确说明重复规则，不得假定每周重复。'
              '如果用户明确指定按现有课表作判断，应直接给出条件性结论（按这张表、在图示时段内），并说明日期差异和本周沿用该表的假设，'
              '不要把条件性判断说成已经核实的本周事实，也不要反复以缺少新课表为由拒绝按用户指定依据判断。'
-             '若附有图片，直接核对图中内容与已有AI解读的差异；未附图片时说明只查到了文字，不能声称核对原图。'
+             '查询本人的生日，前一轮提到的姓名不能单独证明用户身份；只在身份明确时直接归属，否则说明条件或询问姓名，勿输出完整证件号码。查询就诊时间需核对预约的绝对日期与所问日期；日期不符时说明检索范围，不把其他日期的预约当成当天预约。若附有图片，直接核对图中内容与已有AI解读的差异；未附图片时说明只查到了文字，不能声称核对原图。'
              '用户要求再看已有课表时，应给出已核对的具体范围和结论边界，避免只重复索要已存在的资料。\n')
     payload=prompt+json.dumps({'question':question,'history':turns,'current_time':current_time(),'visual_evidence':visual_status or [],'passages':[
         {'source':i+1,'title':p['title'],'text':p['text'],'origin':p.get('origin',{})}
