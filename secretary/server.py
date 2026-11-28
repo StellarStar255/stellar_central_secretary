@@ -1084,6 +1084,10 @@ class Service:
             begin=time.monotonic()
             try:return action()
             finally:timings[name]=round(timings.get(name,0)+time.monotonic()-begin,3)
+        def show_excerpts(passages):
+            if progress and passages:
+                excerpts=knowledge_chat.source_excerpts(self.archive,question,passages)
+                stage('excerpts',excerpts)
         def planning(turns,backend,passages=()):
             stage('planning')
             timings['model_calls']+=1
@@ -1123,6 +1127,9 @@ class Service:
                 return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'],'archive')
             from .archived_arrangements import visit_time
             visit=measured('retrieval_seconds',lambda:visit_time(self.archive,question,turns))
+            if not visit:
+                from .appointment_facts import lookup as appointment_slot
+                visit=measured('retrieval_seconds',lambda:appointment_slot(self.archive,question,turns))
             if visit:
                 return result(*visit,[],'archive')
             from . import archived_birthdays
@@ -1144,6 +1151,11 @@ class Service:
             cached['timings']={'model_calls':0,'cache_hit':True,'total_seconds':round(time.monotonic()-started,3)}
             cached['retrieval_notice']='已复用近期回答：问题、对话条件、资料和模型配置未变化。'
             return cached
+        if progress and question.rstrip().endswith(('?', '？')):
+            hits=self.archive.retrieve(question,3)
+            try:self.model_backend(item_ids=[p['item_id'] for p in hits])
+            except company_ai.ApprovalRequired:hits=[]
+            show_excerpts(hits)
         with self.lock:self.questions+=1
         try:
             waiting=time.monotonic()
@@ -1169,6 +1181,8 @@ class Service:
                     if preview:
                         try:backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in preview])
                         except company_ai.ApprovalRequired:preview=[]
+                    if preview:
+                        show_excerpts(preview)
                     queries=measured('planning_seconds',lambda:planning(turns,backend,preview))
                     if getattr(queries,'grounded_answer',None):
                         if preview==knowledge_chat.planning_evidence(self.archive,question):
@@ -1196,6 +1210,7 @@ class Service:
                     passages=measured('retrieval_seconds',lambda:knowledge_chat.retrieve(self.archive,queries,semantic=self.semantic,notice=notice))
                 if not passages:return result('知识库中没有找到相关正文。请补充资料，或使用资料中的关键词提问。',[],notice,'no_match')
                 backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in passages])
+                show_excerpts(passages)
                 from .evidence_context import expand
                 passages,expanded,expansion_notice=measured('expansion_seconds',lambda:expand(self.archive,question,queries,passages,stage,cancel))
                 timings['expanded_passages']=expanded;notice.extend(expansion_notice)

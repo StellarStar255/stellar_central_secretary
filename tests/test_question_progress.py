@@ -19,16 +19,17 @@ class QuestionProgressTest(unittest.TestCase):
             progress.begin('c'*32)
         self.assertNotIn(a,progress.records)
 
-    def test_real_operations_emit_stages_without_content(self):
+    def test_excerpts_are_separate_from_stage_labels(self):
         with tempfile.TemporaryDirectory() as root:
             service=Service(root);service.archive.configure('codex',False)
             service.archive.add('Private course title','课程表：周四14:00有课。');stages=[]
             try:
                 with patch('secretary.ai.run',side_effect=['{"queries":["课程表"]}','14:00有课。[1]']):
                     service.ask_library('课程表有课吗？',progress=lambda name,count:stages.append((name,count)))
-                self.assertEqual([name for name,count in stages],['preparing','queued','planning','retrieving','images','answering'])
+                self.assertEqual([name for name,count in stages if name!='excerpts'],['preparing','queued','planning','retrieving','images','answering'])
                 self.assertEqual(stages[-1][1],1)
-                self.assertNotIn('Private',str(stages))
+                self.assertNotIn('Private',str([s for s in stages if s[0]!='excerpts']))
+                self.assertEqual(next(count for name,count in stages if name=='excerpts')[0]['title'],'Private course title')
                 stages=[]
                 with patch('secretary.ai.run',side_effect=AssertionError('No model')):
                     service.ask_library('你好呀',progress=lambda name,count:stages.append((name,count)))

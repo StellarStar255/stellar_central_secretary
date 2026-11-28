@@ -1334,6 +1334,7 @@
   "以下是你明确说明的条件，不代表已核实的资料事实。": "These are your stated conditions, not verified source facts.",
   "清除对话依据": "Clear conversation context",
   "流式显示回答（接口支持时）": "Stream answers (when supported by the API)",
+  "检索到的原文": "Retrieved excerpts",
   "回答生成中，内容尚未核对完成。": "Answer in progress; the content has not been fully checked.",
   "整理完成或失败时通知我": "Notify me when organization completes or fails",
   "系统通知不显示资料标题或正文。浏览器模式需允许通知。": "System notifications omit source titles and content. Browser mode requires notification permission.",

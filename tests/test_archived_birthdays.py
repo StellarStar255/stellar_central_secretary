@@ -68,6 +68,14 @@ class BirthdayTests(unittest.TestCase):
         self.service.archive.add('纠正','我的生日其实是3月3日')
         self.assertIsNone(lookup(self.archive,'我的生日呢？'))
 
+    def test_explicit_self_note_has_same_owner_for_my_question(self):
+        self.service.ingest({'text':'本人生日 公历2000年3月2日','archive_only':True})
+        result=self.service.ask_library('我的生日呢？')
+        self.assertEqual(result['timings']['model_calls'],0)
+        self.assertIn('你的生日是公历2000年3月2日',result['answer'])
+        self.service.archive.add('另一条个人记录','我的生日 公历2000年3月3日')
+        self.assertIsNone(lookup(self.archive,'本人的生日'))
+
     def test_date_boundaries(self):
         for value in ('2024-02-29', '农历二〇〇一年八月十二', '阴历闰四月二十三', '农历腊月初一', '11月30号'):
             self.assertTrue(date_identity(value), value)

@@ -99,10 +99,11 @@ def lookup(archive, question, turns=()):
         return None
     # Read birthday candidates across material types so a correction in an
     # attachment or a separately worded note can prevent a stale direct answer.
-    tokens = list(dict.fromkeys(token for token in terms(subject) if len(token) > 1))
+    self_lookup = subject in ('我','本人')
+    tokens = [] if self_lookup else list(dict.fromkeys(token for token in terms(subject) if len(token) > 1))
     clauses = [f'"{token}"' for token in tokens]
     search = ' AND '.join(clauses + ['("生日" OR "出生")'])
-    record = re.compile(re.escape(subject) + r'\s*(?:的\s*)?(?:生日|出生日期)\s*[是在为]?\s*[:：]?\s*([^\n]{1,64}?)[。！!]?')
+    record = re.compile((r'(?:我|本人)' if self_lookup else re.escape(subject)) + r'\s*(?:的\s*)?(?:生日|出生日期)\s*[是在为]?\s*[:：]?\s*([^\n]{1,64}?)[。！!]?')
     with archive.db() as db:
         db.execute('BEGIN')
         rows = db.execute(
@@ -120,7 +121,7 @@ def lookup(archive, question, turns=()):
             if row['note_images'] != '[]' or row['additions'] != '[]':
                 return None
             body = arrangement_text(row['text'])
-            if subject == '我':
+            if self_lookup:
                 # A standalone relative's birthday cannot describe the speaker.
                 relative = re.fullmatch(r'(?:[\w·]{1,20})?(?:爸爸|妈妈|父亲|母亲|儿子|女儿)(?:的)?(?:生日|出生日期)\s*[是在为]?\s*[:：]?\s*(.+?)[。！!]?', body)
                 if relative and date_identity(relative[1]):
@@ -134,7 +135,9 @@ def lookup(archive, question, turns=()):
             original_dates.append(fact[1])
         if len(dates) != 1:
             return None
-        if depends_on_conversation(subject, {row['id'] for row in matches}, turns, record, dates.pop()):
+        matched_date=dates.pop()
+        subjects=('我','本人') if self_lookup else (subject,)
+        if any(depends_on_conversation(name, {row['id'] for row in matches}, turns, record, matched_date) for name in subjects):
             return None
         item = matches[0]
         chunk = db.execute('SELECT * FROM chunks WHERE item_id=? AND position=0 LIMIT 1', (item['id'],)).fetchone()
@@ -142,5 +145,5 @@ def lookup(archive, question, turns=()):
             return None
     source = dict(chunk, title=item['title'], text=item['text'], revision=item['updated'],
                   origin=json.loads(chunk['origin']), url='', filename='')
-    owner = '你' if subject == '我' else subject
+    owner = '你' if self_lookup else subject
     return f'{owner}的生日是{original_dates[0]}。[1]', [source]

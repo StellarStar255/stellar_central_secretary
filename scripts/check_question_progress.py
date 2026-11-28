@@ -1,5 +1,5 @@
 """Hold actual HTTP question calls at model stages and verify live browser progress."""
-import json,os,sys,tempfile,threading
+import json,os,re,sys,tempfile,threading
 from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
@@ -29,10 +29,14 @@ with tempfile.TemporaryDirectory() as root:
    page.locator('#message-input').fill('课程表有课吗？');page.locator('#send-button').click()
    expect(page.locator('.question-progress')).to_contain_text('规划检索')
    page.wait_for_timeout(1200)
-   expect(page.locator('.question-progress small')).to_contain_text('已等待 1')
+   expect(page.locator('.question-progress > small')).to_contain_text(re.compile(r'已等待 [1-9]\d* 秒'))
+   expect(page.locator('.question-excerpts')).to_contain_text('周四14:00有课')
+   page.locator('.question-excerpts [data-id]').first.click()
+   expect(page.locator('#detail-dialog')).to_be_visible()
+   page.locator('#detail-dialog .dialog-head button').click()
    planning.set()
    expect(page.locator('.question-progress')).to_contain_text('生成回答')
-   expect(page.locator('.question-progress small')).to_contain_text('相关资料 1')
+   expect(page.locator('.question-progress > small')).to_contain_text('相关资料 1')
    answering.set()
    expect(page.locator('.source')).to_have_count(1)
    expect(page.locator('.question-progress')).to_have_count(0)

@@ -129,6 +129,35 @@ def history(value):
     return result
 
 
+def question_keywords(question):
+    from .core import terms
+    return set(terms(re.sub(r'请问|需要|什么|怎么|哪个|哪些|是否|可以|如何|为什么|我的|明天|今天|后天|上午|下午|晚上', ' ', question)))
+
+
+def source_excerpts(archive, question, passages):
+    from .core import terms
+    keywords=question_keywords(question)
+    excerpts=[]
+    from .appointment_facts import excerpts as appointment_excerpts
+    with archive.db() as db:
+        slots=appointment_excerpts(db,question,passages)
+        if slots:return slots
+        for hit in passages:
+            raw=hit['text']
+            if not hit.get('origin'):
+                row=db.execute("SELECT text FROM items WHERE id=? AND updated=? AND trashed_at=''",(hit['item_id'],hit['revision'])).fetchone()
+                if not row:continue
+                raw=raw.split('【AI 图片解读',1)[0].strip()
+                if not raw or raw not in row[0]:continue
+            lines=re.split(r'[\n。！？]+',raw)
+            line=max(lines,key=lambda s:len(keywords.intersection(terms(s))))
+            if not keywords.intersection(terms(line)) and not keywords.intersection(terms(hit['title'])):continue
+            snippet=re.sub(r'(?<!\d)\d{17}[\dXx](?!\d)','〔证件号〕',line.strip())
+            excerpts.append(dict(item_id=hit['item_id'],title=hit['title'],text=snippet[:220],origin=hit.get('origin',{})))
+            if len(excerpts)==2:break
+    return excerpts
+
+
 def planning_evidence(archive, question):
     """Offer complete short originals to the planner on a first factual question."""
     if len(question)>240 or not re.search(r'[?？]$|需要什么|需要带什么|怎么走|在哪里|多少钱',question.strip()):
@@ -144,7 +173,9 @@ def planning_evidence(archive, question):
             if not row or row['updated']!=hit['revision'] or hit['origin'] or hit['filename']:
                 return []
             hit['text']=row['text']
-    return hits
+    from .core import terms
+    keywords=question_keywords(question)
+    return [hit for hit in hits if keywords.intersection(terms(hit['title']+' '+hit['text']))]
 
 
 def plan(question,turns,backend,passages=()):

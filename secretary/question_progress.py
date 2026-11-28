@@ -1,4 +1,4 @@
-"""Short-lived, content-free progress for concurrent library requests."""
+"""Short-lived, progress for concurrent library requests."""
 import re
 import threading
 import time
@@ -25,11 +25,15 @@ class QuestionProgress:
         with self.lock:
             value=self.records[key]
             if value['cancel'].is_set():stage='cancelled';count=None
+            if stage=='excerpts':
+                if 'ended' not in value:value['excerpts']=count
+                return
             value.update(stage=stage,stage_at=time.monotonic())
             value.pop('count',None)
             if count is not None:value['count']=count
             if stage in ('done','error','cancelled'):value['ended']=time.monotonic()
-            if stage in ('done','error','cancelled'):value.pop('partial',None)
+            if stage in ('done','error','cancelled','approval'):
+                value.pop('partial',None);value.pop('excerpts',None)
 
     def partial(self,key,text):
         with self.lock:
@@ -42,7 +46,7 @@ class QuestionProgress:
             if not value:return {'stage':'connecting','elapsed_seconds':0,'stage_seconds':0}
             now=value.get('ended',time.monotonic())
             return {'stage':value['stage'],'elapsed_seconds':round(now-value['started'],1),'stage_seconds':round(now-value['stage_at'],1),
-                    **({'count':value['count']} if 'count' in value else {}),**({'partial':value['partial']} if 'partial' in value else {})}
+                    **({'excerpts':value['excerpts']} if 'excerpts' in value else {}),**({'count':value['count']} if 'count' in value else {}),**({'partial':value['partial']} if 'partial' in value else {})}
 
     def event(self,key):
         with self.lock:return self.records[key]['cancel']

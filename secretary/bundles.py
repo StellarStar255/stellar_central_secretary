@@ -14,11 +14,9 @@ def is_bundle(name):return str(name).lower().endswith('.stellar.zip')
 
 CLIPBOARD_IMAGE_NAME = re.compile(r'(?:(?:image|clipboard|pasted[-_ ]image)?\.(?:png|jpe?g|gif|webp|heic|heif|hif)|image)', re.I)
 
-def clipboard_image_name(name, raw, digest, media):
-    from .core import extract
+def clipboard_image_name(name, raw, digest, media, text):
     from . import local_ocr
     extension = Path(name).suffix.lower() or '.' + media.removeprefix('image/')
-    text, _ = extract('image' + extension, raw)
     def clean(value):
         value = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]+', ' ', value)
         return ' '.join(value.split()).strip(' .')[:56].rstrip(' .')
@@ -85,8 +83,10 @@ def create(text,files,urls=None,existing=None):
         if media.startswith('image/'):
             images+=1
             if images>8:raise ValueError('每份组合资料最多包含 8 张图片')
+            source,ocr_warning=extract('image.'+media.removeprefix('image/'),raw)
+            if ocr_warning and not source:warning=' '.join(filter(None,[warning,ocr_warning]))
             if file.get('clipboard_image') is True and CLIPBOARD_IMAGE_NAME.fullmatch(name):
-                name=clipboard_image_name(name,raw,digest,media)
+                name=clipboard_image_name(name,raw,digest,media,source)
         if video_type(name):media=video_type(name);warning='视频原件已保存，可直接播放；暂未提取字幕或音轨正文。'
         if len(source)>remaining:source=source[:remaining];warning+=' 正文超过组合资料索引上限，仅保存可索引的前部文字；原件完整保留。'
         remaining-=len(source)

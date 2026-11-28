@@ -179,6 +179,8 @@ class Archive:
                 if name not in columns:
                     db.execute('ALTER TABLE items ADD COLUMN '+name+' '+definition)
                     if name=='company_data':db.execute("UPDATE items SET company_data=1 WHERE url!=''")
+            from .appointment_facts import initialize as initialize_slots
+            initialize_slots(db)
             if 'tags_manual' not in columns:
                 db.execute('ALTER TABLE items ADD COLUMN tags_manual INTEGER NOT NULL DEFAULT 0')
                 for row in db.execute('SELECT id,text FROM items').fetchall():self._index(db,row['id'],row['text'])
@@ -305,6 +307,8 @@ class Archive:
             for offset in range(0,len(content),1000):
                 chunk=content[offset:offset+1200]
                 cursor=db.execute('INSERT INTO chunks(item_id,position,text,origin) VALUES (?,?,?,?)',(item_id,-1,chunk,json.dumps(origin,ensure_ascii=False)))
+                from .appointment_facts import extract
+                extract(db,cursor.lastrowid,chunk,origin)
                 db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
     def add(self, title='', text='', url='', filename='', data=None, warning=''):
         if isinstance(data,Path):

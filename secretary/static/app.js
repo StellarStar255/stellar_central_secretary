@@ -930,7 +930,8 @@ function questionProgress(message){
  const elapsed=Math.max(0,Math.floor((Date.now()-p.started)/1000));
  const stopping=activeQuestion?.messageId===message.id&&activeQuestion.cancelRequested;
  const note=p.offline?'暂时无法获取进度，仍在等待回答。':elapsed>=8&&['planning','answering'].includes(p.stage)?'正在等待模型返回，耗时受模型服务和网络影响。':'';
- return `<div class="question-progress" role="status" aria-live="polite"><p>${esc(t(stopping?'正在停止…':labels[p.stage]||labels.connecting))}</p><small>${esc(t('已等待'))} ${elapsed} ${esc(t('秒'))}${p.count?` · ${esc(t('相关资料'))} ${Number(p.count)}`:''}</small>${note?`<p class="muted">${esc(t(note))}</p>`:''}${activeQuestion?.messageId===message.id?`<button type="button" class="question-stop" data-cancel-question="${activeQuestion.id}" ${stopping?'disabled':''}>${esc(t(stopping?'正在停止…':'停止回答'))}</button>`:''}${p.partial?`<p class="muted">${esc(t('回答生成中，内容尚未核对完成。'))}</p><div class="streaming-answer">${esc(p.partial)}</div>`:''}</div>`;
+ const excerpts=(p.excerpts||[]).map(s=>`<blockquote><button type="button" class="source-view" data-id="${esc(s.item_id)}" data-source-snippet="${esc(s.text)}" data-source-origin="${esc(JSON.stringify(s.origin||{}))}">${esc(s.title)}</button><div>${esc(s.text)}</div></blockquote>`).join('');
+ return `<div class="question-progress" role="status" aria-live="polite"><p>${esc(t(stopping?'正在停止…':labels[p.stage]||labels.connecting))}</p><small>${esc(t('已等待'))} ${elapsed} ${esc(t('秒'))}${p.count?` · ${esc(t('相关资料'))} ${Number(p.count)}`:''}</small>${excerpts?`<div class="question-excerpts"><small>${esc(t('检索到的原文'))}</small>${excerpts}</div>`:''}${note?`<p class="muted">${esc(t(note))}</p>`:''}${activeQuestion?.messageId===message.id?`<button type="button" class="question-stop" data-cancel-question="${activeQuestion.id}" ${stopping?'disabled':''}>${esc(t(stopping?'正在停止…':'停止回答'))}</button>`:''}${p.partial?`<p class="muted">${esc(t('回答生成中，内容尚未核对完成。'))}</p><div class="streaming-answer">${esc(p.partial)}</div>`:''}</div>`;
 }
 function watchQuestionProgress(chat,message,progressId){
  let stopped=false,pollTimer,tickTimer;if(!message.sources?.length)message.text='';message.questionProgress={stage:'connecting',started:Date.now()};if(activeQuestion)activeQuestion.progress=message.questionProgress;
@@ -940,7 +941,7 @@ function watchQuestionProgress(chat,message,progressId){
    const state=await api('/api/ask/progress',{progress_id:progressId});
    if(stopped)return;
    if(state.stage!=='connecting'||message.questionProgress.stage==='connecting')Object.assign(message.questionProgress,{stage:state.stage,count:state.count});
-   message.questionProgress.offline=false;if(typeof state.partial==='string')message.questionProgress.partial=state.partial;
+   message.questionProgress.excerpts=state.excerpts;message.questionProgress.offline=false;if(typeof state.partial==='string')message.questionProgress.partial=state.partial;
   }catch(e){if(!stopped)message.questionProgress.offline=true}
   if(!stopped){render();pollTimer=setTimeout(poll,700)}
  };
@@ -954,7 +955,7 @@ async function receiveQuestionJob(chat,message,request){
   try{
    const data=await api('/api/ask/job',{progress_id:request.id,chat_id:chat.id,message_id:message.id,wait:true});
    if(data.waited)retryDelay=50;
-   Object.assign(request.progress,data.progress,{offline:false,started:Date.now()-(data.progress.elapsed_seconds||0)*1000});
+   Object.assign(request.progress,data.progress,{excerpts:data.progress.excerpts,offline:false,started:Date.now()-(data.progress.elapsed_seconds||0)*1000});
    if(data.message.requestState!=='running'){
     updateMessage(chat,message,data.message);
     if(data.message.requestState==='done'||data.message.sources?.length)return jobResponse(data.message);
