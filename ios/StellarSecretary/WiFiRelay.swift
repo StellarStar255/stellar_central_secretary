@@ -12,14 +12,17 @@ final class WiFiRelay: @unchecked Sendable {
     let listener: NWListener
     private var browser: NWBrowser?
     private var target: NWEndpoint?
+    private var routeGeneration = UUID()
     private var targetInterface: NWInterface?
+    private var retryAfter: [String:Date] = [:]
     private var keeper: NWConnection?
     private var probes: [NWEndpoint:NWConnection] = [:]
     private var started = false
     private var stopped = false
     private var suspended=false
     private var localURL: String?
-    private var waiters: [UUID: CheckedContinuation<String,Error>] = [:]
+    private typealias Route = (url:String, generation:UUID)
+    private var waiters: [UUID: CheckedContinuation<Route,Error>] = [:]
     private var pipes: [UUID: Pipe] = [:]
     var diagnostic: (@Sendable (String) -> Void)?
     private let logger=Logger(subsystem:"io.github.stellarstar255.secretary",category:"WiFiRelay")
@@ -80,6 +83,7 @@ final class WiFiRelay: @unchecked Sendable {
             for result in results {
                 guard case .service(let name,let type,let domain,_)=result.endpoint,name == "stellar-"+self.serverID else {continue}
                 for interface in result.interfaces where interface.type == .wifi || interface.name.hasPrefix("awdl") {
+                    guard (self.retryAfter[interface.name] ?? .distantPast) <= Date() else {continue}
                     let endpoint=NWEndpoint.service(name:name,type:type,domain:domain,interface:interface)
                     if self.probes[endpoint] == nil && self.probes.count < 8 {
                         self.check(endpoint)
@@ -105,6 +109,7 @@ final class WiFiRelay: @unchecked Sendable {
             self.report("probe-"+String(describing:state))
             switch state {
             case .ready:
+                self.routeGeneration=UUID()
                 self.target=connection.currentPath?.remoteEndpoint ?? endpoint
                 if case .service(_,_,_,let interface)=endpoint {self.targetInterface=interface}
                 self.browser?.cancel();self.browser=nil
@@ -131,21 +136,48 @@ final class WiFiRelay: @unchecked Sendable {
             current.cancel();self.browser=nil;self.browse()
         }
     }
-    func endpoint(timeout: TimeInterval = 14) async throws -> String {
+    private func route(timeout: TimeInterval) async throws -> Route {
         let id=UUID(),token=CancellationToken()
         return try await withTaskCancellationHandler(operation:{
             try await withCheckedThrowingContinuation { continuation in self.queue.async {
                 guard !token.cancelled,!self.stopped else {continuation.resume(throwing:CancellationError());return}
                 self.startOnQueue()
-                if let url=self.localURL,self.target != nil {continuation.resume(returning:url);return}
+                if let url=self.localURL,self.target != nil {continuation.resume(returning:(url,self.routeGeneration));return}
                 self.waiters[id]=continuation
                 self.queue.asyncAfter(deadline:.now()+timeout) {self.waiters.removeValue(forKey:id)?.resume(throwing:PairingTransportFailure.timedOut)}
             }}
         },onCancel:{self.queue.async {token.cancelled=true;self.waiters.removeValue(forKey:id)?.resume(throwing:CancellationError())}})
     }
+    func verifiedEndpoint(fingerprint:String, timeout:TimeInterval = 14) async throws -> String {
+        let deadline=Date().addingTimeInterval(timeout)
+        while deadline.timeIntervalSinceNow > 0 {
+            let (url,generation)=try await route(timeout:max(0,deadline.timeIntervalSinceNow))
+            do {
+                return try await PairingTLSProbe.verified(url,fingerprint:fingerprint,
+                    timeout:min(4,max(0.1,deadline.timeIntervalSinceNow)))
+            } catch {
+                try Task.checkCancellation()
+                await withCheckedContinuation { reply in
+                    queue.async { [self] in
+                        if self.target != nil, self.routeGeneration == generation, let interface=self.targetInterface {
+                            // TCP can accept while the peer gateway is still unreachable over this interface.
+                            self.retryAfter[interface.name]=Date().addingTimeInterval(3)
+                            self.retryRoute(generation)
+                            self.queue.asyncAfter(deadline:.now()+3) { [weak self] in
+                                guard let self, self.target == nil, self.probes.isEmpty else {return}
+                                self.browser?.cancel();self.browser=nil;self.browse()
+                            }
+                        }
+                        reply.resume()
+                    }
+                }
+            }
+        }
+        throw PairingTransportFailure.timedOut
+    }
     private func completeWaiters() {
         guard let url=localURL,target != nil else { return }
-        let values=waiters.values;waiters.removeAll();for value in values {value.resume(returning:url)}
+        let values=waiters.values;waiters.removeAll();for value in values {value.resume(returning:(url,routeGeneration))}
         onAvailable?()
     }
     private func accept(_ incoming: NWConnection) {
@@ -158,20 +190,31 @@ final class WiFiRelay: @unchecked Sendable {
             parameters.requiredInterface=targetInterface
             outgoing=NWConnection(to:target,using:parameters)
         } else { incoming.cancel();startOnQueue();return }
+        let generation=routeGeneration
         let id=UUID(),pipe=Pipe(incoming,outgoing);pipes[id]=pipe
         incoming.stateUpdateHandler={ [weak self] state in if case .failed=state {self?.close(id)} }
         outgoing.stateUpdateHandler={ [weak self] state in
             guard let self,self.pipes[id] === pipe else {return}
-            if case .ready=state {pipe.ready=true;self.keeper?.cancel();self.keeper=nil;self.copy(id,from:incoming,to:outgoing);self.copy(id,from:outgoing,to:incoming)}
+            if case .ready=state {
+                pipe.ready=true
+                if self.routeGeneration == generation {self.keeper?.cancel();self.keeper=nil}
+                self.copy(id,from:incoming,to:outgoing);self.copy(id,from:outgoing,to:incoming)
+            }
             else if case .failed=state {
                 self.close(id)
-                if self.upstreamPort == nil { self.target=nil;self.startOnQueue() }
+                self.retryRoute(generation)
             }
         }
         incoming.start(queue:queue);outgoing.start(queue:queue)
         queue.asyncAfter(deadline:.now()+10) { [weak self] in
-            guard let self,self.pipes[id] === pipe,!pipe.ready else {return};self.close(id)
+            guard let self,self.pipes[id] === pipe,!pipe.ready else {return}
+            self.close(id);self.retryRoute(generation)
         }
+    }
+    private func retryRoute(_ generation:UUID) {
+        guard upstreamPort == nil, !stopped, !suspended, target != nil, routeGeneration == generation else {return}
+        target=nil;targetInterface=nil;keeper?.cancel();keeper=nil
+        browse()
     }
     private func copy(_ id:UUID,from:NWConnection,to:NWConnection) {
         from.receive(minimumIncompleteLength:1,maximumLength:32768) { [weak self] data,_,complete,error in

@@ -64,11 +64,16 @@ final class PairingNetworkTests: XCTestCase {
     func testClosedPortNeverCountsAsSuccessfulConnection() async throws {
         let listener = try NWListener(using: .tcp, on: .any)
         let ready = expectation(description: "Listener ready")
-        listener.stateUpdateHandler = { state in if case .ready = state { ready.fulfill() } }
+        let closed = expectation(description:"Listener has released its port")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+            if case .cancelled = state { closed.fulfill() }
+        }
         listener.newConnectionHandler = { $0.cancel() }
         listener.start(queue: DispatchQueue(label:"fixture.closed"))
         await fulfillment(of: [ready], timeout: 3)
         let port = listener.port!.rawValue;listener.cancel()
+        await fulfillment(of:[closed],timeout:3)
         do {
             try await PairingNetworkProbe(url:URL(string:"https://127.0.0.1:\(port)")!,timeout:0.2).check()
             XCTFail("Closed port must not count as connected")
@@ -142,6 +147,29 @@ private final class FixtureTrust: NSObject,URLSessionDelegate {
     }
 }
 extension WiFiRelayTests {
+    func testPinnedRouteBecomesReachableDuringUploadDiscovery() async throws {
+        let env=ProcessInfo.processInfo.environment
+        guard let value=env["STELLAR_TLS_FIXTURE_PORT"], let port=UInt16(value),
+              let pin=env["STELLAR_TLS_FIXTURE_PIN"] else {throw XCTSkip("Requires isolated TLS gateway")}
+        let parameters=NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host:"127.0.0.1",port:.any)
+        let relay=try WiFiRelay(serverID:UUID().uuidString,upstreamPort:port,serverParameters:parameters)
+        let bound=expectation(description:"Delayed route listener is bound")
+        relay.listener.stateUpdateHandler={ if case .ready=$0 {bound.fulfill()} }
+        let accept=try XCTUnwrap(relay.listener.newConnectionHandler)
+        var firstAttempt:Date?
+        relay.listener.newConnectionHandler={ connection in
+            let start=firstAttempt ?? Date()
+            firstAttempt=start
+            if Date().timeIntervalSince(start)<0.7 {connection.cancel()} else {accept(connection)}
+        }
+        relay.start();defer {relay.stop()}
+        await fulfillment(of:[bound],timeout:3)
+        let endpoint="https://127.0.0.1:\(try XCTUnwrap(relay.listener.port).rawValue)"
+        let selected=try await PairingTLSProbe.verifiedWhileDiscovering(endpoint,fingerprint:pin,timeout:4)
+        XCTAssertEqual(selected,endpoint)
+    }
+
     func testRealGatewayTLSAndAuthenticatedStatusThroughRelay() async throws {
         let env=ProcessInfo.processInfo.environment
         guard let value=env["STELLAR_TLS_FIXTURE_PORT"],let port=UInt16(value),let pin=env["STELLAR_TLS_FIXTURE_PIN"],let credential=env["STELLAR_TLS_FIXTURE_CREDENTIAL"] else {throw XCTSkip("Run scripts/check_wifi_tls.py for the isolated TLS fixture")}
@@ -174,6 +202,28 @@ extension WiFiRelayTests {
             XCTAssertEqual(object?["connected"] as? Bool,true)
         }
         XCTAssertEqual(trust.challenges,1,"Foreground requests must reuse one pinned TLS connection")
+        if let folder=env["STELLAR_TLS_FIXTURE_PHOTOS"] {
+            let files = try (0..<8).map { index -> [String:Any] in
+                let name = "\(index).jpg"
+                let file = URL(fileURLWithPath:folder).appendingPathComponent(name)
+                return ["name":name,"data":try Data(contentsOf:file)]
+            }
+            let body:[String:Any] = ["request_id":"fixture-batch","content":["attachments":files]]
+            let packet = try MobileUploadBody.encode(body,binary:true)
+            var upload = URLRequest(url:URL(string:endpoint+"/privacy-v1/ingest")!)
+            upload.httpMethod="POST"
+            upload.timeoutInterval=30
+            upload.setValue(packet.type,forHTTPHeaderField:"Content-Type")
+            upload.setValue("Bearer "+credential,forHTTPHeaderField:"Authorization")
+            for replay in [false,true] {
+                let started=Date()
+                let (data,response)=try await session.upload(for:upload,from:packet.data)
+                XCTAssertEqual((response as? HTTPURLResponse)?.statusCode,200)
+                let receipt=try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+                XCTAssertEqual(receipt["duplicate"] as? Bool,replay)
+                print("8 MiB loopback relay to archive receipt, replay=\(replay): \(Date().timeIntervalSince(started))s")
+            }
+        }
         relay.stop()
         let recovered=await PairingTLSProbe.firstVerifiedDirect([endpoint,direct],fingerprint:pin,timeout:2)
         XCTAssertEqual(recovered,direct)

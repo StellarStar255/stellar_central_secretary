@@ -11,7 +11,27 @@ with tempfile.TemporaryDirectory(prefix='stellar-wifi-tls-') as folder:
     credential=secrets.token_urlsafe(48)
     gateway.state['devices']['fixture']={'hash':digest(credential),'name':'Fixture phone','created':'fixture'}
     env={**os.environ,'DEVELOPER_DIR':'/Applications/Xcode.app/Contents/Developer','STELLAR_TLS_FIXTURE_PORT':str(gateway.server.server_port),'STELLAR_TLS_FIXTURE_PIN':gateway.fingerprint,'STELLAR_TLS_FIXTURE_CREDENTIAL':credential}
+    # JPEG originals are padded to one MiB so the transfer size is reproducible.
+    import io
+    from PIL import Image
+    from secretary import bundles
+    photos=Path(folder)/'fixture-photos'
+    photos.mkdir()
+    for index in range(8):
+        image=io.BytesIO()
+        Image.new('RGB',(640,480),(index*30,60,120)).save(image,'JPEG')
+        (photos/f'{index}.jpg').write_bytes(image.getvalue().ljust(1024**2,b'\0'))
+    env['STELLAR_TLS_FIXTURE_PHOTOS']=str(photos)
     try:
         subprocess.run(['swift','test','--package-path','ios','--scratch-path','/tmp/stellar-pairing-network-tests'],env=env,check=True)
+        items=service.archive.list()
+        assert len(items)==1, 'Retry must return the original archive'
+        archive,manifest=bundles.load(service.archive.root/'files'/items[0]['id'])
+        with archive:
+            assert len(manifest['files'])==8
+            for index,file in enumerate(manifest['files']):
+                expected=photos/f'{index}.jpg'
+                assert file['name']==expected.name and archive.read(file['path'])==expected.read_bytes()
+        print('PASS: eight ordered JPEG originals preserved byte for byte after upload and replay')
         print('PASS: real TLS, certificate pinning and three authenticated gateway requests over one reused native-relay TLS connection')
     finally:service.close()

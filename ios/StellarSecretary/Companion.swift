@@ -390,7 +390,7 @@ struct RecordAppend {
                     return try await PairingTLSProbe.verifiedWhileDiscovering(url,fingerprint:info.fingerprint)
                 }}
             }
-            if let wifi, !bluetoothOnly { group.addTask {let endpoint = try await wifi.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint) } }
+            if let wifi, !bluetoothOnly { group.addTask {try await wifi.verifiedEndpoint(fingerprint:info.fingerprint) } }
             if let bluetooth, !wifiOnly {group.addTask {if !bluetoothOnly && !preferBluetooth {try await Task.sleep(for:.seconds(4))};let endpoint = try await bluetooth.endpoint();return try await PairingTLSProbe.verified(endpoint,fingerprint:info.fingerprint)}}
             var failure: Error = PairingTransportFailure.timedOut
             while !group.isEmpty {
@@ -1089,12 +1089,11 @@ struct RecordAppend {
         return try? await withThrowingTaskGroup(of:String?.self) { group in
             group.addTask { try await Task.sleep(for:.seconds(timeout));throw PairingTransportFailure.timedOut }
             for url in direct.prefix(9) where URLComponents(string:url)?.host?.hasPrefix("169.254.") != true {
-                group.addTask { try? await PairingTLSProbe.verified(url,fingerprint:pair.info.fingerprint) }
+                group.addTask { try? await PairingTLSProbe.verifiedWhileDiscovering(url,fingerprint:pair.info.fingerprint,timeout:timeout) }
             }
             if let wifi {
                 group.addTask {
-                    guard let endpoint = try? await wifi.endpoint(timeout:timeout) else { return nil }
-                    return try? await PairingTLSProbe.verified(endpoint,fingerprint:pair.info.fingerprint)
+                    try? await wifi.verifiedEndpoint(fingerprint:pair.info.fingerprint,timeout:timeout)
                 }
             }
             for try await endpoint in group {

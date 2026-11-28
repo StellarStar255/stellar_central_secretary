@@ -137,10 +137,11 @@ final class PairingTLSProbe: NSObject, URLSessionTaskDelegate, @unchecked Sendab
         var failure:Error=PairingTransportFailure.timedOut
         repeat {
             try Task.checkCancellation()
-            do {return try await verified(endpoint,fingerprint:fingerprint)}
+            do {return try await verified(endpoint,fingerprint:fingerprint,timeout:min(3,max(0.1,deadline.timeIntervalSinceNow)))}
             catch {try Task.checkCancellation();failure=error}
-            guard Date()<deadline else {break}
-            try await Task.sleep(nanoseconds:500_000_000)
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else {break}
+            try await Task.sleep(nanoseconds:UInt64(min(0.5,remaining) * 1_000_000_000))
         } while Date()<deadline
         throw failure
     }

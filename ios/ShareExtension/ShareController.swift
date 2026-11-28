@@ -107,7 +107,7 @@ final class ShareController: UIViewController {
             if let wifi {
                 group.addTask {
                     wifi.start()
-                    return try await PairingTLSProbe.verified(wifi.endpoint(), fingerprint: pin, timeout: 5)
+                    return try await wifi.verifiedEndpoint(fingerprint:pin)
                 }
             }
             if let bluetooth {
