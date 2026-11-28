@@ -1084,10 +1084,10 @@ class Service:
             begin=time.monotonic()
             try:return action()
             finally:timings[name]=round(timings.get(name,0)+time.monotonic()-begin,3)
-        def planning(turns,backend):
+        def planning(turns,backend,passages=()):
             stage('planning')
             timings['model_calls']+=1
-            return knowledge_chat.plan(question,turns,backend)
+            return knowledge_chat.plan(question,turns,backend,passages)
         def result(answer,passages,notice,kind,model_turns=()):
             if cancel is not None and cancel.is_set():raise ai.ModelCancelledError('问答已停止。')
             timings['total_seconds']=round(time.monotonic()-started,3)
@@ -1161,7 +1161,22 @@ class Service:
                         timings['local_plan']=True
                 if queries is None and not turns and not force_refresh:
                     queries=measured('retrieval_seconds',lambda:knowledge_chat.definition_plan(self.archive,question))
-                if queries is None:queries=measured('planning_seconds',lambda:planning(turns,backend))
+                if queries is None:
+                    preview=[]
+                    from .semantic import config as semantic_config
+                    if not retained and not force_refresh and not semantic_config(self.archive)['enabled']:
+                        preview=measured('retrieval_seconds',lambda:knowledge_chat.planning_evidence(self.archive,question))
+                    if preview:
+                        try:backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in preview])
+                        except company_ai.ApprovalRequired:preview=[]
+                    queries=measured('planning_seconds',lambda:planning(turns,backend,preview))
+                    if getattr(queries,'grounded_answer',None):
+                        if preview==knowledge_chat.planning_evidence(self.archive,question):
+                            timings['answer_seconds']=timings.pop('planning_seconds')
+                            response=result(queries.grounded_answer,preview,notice,'library',turns)
+                            if cache_key==answer_key(self.archive,question,turns,backend,self.semantic.generation):
+                                self.answer_cache.put(cache_key,self.archive,response,preview)
+                            return response
                 if getattr(queries,'catalog',False):
                     from .catalog import page
                     stage('retrieving')

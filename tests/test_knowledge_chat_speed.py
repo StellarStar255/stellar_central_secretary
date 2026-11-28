@@ -58,6 +58,22 @@ class KnowledgeChatSpeedTest(unittest.TestCase):
         self.assertEqual(result['timings']['model_calls'],1)
         self.assertGreaterEqual(result['timings']['total_seconds'],result['timings']['answer_seconds'])
 
+    def test_first_model_call_can_answer_from_complete_originals(self):
+        item,_=self.service.archive.add('仓库流程','领取备件要带工单。')
+        q='去仓库领取备件需要带什么？'
+        with patch('secretary.ai.run',return_value=json.dumps(dict(route='grounded',answer='工单。[1]'))) as model:
+            result=self.service.ask_library(q)
+        self.assertEqual(result['timings']['model_calls'],1)
+        self.assertEqual(result['sources'][0]['item_id'],item)
+        self.assertEqual(json.loads(model.call_args.args[0].split('\n',1)[1])['passages'][0]['text'],'领取备件要带工单。')
+
+    def test_unverified_planner_citation_continues_retrieval(self):
+        self.service.archive.add('仓库流程','领取备件要带工单。')
+        with patch('secretary.ai.run',side_effect=['{"route":"grounded","answer":"工单。[9]","queries":["领取备件"]}','需带工单。[1]']):
+            result=self.service.ask_library('去仓库领取备件需要带什么？')
+        self.assertEqual(result['timings']['model_calls'],2)
+        self.assertEqual(result['answer'],'需带工单。[1]')
+
     def test_new_topic_keeps_query_planning(self):
         _,turns=self.context()
         other,_=self.service.archive.add('Roman history','Roman succession history')
