@@ -206,6 +206,7 @@ struct CaptureView: View {
     @State private var importing = false
     @State private var sharedFiles: [URL] = []
     @State private var showingSummarySettings = false
+    @State private var cameraOpen = false
     @State private var saving = false
     @FocusState private var editing: Bool
     var body: some View {
@@ -239,6 +240,12 @@ struct CaptureView: View {
                 }
                 Section("链接、笔记或安排") { TextEditor(text:$model.captureEditor.text).focused($editing).frame(minHeight:150).accessibilityLabel("归档内容") }
                 Section {
+                    Button {
+                        editing = false
+                        cameraOpen = true
+                    } label: { Label("拍照",systemImage:"camera") }
+                    .accessibilityIdentifier("capture-camera")
+                    .disabled(loadingPhotos || saving || remainingCameraSlots <= 0 || remainingCameraBytes <= 0)
                     PhotosPicker(selection:$photos,maxSelectionCount:ChatAttachment.maxCount,selectionBehavior:.ordered,matching:.images,preferredItemEncoding:.current) {
                         Label("添加截图或照片",systemImage:"photo")
                     }.disabled(loadingPhotos || saving)
@@ -322,6 +329,15 @@ struct CaptureView: View {
                     }
                 }
             }.navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            .fullScreenCover(isPresented: $cameraOpen) {
+                CaptureCameraBatch(slots:remainingCameraSlots, bytes:remainingCameraBytes) { batch in
+                    guard batch.count <= remainingCameraSlots,
+                          batch.reduce(0, { $0 + $1.data.count }) <= remainingCameraBytes else { return false }
+                    model.captureEditor.files.append(contentsOf:batch)
+                    model.error = ""
+                    return true
+                }
+            }
             .sheet(isPresented: $showingSummarySettings) { PrivacyView() }
             .task(id:"\(scene)-\(model.selectedTab)") {
                 guard scene == .active, model.selectedTab == "archive" else { return }
@@ -354,6 +370,18 @@ struct CaptureView: View {
             }
         }
     }
+    private var remainingCameraSlots: Int {
+        ChatAttachment.maxCount - model.captureEditor.files.count - model.captureEditor.inboxSelection.count
+    }
+    private var remainingCameraBytes: Int {
+        var used = model.captureEditor.files.reduce(0) { $0 + $1.data.count }
+        for url in model.captureEditor.inboxSelection {
+            guard let size = try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize else { return 0 }
+            used += size
+        }
+        return ChatAttachment.maxBytes - used
+    }
+
 }
 
 private struct AttachmentUploadProgress: View {
@@ -674,6 +702,93 @@ struct ChatView: View {
     private func setAttachment(name:String,data:Data) {
         let file=ChatAttachment(name:name,data:data)
         attachmentError=appendAttachment(file,to:&model.chatFiles) ? "" : attachmentLimit
+    }
+}
+
+private struct CaptureCameraBatch: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
+    let slots: Int
+    let bytes: Int
+    let add: ([ChatAttachment]) -> Bool
+    @State private var photos: [ChatAttachment] = []
+    @State private var shooting = false
+    @State private var error = ""
+
+    private var availableBytes: Int { bytes - photos.reduce(0) { $0 + $1.data.count } }
+
+    var body: some View {
+        ZStack {
+            if shooting {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-fixture-camera") {
+                    Button("Fixture shutter") {
+                        let image = UIGraphicsImageRenderer(size:CGSize(width:80,height:80)).image { context in
+                            (photos.count.isMultiple(of:2) ? UIColor.orange : UIColor.blue).setFill()
+                            context.fill(CGRect(x:0,y:0,width:80,height:80))
+                        }
+                        receive(.captured(image))
+                    }
+                } else { ChatCamera(onFinish:receive).ignoresSafeArea() }
+                #else
+                ChatCamera(onFinish:receive).ignoresSafeArea()
+                #endif
+            } else {
+                NavigationStack {
+                    List {
+                        ForEach(Array(photos.enumerated()),id:\.element.name) { index,photo in
+                            HStack {
+                                if let image = UIImage(data:photo.data)?.preparingThumbnail(of:CGSize(width:240,height:204)) {
+                                    Image(uiImage:image).resizable().scaledToFit().frame(width:80,height:68)
+                                }
+                                Text(verbatim:String(index + 1))
+                                Spacer()
+                                Button("移除") { photos.removeAll { $0.name == photo.name } }
+                                    .buttonStyle(.borderless)
+                            }
+                        }
+                        if !error.isEmpty { Text(PhoneLanguage.text(error,in:locale)).foregroundStyle(.secondary) }
+                        Button { Task { await openCamera() } } label: { Label("继续拍摄",systemImage:"camera") }
+                            .disabled(photos.count >= slots || availableBytes <= 0)
+                        Button("加入草稿") {
+                            if add(photos) { dismiss() } else { error = attachmentLimit }
+                        }.disabled(photos.isEmpty)
+                    }.navigationTitle("拍照")
+                    .toolbar { ToolbarItem(placement:.cancellationAction) { Button("取消") { dismiss() } } }
+                }
+            }
+        }.task { await openCamera() }
+    }
+
+    @MainActor private func openCamera() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-fixture-camera") { shooting = true; return }
+        #endif
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { error = "此设备无法使用相机。"; return }
+        let granted = await AVCaptureDevice.requestAccess(for:.video)
+        guard !Task.isCancelled else { return }
+        if granted { shooting = true; error = "" }
+        else { error = "未获相机权限。请在系统设置中允许知识秘书使用相机。" }
+    }
+
+    private func receive(_ result:ChatCamera.Result) {
+        shooting = false
+        guard case .captured(let image) = result else {
+            if photos.isEmpty { dismiss() }
+            return
+        }
+        guard let image, image.size.width > 0, image.size.height > 0 else { error = "无法读取照片。"; return }
+        let scale = min(1, 2560 / max(image.size.width,image.size.height))
+        let size = CGSize(width:image.size.width * scale,height:image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let data = UIGraphicsImageRenderer(size:size,format:format).jpegData(withCompressionQuality:0.82) { _ in
+            image.draw(in:CGRect(origin:.zero,size:size))
+        }
+        guard !data.isEmpty, photos.count < slots, data.count <= availableBytes else { error = attachmentLimit; return }
+        photos.append(ChatAttachment(name:"Camera-" + UUID().uuidString.prefix(8) + ".jpg",data:data))
+        error = ""
     }
 }
 

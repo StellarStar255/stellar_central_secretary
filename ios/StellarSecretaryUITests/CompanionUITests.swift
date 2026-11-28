@@ -280,6 +280,7 @@ final class CompanionUITests: XCTestCase {
         let initialCount = try XCTUnwrap(fixture("/count")["count"] as? Int)
         let name = try XCTUnwrap(fixture("/prepare-original-export")["name"] as? String)
         let app = XCUIApplication()
+        app.launchArguments.append("-fixture-camera")
         app.launch()
         clearSavedComputers(app)
         let pair = try fixture("/pair.json")
@@ -339,7 +340,8 @@ final class CompanionUITests: XCTestCase {
         wait(for:[ready],timeout:8)
         _ = try fixture("/hold-ingest")
         capture.tap()
-        XCTAssertTrue(app.staticTexts["电脑已收齐，正在处理…"].waitForExistence(timeout:10))
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["电脑已收齐，正在处理…"].waitForExistence(timeout:10),app.debugDescription)
         _ = try fixture("/release-ingest")
         XCTAssertTrue(app.staticTexts["Fixture upload rejected once"].waitForExistence(timeout:10))
         let retry=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-retry-'")).firstMatch
@@ -357,6 +359,7 @@ final class CompanionUITests: XCTestCase {
         let photoGrid = app.images.matching(NSPredicate(
             format:"identifier == %@ OR label BEGINSWITH %@","PXGGridLayout-Info","Photo,"
         ))
+        if !choosePhotos.isHittable { app.swipeDown() }
         choosePhotos.tap()
         XCTAssertTrue(photoGrid.element(boundBy:2).waitForExistence(timeout:10),app.debugDescription)
         for index in 0...1 {
@@ -373,6 +376,22 @@ final class CompanionUITests: XCTestCase {
         app.buttons["Add"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Photo-3.png"].waitForExistence(timeout:10),app.debugDescription)
         XCTAssertTrue(app.staticTexts["Photo-2.png"].exists)
+        let camera = app.buttons["capture-camera"]
+        if !camera.isHittable { app.swipeDown() }
+        camera.tap()
+        let shutter = app.buttons["Fixture shutter"]
+        XCTAssertTrue(shutter.waitForExistence(timeout:5))
+        shutter.tap()
+        app.buttons["继续拍摄"].tap()
+        shutter.tap()
+        app.buttons["加入草稿"].tap()
+        let cameraFiles = app.staticTexts.matching(NSPredicate(format:"label BEGINSWITH 'Camera-'"))
+        XCTAssertEqual(cameraFiles.count,2)
+        camera.tap()
+        shutter.tap()
+        app.buttons["取消"].tap()
+        XCTAssertEqual(cameraFiles.count,2)
+        if !capture.isHittable { app.swipeUp() }
         capture.tap()
         let photoReceipt = app.buttons.matching(NSPredicate(
             format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Photo.'"
@@ -381,6 +400,9 @@ final class CompanionUITests: XCTestCase {
         XCTAssertEqual(try fixture("/count")["count"] as? Int,initialCount+2)
         photoReceipt.tap()
         XCTAssertTrue(app.buttons["打开原件 · Photo-3.png"].waitForExistence(timeout:10))
+        let savedShots = app.buttons.matching(NSPredicate(format:"label BEGINSWITH '打开原件 · Camera-'"))
+        for _ in 0..<4 where savedShots.count < 2 { app.swipeUp() }
+        XCTAssertEqual(savedShots.count,2,app.debugDescription)
     }
 
     @MainActor func testFirstChatCanStartFromComposer() throws {
