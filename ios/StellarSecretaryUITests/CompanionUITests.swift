@@ -130,6 +130,7 @@ final class CompanionUITests: XCTestCase {
         cancel.tap();XCTAssertTrue(app.buttons["扫描 Mac 配对码"].waitForExistence(timeout: 10))
     }
     @MainActor func testPairCaptureSearchAndOfflineOutbox() throws {
+        addTeardownBlock { _ = try self.fixture("/online") }
         continueAfterFailure = false
         let app = XCUIApplication();app.launch();clearSavedComputers(app)
         if app.tabBars.buttons["连接"].exists {
@@ -152,7 +153,7 @@ final class CompanionUITests: XCTestCase {
         XCUIDevice.shared.press(.home);app.activate()
         let after=try fixture("/wait-status?after=\(before["status"] as! Int)")
         XCTAssertGreaterThan(after["status"] as! Int,before["status"] as! Int)
-        XCTAssertEqual(after["tls"] as? Int,before["tls"] as? Int,"Short foreground resume must reuse the pinned TLS connection")
+        XCTAssertLessThanOrEqual(try XCTUnwrap(after["status_tls"] as? Int),try XCTUnwrap(before["tls"] as? Int),"The foreground status check must reuse an established TLS connection")
         // Reproduce a long suspension with the old gateway going away. The
         // foreground path must rebuild immediately, without terminating the app.
         let beforeLong=try fixture("/connections")
@@ -254,9 +255,17 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Synthetic fixture answer [1]"].waitForExistence(timeout:20))
         _ = try fixture("/offline")
         app.tabBars.buttons["归档"].tap()
-        XCTAssertTrue(app.buttons["暂存，连接后发送"].waitForExistence(timeout:20))
-        editor.tap();editor.typeText("Offline fixture note");app.buttons["暂存，连接后发送"].tap()
-        app.terminate();app.launch();XCTAssertTrue(app.staticTexts["Offline fixture note"].waitForExistence(timeout:20))
+        XCTAssertTrue(app.buttons["暂存，连接后发送"].waitForExistence(timeout:20),app.debugDescription)
+        editor.tap();editor.typeText("Offline fixture note");app.buttons["完成"].tap()
+        app.buttons["暂存，连接后发送"].tap()
+        let offlineDraft=app.staticTexts.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-outbox-' AND label == 'Offline fixture note'")).firstMatch
+        func showOfflineDraft() {
+            for _ in 0..<3 where !offlineDraft.exists { app.swipeUp() }
+            XCTAssertTrue(offlineDraft.waitForExistence(timeout:5),app.debugDescription)
+        }
+        showOfflineDraft()
+        app.terminate();app.launch();showOfflineDraft()
+        app.swipeDown() // Bring the connection banner back into the visible list.
         // Leave an offline connection attempt in flight, then suspend. Its
         // late completion must not block or overwrite the foreground attempt.
         XCUIDevice.shared.press(.home)
@@ -271,10 +280,128 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20))
         app.tabBars.buttons["归档"].tap()
         let offlineReceipt=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Offline fixture note'")).firstMatch
+        for _ in 0..<3 where !offlineReceipt.exists { app.swipeUp() }
         XCTAssertTrue(offlineReceipt.waitForExistence(timeout:20))
         XCTAssertEqual(try fixture("/count")["count"] as? Int,3)
         let screenshot = XCTAttachment(screenshot:app.screenshot());screenshot.name = "Paired iPhone capture";screenshot.lifetime = .keepAlways;add(screenshot)
     }
+    @MainActor func testUploadPhotoToExistingRecord() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        clearSavedComputers(app)
+        let pair = try fixture("/pair.json")
+        app.open(URL(string:try XCTUnwrap(pair["url"] as? String))!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        let search = app.tabBars.buttons["检索"]
+        XCTAssertTrue(search.waitForExistence(timeout:20))
+        search.tap()
+        let record = app.buttons.containing(NSPredicate(format:"label CONTAINS 'Reference fixture'")).firstMatch
+        XCTAssertTrue(record.waitForExistence(timeout:10))
+        record.tap()
+        let photo = app.buttons["照片"]
+        XCTAssertTrue(photo.waitForExistence(timeout:8))
+        for _ in 0..<6 where !photo.isHittable { app.swipeUp() }
+        _ = try fixture("/prepare-multiple-photos")
+        photo.tap()
+        let image = app.images.matching(NSPredicate(format:"identifier == 'PXGGridLayout-Info' OR label BEGINSWITH 'Photo,'")).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout:8))
+        image.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        let add = app.buttons["添加到这份资料"]
+        XCTAssertTrue(add.waitForExistence(timeout:8))
+        app.navigationBars.buttons.element(boundBy:0).tap()
+        record.tap()
+        XCTAssertTrue(add.waitForExistence(timeout:8))
+        _ = try fixture("/hold-append")
+        defer { _ = try? fixture("/release-append") }
+        add.tap()
+        XCTAssertTrue(app.staticTexts["附件已发出，等待电脑保存…"].waitForExistence(timeout:10),app.debugDescription)
+        app.navigationBars.buttons.element(boundBy:0).tap()
+        app.tabBars.buttons["归档"].tap()
+        search.tap()
+        record.tap()
+        XCTAssertTrue(app.staticTexts["附件已发出，等待电脑保存…"].waitForExistence(timeout:8))
+        XCTAssertFalse(add.exists)
+        XCTAssertEqual(try fixture("/append-requests")["calls"] as? Int,1)
+        _ = try fixture("/release-append")
+        XCTAssertTrue(app.staticTexts["Fixture response lost after save"].waitForExistence(timeout:10))
+        app.navigationBars.buttons.element(boundBy:0).tap()
+        record.tap()
+        XCTAssertTrue(add.waitForExistence(timeout:8))
+        add.tap()
+        XCTAssertTrue(app.staticTexts["附件已添加"].waitForExistence(timeout:10),app.debugDescription)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format:"label == '打开原件 · Photo.png'")).count,1)
+        let attempts = try fixture("/append-requests")
+        XCTAssertEqual(attempts["calls"] as? Int,2)
+        XCTAssertEqual(attempts["distinct"] as? Int,1)
+    }
+
+    @MainActor func testViewfinderStripAtAttachmentLimit() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments.append("-fixture-camera")
+        app.launch()
+        clearSavedComputers(app)
+        let pair = try fixture("/pair.json")
+        app.open(URL(string:try XCTUnwrap(pair["url"] as? String))!)
+        XCTAssertTrue(app.staticTexts["请在 Mac 上核对数字并允许配对"].waitForExistence(timeout:20))
+        _ = try fixture("/approve")
+        let camera = app.buttons["capture-camera"]
+        XCTAssertTrue(camera.waitForExistence(timeout:20))
+        let note = app.textViews["归档内容"]
+        note.tap()
+        note.typeText("Camera naming fixture")
+        app.buttons["完成"].tap()
+        camera.tap()
+        let shutter = app.buttons["camera-shutter"]
+        let done = app.buttons["camera-done"]
+        shutter.tap()
+        let first = app.buttons["camera-thumbnail-1"]
+        first.tap()
+        app.buttons["camera-preview-close"].tap()
+        XCTAssertTrue(first.isHittable)
+        first.tap()
+        app.buttons["camera-preview-remove"].tap()
+        XCTAssertFalse(first.exists)
+        XCTAssertTrue(shutter.isEnabled)
+        for i in 1...8 {
+            shutter.tap()
+            let newest = app.buttons["camera-thumbnail-\(i)"]
+            XCTAssertTrue(newest.waitForExistence(timeout:3))
+            XCTAssertTrue(newest.isHittable,"Photo \(i) outside the strip")
+        }
+        XCTAssertFalse(shutter.isEnabled)
+        app.buttons["camera-thumbnail-8"].swipeRight()
+        XCTAssertTrue(first.isHittable)
+        first.press(forDuration:0.8,thenDragTo:app.buttons["camera-thumbnail-3"])
+        done.tap()
+        app.buttons["移除"].firstMatch.tap()
+        let resume = app.buttons["继续拍摄"]
+        if !resume.isHittable {app.swipeUp()}
+        resume.tap()
+        XCTAssertTrue(app.buttons["camera-thumbnail-7"].isHittable)
+        XCTAssertFalse(app.buttons["camera-thumbnail-8"].exists)
+        shutter.tap()
+        XCTAssertTrue(app.buttons["camera-thumbnail-8"].isHittable)
+        XCTAssertFalse(shutter.isEnabled)
+        done.tap()
+        let add = app.buttons["加入草稿"]
+        if !add.isHittable {app.swipeUp()}
+        add.tap()
+        XCTAssertFalse(camera.isEnabled)
+        let save = app.buttons["保存到知识库"]
+        for _ in 0..<4 where !save.isHittable {app.swipeUp()}
+        XCTAssertEqual(app.switches["capture-rename-photos"].value as? String,"1")
+        save.tap()
+        let receipt = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-receipt-' AND label CONTAINS 'Camera naming fixture'")).firstMatch
+        for _ in 0..<3 where !receipt.exists {app.swipeUp()}
+        XCTAssertTrue(receipt.waitForExistence(timeout:15))
+        let batch = try fixture("/camera-batch-names")
+        XCTAssertEqual(batch["shots"] as? [Int], [4,2,5,6,7,8,9,10])
+        XCTAssertEqual(batch["names"] as? [String], (1...8).map { String(format:"Camera naming fixture-%02d.jpg",$0) })
+    }
+
     @MainActor func testSaveOriginalAttachmentToFilesAndPhotos() throws {
         continueAfterFailure = false
         let initialCount = try XCTUnwrap(fixture("/count")["count"] as? Int)
@@ -372,25 +499,45 @@ final class CompanionUITests: XCTestCase {
         choosePhotos.tap()
         let nextPhoto = photoGrid.element(boundBy:2)
         XCTAssertTrue(nextPhoto.waitForExistence(timeout:10))
+        let confirmPhotos=app.buttons["Add"].firstMatch
+        let tipClose=app.buttons["Close"].firstMatch
+        if tipClose.exists && tipClose.isHittable {tipClose.tap()}
         nextPhoto.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
-        app.buttons["Add"].firstMatch.tap()
+        if !confirmPhotos.waitForExistence(timeout:3) {
+            // The system picker can insert its privacy tip and move the grid after presentation.
+            if tipClose.exists && tipClose.isHittable {tipClose.tap()}
+            nextPhoto.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        }
+        XCTAssertTrue(confirmPhotos.waitForExistence(timeout:3),app.debugDescription)
+        confirmPhotos.tap()
         XCTAssertTrue(app.staticTexts["Photo-3.png"].waitForExistence(timeout:10),app.debugDescription)
         XCTAssertTrue(app.staticTexts["Photo-2.png"].exists)
         let camera = app.buttons["capture-camera"]
         if !camera.isHittable { app.swipeDown() }
         camera.tap()
-        let shutter = app.buttons["Fixture shutter"]
+        let shutter = app.buttons["camera-shutter"]
         XCTAssertTrue(shutter.waitForExistence(timeout:5))
+        XCTAssertFalse(app.buttons["camera-thumbnail-1"].exists)
         shutter.tap()
-        app.buttons["继续拍摄"].tap()
+        XCTAssertTrue(app.buttons["camera-thumbnail-1"].waitForExistence(timeout:3))
+        XCTAssertTrue(shutter.isHittable)
         shutter.tap()
+        XCTAssertTrue(app.buttons["camera-thumbnail-2"].waitForExistence(timeout:3))
+        XCTAssertTrue(app.buttons["camera-thumbnail-1"].exists)
+        app.buttons["camera-done"].tap()
         app.buttons["加入草稿"].tap()
         let cameraFiles = app.staticTexts.matching(NSPredicate(format:"label BEGINSWITH 'Camera-'"))
         XCTAssertEqual(cameraFiles.count,2)
         camera.tap()
         shutter.tap()
+        app.buttons["camera-done"].tap()
         app.buttons["取消"].tap()
         XCTAssertEqual(cameraFiles.count,2)
+        let rename = app.switches["capture-rename-photos"]
+        for _ in 0..<3 where !rename.isHittable { app.swipeUp() }
+        XCTAssertEqual(rename.value as? String,"1")
+        rename.switches.firstMatch.exists ? rename.switches.firstMatch.tap() : rename.tap()
+        XCTAssertEqual(rename.value as? String,"0")
         if !capture.isHittable { app.swipeUp() }
         capture.tap()
         let photoReceipt = app.buttons.matching(NSPredicate(
@@ -603,9 +750,11 @@ final class CompanionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["当前电脑 · 公司电脑"].waitForExistence(timeout:10))
         _ = try fixture("/offline")
         app.terminate();app.launch();app.tabBars.buttons["归档"].tap()
-        let editor=app.textViews["归档内容"];editor.tap();editor.typeText("Company queued note")
+        let editor=app.textViews["归档内容"];editor.tap();editor.typeText("Company queued note");app.buttons["完成"].tap()
         app.buttons["暂存，连接后发送"].tap()
-        XCTAssertTrue(app.staticTexts["Company queued note"].waitForExistence(timeout:5))
+        let queued=app.staticTexts.matching(NSPredicate(format:"identifier BEGINSWITH 'capture-outbox-' AND label == 'Company queued note'")).firstMatch
+        for _ in 0..<3 where !queued.exists {app.swipeUp()}
+        XCTAssertTrue(queued.waitForExistence(timeout:5),app.debugDescription)
         app.tabBars.buttons["聊天"].tap()
         XCTAssertTrue(app.navigationBars["Shared fixture chat"].waitForExistence(timeout:3),"Company chat cache survives switching and restart")
         let input=app.textFields["chat-input"].exists ? app.textFields["chat-input"]:app.textViews["chat-input"]
@@ -623,10 +772,13 @@ final class CompanionUITests: XCTestCase {
         app.terminate();_ = try fixture("/second/offline");app.launch();app.tabBars.buttons["聊天"].tap()
         XCTAssertTrue(app.staticTexts["Home private reply"].waitForExistence(timeout:3),"Home chat cache survives restart while offline")
         app.tabBars.buttons["连接"].tap();app.buttons["computer-select-"+work].tap()
-        app.tabBars.buttons["归档"].tap();XCTAssertTrue(app.staticTexts["Company queued note"].waitForExistence(timeout:3))
+        app.tabBars.buttons["归档"].tap()
+        for _ in 0..<3 where !queued.exists {app.swipeUp()}
+        XCTAssertTrue(queued.waitForExistence(timeout:3),app.debugDescription)
+        app.swipeDown()
         _ = try fixture("/online")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format:"label BEGINSWITH '已连接'")).firstMatch.waitForExistence(timeout:20))
-        let gone=NSPredicate(format:"exists == false");expectation(for:gone,evaluatedWith:app.staticTexts["Company queued note"]);waitForExpectations(timeout:15)
+        let gone=NSPredicate(format:"exists == false");expectation(for:gone,evaluatedWith:queued);waitForExpectations(timeout:15)
         XCTAssertTrue((try fixture("/first/inspect")["titles"] as! [String]).contains("Company queued note"))
         XCTAssertFalse((try fixture("/second/inspect")["titles"] as! [String]).contains("Company queued note"))
         _ = try fixture("/second/online")

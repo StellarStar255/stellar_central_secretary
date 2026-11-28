@@ -50,6 +50,8 @@ struct ChatAttachment: Codable, Equatable {
     let name: String
     let data: Data
 
+    var capturedAt: Date? = nil
+
     static let maxCount = 8
     static let maxBytes = 10 * 1024 * 1024
     static func fits(_ files: [Self]) -> Bool {
@@ -89,6 +91,7 @@ struct ChatCache: Codable {
 }
 
 struct CaptureEditor {
+    var renameCameraPhotos = true
     var inboxSelection: [URL] = []
     var text = ""
     var files: [ChatAttachment] = []

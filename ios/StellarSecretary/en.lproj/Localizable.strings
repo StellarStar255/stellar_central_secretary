@@ -300,3 +300,8 @@
 "无法读取或移除分享的文件" = "Could not read or remove a shared file.";
 "继续拍摄" = "Take Another Photo";
 "加入草稿" = "Add to Draft";
+"切换摄像头" = "Switch Camera";
+"附件已发出，等待电脑保存…" = "Attachment sent. Waiting for the computer to save it…";
+"正在准备上传附件…" = "Preparing to upload attachment…";
+"自动重命名拍摄的照片" = "Automatically rename camera photos";
+"长按并拖动照片调整顺序" = "Touch and hold a photo, then drag to reorder";

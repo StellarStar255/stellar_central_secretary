@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import Vision
 import QuickLook
 import UniformTypeIdentifiers
 import CryptoKit
@@ -196,6 +197,40 @@ private func loadPhotos(_ photos:[PhotosPickerItem],addingTo existing:[ChatAttac
     return (files,error)
 }
 
+private func namedCameraFiles(_ files: [ChatAttachment], note: String) -> [ChatAttachment] {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier:"en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd_HHmmss"
+    let separators = CharacterSet(charactersIn:"/\\:*?\"<>|").union(.controlCharacters)
+    func stem(_ text: String) -> String {
+        let clean = text.components(separatedBy:separators).joined(separator:" ")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator:" ")
+            .trimmingCharacters(in:CharacterSet(charactersIn:" ."))
+        return String(clean.unicodeScalars.prefix(40))
+    }
+    let subject = stem(String(note.split(whereSeparator: { $0.isNewline }).first ?? ""))
+    var used = Set(files.filter { $0.capturedAt == nil }.map { $0.name.lowercased() })
+    var sequence = 0
+    return files.map { file in
+        guard let date = file.capturedAt else { return file }
+        var title = subject
+        if title.isEmpty {
+            let request = VNClassifyImageRequest()
+            try? VNImageRequestHandler(data:file.data).perform([request])
+            if let match = request.results?.first, match.confidence >= 0.65 {
+                title = stem(String(match.identifier.split(separator:",").first ?? "").replacingOccurrences(of:"_",with:" "))
+            }
+        }
+        if title.isEmpty { title = "Photo-" + formatter.string(from:date) }
+        var name: String
+        repeat {
+            sequence += 1
+            name = title + String(format:"-%02d.jpg",sequence)
+        } while !used.insert(name.lowercased()).inserted
+        return ChatAttachment(name:name,data:file.data)
+    }
+}
+
 struct CaptureView: View {
     @Environment(\.locale) private var interfaceLocale
     @EnvironmentObject var model: Companion
@@ -256,12 +291,17 @@ struct CaptureView: View {
                             Button("移除") { model.captureEditor.files.remove(at:index) }.disabled(loadingPhotos || saving)
                         }
                     }
+                    if model.captureEditor.files.contains(where: { $0.capturedAt != nil }) {
+                        Toggle("自动重命名拍摄的照片",isOn:$model.captureEditor.renameCameraPhotos)
+                            .disabled(saving).accessibilityIdentifier("capture-rename-photos")
+                    }
                     if loadingPhotos { ProgressView("正在读取附件…") }
                     Button {
                         editing = false;saving = true
                         let workspace = model.workspaceID, note = text
                         let selected = model.captureEditor.inboxSelection
                         let attachments = model.captureEditor.files
+                        let renamePhotos = model.captureEditor.renameCameraPhotos
                         Task {
                             defer { saving = false }
                             do {
@@ -277,6 +317,12 @@ struct CaptureView: View {
                                 }
                                 let single = selected.count == 1 && attachments.isEmpty && note.isEmpty ? selected.first : nil
                                 let requestID = single?.deletingLastPathComponent().lastPathComponent ?? UUID().uuidString
+                                if renamePhotos && files.contains(where: { $0.capturedAt != nil }) {
+                                    let originals = files
+                                    files = await Task.detached(priority:.userInitiated) {
+                                        namedCameraFiles(originals,note:note)
+                                    }.value
+                                }
                                 let reference = try single.map { try SharedInbox.noteReference(for: $0) }
                                 guard await model.enqueue(text: note, files: files, workspace: workspace, id: requestID, noteReference: reference) else { return }
                                 if workspace == model.workspaceID { model.captureEditor = CaptureEditor() }
@@ -328,7 +374,7 @@ struct CaptureView: View {
                         if !model.online { Text("离线 · 显示上次确认的状态") }
                     }
                 }
-            }.navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
+            }.disabled(saving).navigationTitle(PhoneLanguage.text("随手归档",in:interfaceLocale)).scrollDismissesKeyboard(.interactively).toolbar { ToolbarItemGroup(placement:.keyboard) { Spacer();Button("完成") { editing = false } } }
             .fullScreenCover(isPresented: $cameraOpen) {
                 CaptureCameraBatch(slots:remainingCameraSlots, bytes:remainingCameraBytes) { batch in
                     guard batch.count <= remainingCameraSlots,
@@ -711,39 +757,121 @@ private struct CaptureCameraBatch: View {
     let slots: Int
     let bytes: Int
     let add: ([ChatAttachment]) -> Bool
-    @State private var photos: [ChatAttachment] = []
+    private struct Shot: Identifiable {
+        let attachment: ChatAttachment
+        let thumbnail: UIImage
+        var id: String { attachment.name }
+    }
+    @State private var photos: [Shot] = []
+    @State private var preview: Shot?
     @State private var shooting = false
     @State private var error = ""
 
-    private var availableBytes: Int { bytes - photos.reduce(0) { $0 + $1.data.count } }
+    @State private var shutterRequest = 0
+    @State private var capturing = false
+    @State private var frontCamera = false
+
+    private var availableBytes: Int { bytes - photos.reduce(0) { $0 + $1.attachment.data.count } }
 
     var body: some View {
         ZStack {
             if shooting {
-                #if DEBUG && targetEnvironment(simulator)
-                if ProcessInfo.processInfo.arguments.contains("-fixture-camera") {
-                    Button("Fixture shutter") {
-                        let image = UIGraphicsImageRenderer(size:CGSize(width:80,height:80)).image { context in
-                            (photos.count.isMultiple(of:2) ? UIColor.orange : UIColor.blue).setFill()
-                            context.fill(CGRect(x:0,y:0,width:80,height:80))
-                        }
-                        receive(.captured(image))
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    if !fixtureCamera {
+                        ContinuousCamera(request:shutterRequest,front:frontCamera,onPhoto:receive)
+                            .ignoresSafeArea()
                     }
-                } else { ChatCamera(onFinish:receive).ignoresSafeArea() }
-                #else
-                ChatCamera(onFinish:receive).ignoresSafeArea()
-                #endif
+                    VStack {
+                        HStack {
+                            if photos.isEmpty {
+                                Button("取消") { dismiss() }
+                            } else {
+                                Label("\(photos.count)",systemImage:"photo.stack")
+                                    .accessibilityIdentifier("camera-count")
+                            }
+                            Spacer()
+                            Button("完成") { shooting = false }
+                                .disabled(photos.isEmpty || capturing)
+                                .accessibilityIdentifier("camera-done")
+                        }.padding().background(.black.opacity(0.75))
+                        Spacer()
+                        if !error.isEmpty {
+                            Text(PhoneLanguage.text(error,in:locale)).padding(8).background(.black.opacity(0.8))
+                        }
+                        if photos.count > 1 {
+                            Text("长按并拖动照片调整顺序").font(.caption)
+                        }
+                        if !photos.isEmpty {
+                            ScrollViewReader { scroll in
+                                ScrollView(.horizontal) {
+                                    HStack(spacing:8) {
+                                        ForEach(Array(photos.enumerated()), id:\.element.id) { index,shot in
+                                            Button { preview = shot } label: {
+                                                Image(uiImage:shot.thumbnail)
+                                                    .resizable().scaledToFit()
+                                                    .frame(width:72,height:72)
+                                                    .overlay(alignment:.bottomLeading) {
+                                                        Text(verbatim:String(index + 1)).font(.caption2.bold())
+                                                            .padding(4).background(.black.opacity(0.75),in:.capsule)
+                                                    }
+                                                    .contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(capturing)
+                                            .accessibilityLabel(Text("照片") + Text(verbatim:" \(index + 1)"))
+                                            .accessibilityIdentifier("camera-thumbnail-\(index + 1)")
+                                            .draggable(shot.id)
+                                            .dropDestination(for:String.self) { ids,_ in
+                                                guard !capturing, ids.count == 1,
+                                                      let from = photos.firstIndex(where:{ $0.id == ids[0] }),
+                                                      let to = photos.firstIndex(where:{ $0.id == shot.id }),
+                                                      from != to else { return false }
+                                                withAnimation {
+                                                    photos.move(fromOffsets:IndexSet(integer:from),toOffset:from < to ? to + 1 : to)
+                                                }
+                                                return true
+                                            }
+                                            .id(shot.id)
+                                        }
+                                    }.padding(.horizontal,12)
+                                }.scrollIndicators(.hidden)
+                                .onAppear { if let latest = photos.last { scroll.scrollTo(latest.id,anchor:.trailing) } }
+                                .onChange(of:photos.count) { old,new in
+                                    if new > old, let latest = photos.last { scroll.scrollTo(latest.id,anchor:.trailing) }
+                                }
+                            }.frame(height:76)
+                        }
+                        ZStack {
+                            Button(action:takePhoto) {
+                                Circle().fill(.white).padding(5)
+                                    .overlay(Circle().stroke(.white,lineWidth:3)).frame(width:68,height:68)
+                            }
+                            .accessibilityLabel("拍照").accessibilityIdentifier("camera-shutter")
+                            .disabled(capturing || photos.count >= slots || availableBytes <= 0)
+                            .opacity(capturing || photos.count >= slots || availableBytes <= 0 ? 0.45 : 1)
+                            if !fixtureCamera && UIImagePickerController.isCameraDeviceAvailable(.front) {
+                                HStack {
+                                    Spacer()
+                                    Button { frontCamera.toggle() } label: { Image(systemName:"camera.rotate") }
+                                        .accessibilityLabel("切换摄像头").disabled(capturing)
+                                }.padding(.trailing,24)
+                            }
+                        }.padding(.vertical,12).frame(maxWidth:.infinity).background(.black.opacity(0.75))
+                    }.foregroundStyle(.white)
+                }
             } else {
                 NavigationStack {
                     List {
-                        ForEach(Array(photos.enumerated()),id:\.element.name) { index,photo in
+                        ForEach(Array(photos.enumerated()),id:\.element.id) { index,photo in
                             HStack {
-                                if let image = UIImage(data:photo.data)?.preparingThumbnail(of:CGSize(width:240,height:204)) {
-                                    Image(uiImage:image).resizable().scaledToFit().frame(width:80,height:68)
-                                }
+                                Button { preview = photo } label: {
+                                    Image(uiImage:photo.thumbnail).resizable().scaledToFit().frame(width:80,height:68)
+                                }.buttonStyle(.borderless)
+                                .accessibilityLabel(Text("照片") + Text(verbatim:" \(index + 1)"))
                                 Text(verbatim:String(index + 1))
                                 Spacer()
-                                Button("移除") { photos.removeAll { $0.name == photo.name } }
+                                Button("移除") { photos.removeAll { $0.id == photo.id } }
                                     .buttonStyle(.borderless)
                             }
                         }
@@ -751,19 +879,61 @@ private struct CaptureCameraBatch: View {
                         Button { Task { await openCamera() } } label: { Label("继续拍摄",systemImage:"camera") }
                             .disabled(photos.count >= slots || availableBytes <= 0)
                         Button("加入草稿") {
-                            if add(photos) { dismiss() } else { error = attachmentLimit }
+                            if add(photos.map(\.attachment)) { dismiss() } else { error = attachmentLimit }
                         }.disabled(photos.isEmpty)
                     }.navigationTitle("拍照")
                     .toolbar { ToolbarItem(placement:.cancellationAction) { Button("取消") { dismiss() } } }
                 }
             }
         }.task { await openCamera() }
+        .fullScreenCover(item:$preview) { shot in
+            NavigationStack {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    if let image = UIImage(data:shot.attachment.data) {
+                        Image(uiImage:image).resizable().scaledToFit()
+                    }
+                }
+                .navigationTitle(Text(verbatim:"\((photos.firstIndex { $0.id == shot.id } ?? 0) + 1) / \(photos.count)"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement:.cancellationAction) {
+                        Button("关闭") { preview = nil }.accessibilityIdentifier("camera-preview-close")
+                    }
+                    ToolbarItem(placement:.primaryAction) {
+                        Button("移除",role:.destructive) {
+                            photos.removeAll { $0.id == shot.id }
+                            preview = nil
+                        }.accessibilityIdentifier("camera-preview-remove")
+                    }
+                }
+            }.preferredColorScheme(.dark)
+        }
+    }
+
+    private var fixtureCamera: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("-fixture-camera")
+        #else
+        return false
+        #endif
+    }
+
+    private func takePhoto() {
+        guard !capturing, photos.count < slots, availableBytes > 0 else { return }
+        capturing = true
+        shutterRequest += 1
+        if fixtureCamera {
+            let image = UIGraphicsImageRenderer(size:CGSize(width:80,height:80)).image { context in
+                UIColor(hue:CGFloat(shutterRequest % 16) / 16,saturation:0.9,brightness:0.95,alpha:1).setFill()
+                context.fill(CGRect(x:0,y:0,width:80,height:80))
+            }
+            receive(image)
+        }
     }
 
     @MainActor private func openCamera() async {
-        #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("-fixture-camera") { shooting = true; return }
-        #endif
+        if fixtureCamera { shooting = true; return }
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else { error = "此设备无法使用相机。"; return }
         let granted = await AVCaptureDevice.requestAccess(for:.video)
         guard !Task.isCancelled else { return }
@@ -771,13 +941,9 @@ private struct CaptureCameraBatch: View {
         else { error = "未获相机权限。请在系统设置中允许知识秘书使用相机。" }
     }
 
-    private func receive(_ result:ChatCamera.Result) {
-        shooting = false
-        guard case .captured(let image) = result else {
-            if photos.isEmpty { dismiss() }
-            return
-        }
-        guard let image, image.size.width > 0, image.size.height > 0 else { error = "无法读取照片。"; return }
+    private func receive(_ image:UIImage?) {
+        capturing = false
+        guard let image, image.size.width > 0, image.size.height > 0 else { error = "无法读取照片。"; shooting = false; return }
         let scale = min(1, 2560 / max(image.size.width,image.size.height))
         let size = CGSize(width:image.size.width * scale,height:image.size.height * scale)
         let format = UIGraphicsImageRendererFormat()
@@ -786,9 +952,57 @@ private struct CaptureCameraBatch: View {
         let data = UIGraphicsImageRenderer(size:size,format:format).jpegData(withCompressionQuality:0.82) { _ in
             image.draw(in:CGRect(origin:.zero,size:size))
         }
-        guard !data.isEmpty, photos.count < slots, data.count <= availableBytes else { error = attachmentLimit; return }
-        photos.append(ChatAttachment(name:"Camera-" + UUID().uuidString.prefix(8) + ".jpg",data:data))
+        guard !data.isEmpty, photos.count < slots, data.count <= availableBytes else { error = attachmentLimit; shooting = false; return }
+        let thumbScale = min(1,240 / max(size.width,size.height))
+        let thumbSize = CGSize(width:size.width * thumbScale,height:size.height * thumbScale)
+        let thumbnail = UIGraphicsImageRenderer(size:thumbSize,format:format).image { _ in
+            image.draw(in:CGRect(origin:.zero,size:thumbSize))
+        }
+        let attachment = ChatAttachment(name:"Camera-" + UUID().uuidString.prefix(8) + ".jpg",data:data,capturedAt:Date())
+        photos.append(Shot(attachment:attachment,thumbnail:thumbnail))
         error = ""
+    }
+}
+
+private struct ContinuousCamera: UIViewControllerRepresentable {
+    let request: Int
+    let front: Bool
+    let onPhoto: (UIImage?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(request:request,onPhoto:onPhoto) }
+
+    func makeUIViewController(context:Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.showsCameraControls = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker:UIImagePickerController, context:Context) {
+        context.coordinator.onPhoto = onPhoto
+        let device: UIImagePickerController.CameraDevice = front ? .front : .rear
+        if picker.cameraDevice != device { picker.cameraDevice = device }
+        if request != context.coordinator.request {
+            context.coordinator.request = request
+            picker.takePicture()
+        }
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        var request: Int
+        var onPhoto: (UIImage?) -> Void
+
+        init(request:Int,onPhoto:@escaping (UIImage?) -> Void) {
+            self.request = request
+            self.onPhoto = onPhoto
+        }
+
+        func imagePickerController(_ picker:UIImagePickerController, didFinishPickingMediaWithInfo info:[UIImagePickerController.InfoKey:Any]) {
+            onPhoto(info[.originalImage] as? UIImage)
+        }
+        func imagePickerControllerDidCancel(_ picker:UIImagePickerController) { onPhoto(nil) }
     }
 }
 
@@ -1205,9 +1419,10 @@ struct DetailView: View {
     @State private var notice=""
     @State private var importing=false
     @State private var photo:PhotosPickerItem?
-    @State private var pendingData:Data?
-    @State private var pendingName=""
-    @State private var attachmentRequestID=UUID().uuidString
+    private var appendKey: RecordAppendKey { RecordAppendKey(workspace:workspace,record:record.id) }
+    private var draft: RecordAppend? { model.recordAppends[appendKey] }
+    private var appending: Bool { draft?.attempt != nil }
+    @State private var latestAppendID: String?
     @State private var preview:PhonePreview?
     @State private var fileTask:Task<Void,Never>?
     @State private var downloadDone:Int64=0
@@ -1224,7 +1439,7 @@ struct DetailView: View {
                                 if !file.previewPath.isEmpty {
                                     InlineAttachmentImage(file:file,workspace:workspace)
                                 }
-                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · \(file.name)",systemImage:"doc")}.disabled(working || !model.online)
+                                Button {fileTask=Task {await open(file)}} label:{Label("打开原件 · \(file.name)",systemImage:"doc")}.disabled(working || appending || !model.online)
                                 if file.size>0 {Text(ByteCountFormatter.string(fromByteCount:file.size,countStyle:.file)+(!file.previewPath.isEmpty ? PhoneLanguage.text(" · 图片预览更快，原件保持完整",in:interfaceLocale):"")).font(.caption).foregroundStyle(.secondary)}
                             }
                         }
@@ -1243,6 +1458,20 @@ struct DetailView: View {
                 if !loaded {Text(record.title).font(.title2.bold());Text(record.summary).textSelection(.enabled);if working {ProgressView("正在加载资料详情…")}}
                 if !error.isEmpty {Text(PhoneLanguage.text(error,in:interfaceLocale)).foregroundStyle(.orange)}
                 if !notice.isEmpty {Text(PhoneLanguage.text(notice,in:interfaceLocale)).foregroundStyle(.secondary)}
+                if let draft, appending {
+                    Text(draft.name).lineLimit(1)
+                    if draft.total > 0 && draft.sent >= draft.total {
+                        ProgressView("附件已发出，等待电脑保存…")
+                    } else if draft.total > 0 {
+                        ProgressView(value:Double(draft.sent),total:Double(draft.total)) {
+                            Text("正在上传附件…")
+                        } currentValueLabel: {
+                            Text(verbatim:ByteCountFormatter.string(fromByteCount:draft.sent,countStyle:.file) + " / " +
+                                 ByteCountFormatter.string(fromByteCount:draft.total,countStyle:.file))
+                        }
+                    } else { ProgressView("正在准备上传附件…") }
+                }
+                if let failure = draft?.failure, !failure.isEmpty { Text(failure).foregroundStyle(.orange) }
                 if loaded {
                     VStack(alignment:.leading,spacing:12) {
                         Text("标题").font(.headline)
@@ -1259,23 +1488,23 @@ struct DetailView: View {
                             }
                             Button {newTag="";addingTag=true} label:{Label("添加标签",systemImage:"plus")}.buttonStyle(.bordered)
                         }
-                    }.disabled(working || !model.online)
+                    }.disabled(working || appending || !model.online)
                     VStack(alignment:.leading,spacing:12) {
                         Text("添加附件").font(.headline)
                         HStack {
                             PhotosPicker(selection:$photo,matching:.images) {Label("照片",systemImage:"photo")}
                             Button {importing=true} label:{Label("文件",systemImage:"paperclip")}
-                        }.disabled(working || !model.online)
+                        }.disabled(working || appending || !model.online)
                         Text("追加到当前资料，保留已有原件。每个附件最多 10 MB。").font(.footnote).foregroundStyle(.secondary)
-                        if pendingData != nil {
-                            Text(pendingName).lineLimit(2)
+                        if let draft, draft.data != nil && !appending {
+                            Text(draft.name).lineLimit(2)
                             HStack {
-                                Button("添加到这份资料") {Task {await append()}}.buttonStyle(.borderedProminent)
-                                Button("取消") {pendingData=nil;photo=nil}
-                            }.disabled(working || !model.online)
+                                Button("添加到这份资料") {notice="";error="";model.submitAppend(appendKey,updated:updated)}.buttonStyle(.borderedProminent)
+                                Button("取消") {model.clearAppend(appendKey);photo=nil}
+                            }.disabled(working || appending || !model.online)
                         }
                     }
-                    if working && fileTask == nil {ProgressView("正在处理…")}
+                    if working && fileTask == nil && !appending {ProgressView("正在处理…")}
                     if !summary.isEmpty {Text("摘要").font(.headline);Text(summary).textSelection(.enabled)}
                     if !text.isEmpty {DisclosureGroup("正文与归档说明") {Text(text).frame(maxWidth:.infinity,alignment:.leading).textSelection(.enabled)}}
                 }
@@ -1283,6 +1512,14 @@ struct DetailView: View {
         }.navigationTitle(PhoneLanguage.text("资料详情",in:interfaceLocale)).navigationBarTitleDisplayMode(.inline)
         .toolbar {Button("重新加载") {Task {await load()}}.disabled(working)}
         .task {await load()}
+        .onChange(of:draft?.result != nil,initial:true) { _,ready in
+            guard ready, let draft, let value=draft.result else {return}
+            let oldTitle=title,oldTags=tags,titleChanged=title != savedTitle,tagsChanged=tags != savedTags
+            latestAppendID=draft.requestID
+            apply(value)
+            if titleChanged {title=oldTitle};if tagsChanged {tags=oldTags}
+            photo=nil;error="";notice="附件已添加";model.clearAppend(appendKey)
+        }
         .sheet(item:$preview) { OriginalFileSheet(file:$0) }
         .alert("添加标签",isPresented:$addingTag) {
             TextField("标签名称",text:$newTag)
@@ -1319,7 +1556,12 @@ struct DetailView: View {
     }
     private func load() async {
         guard !working else {return};working=true;defer {working=false}
-        do {apply(try await model.detail(record.id,workspace:workspace));error=""}
+        let previous=latestAppendID
+        do {
+            let value=try await model.detail(record.id,workspace:workspace)
+            guard previous==latestAppendID, !Task.isCancelled else {return}
+            apply(value);error=""
+        }
         catch {self.error=error.localizedDescription}
     }
     private func save() async {
@@ -1344,16 +1586,7 @@ struct DetailView: View {
     }
     private func select(_ data:Data,name:String) {
         guard data.count<=10*1024*1024 else {error="每个附件最多 10 MB";return}
-        pendingData=data;pendingName=name;attachmentRequestID=UUID().uuidString;error="";notice=""
-    }
-    private func append() async {
-        guard let data=pendingData else {return};working=true;defer {working=false};notice=""
-        do {
-            let draftTitle=title,draftTags=tags,titleChanged=title != savedTitle,tagsChanged=tags != savedTags
-            apply(try await model.addAttachment(record.id,name:pendingName,data:data,updated:updated,requestID:attachmentRequestID,workspace:workspace))
-            if titleChanged {title=draftTitle};if tagsChanged {tags=draftTags}
-            pendingData=nil;photo=nil;error="";notice="附件已添加"
-        } catch {self.error=error.localizedDescription}
+        model.stageAppend(appendKey,name:name,data:data);error="";notice=""
     }
     private func open(_ file:PhoneAttachment) async {
         working=true;downloadDone=0;downloadTotal=0

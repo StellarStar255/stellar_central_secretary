@@ -412,7 +412,7 @@ class Service:
         finally:
             self.backups.lock.release()
 
-    def append_material(self,item_id,body):
+    def append_material(self,item_id,body,*,include_detail=True):
         if not isinstance(body.get('text',''),str):raise ValueError('追加文字格式无效')
         with self.lock:
             urls=body.get('links',links.extract(body.get('text',''))) if body.get('read_links',True) else []
@@ -429,7 +429,9 @@ class Service:
                 short=not body.get('attachments') and len(body.get('text',''))<=4000
                 self.busy.add(item_id);self.summary_jobs.enqueue(item_id,len(body.get('text','')),short)
                 self.summary_jobs.target(item_id,batch_id);self.summary_futures[item_id]=(self.quick_pool if short else self.pool).submit(self.process_addition,item_id,batch_id)
-        return {'ok':True,'batch_id':batch_id,'item':self.item_detail(item_id)}
+        result={'ok':True,'batch_id':batch_id}
+        if include_detail:result['item']=self.item_detail(item_id)
+        return result
 
     def read_group_links(self,item_id,batch_id=None,summarize=None):
         with self.lock:

@@ -350,7 +350,7 @@ class Mobile:
             if previous:
                 if previous['signature']!=signature:raise ValueError('这次附件内容已改变，请重新选择附件')
             else:
-                result=self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False,'summarize':False})
+                result=self.service.append_material(item_id,{'expected_updated':body.get('expected_updated'),'attachments':[{'name':name,'data':encoded}],'read_links':False,'summarize':False},include_detail=False)
                 receipts[receipt]={'signature':signature,'id':item_id};self.save()
                 self.queue_summary(device,item_id,result['batch_id'])
             return {'item':self.public_item(self.service.archive.get(item_id),True),'duplicate':previous is not None}

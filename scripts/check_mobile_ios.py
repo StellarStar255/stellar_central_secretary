@@ -16,6 +16,18 @@ if __name__=='__main__':
   file_gate=threading.Event();file_gate.set()
   ingest_gate=threading.Event();ingest_gate.set()
   ingest_failure=threading.Event()
+  append_gate=threading.Event();append_gate.set()
+  append_requests=[];append_failure=threading.Event()
+  original_append=mobile.append_attachment
+  def controlled_append(device,item,body):
+   append_requests.append(body['request_id'])
+   append_gate.wait(timeout=60)
+   result=original_append(device,item,body)
+   if append_failure.is_set():
+    append_failure.clear()
+    raise ValueError('Fixture response lost after save')
+   return result
+  mobile.append_attachment=controlled_append
   original_ingest=mobile.ingest
   def controlled_ingest(device,body):
    ingest_gate.wait(timeout=20)
@@ -30,10 +42,12 @@ if __name__=='__main__':
    class Counting(base):
     def setup(self):
      super().setup()
-     with connection_changed:connections['tls']+=1
+     with connection_changed:
+      connections['tls']+=1;self.tls_number=connections['tls']
     def do_GET(self):
      if self.path=='/status':
-      with connection_changed:connections['status']+=1;connection_changed.notify_all()
+      with connection_changed:
+       connections['status']+=1;connections['status_tls']=self.tls_number;connection_changed.notify_all()
      if self.path.startswith('/items?'):
       with connection_changed:connections['items']+=1;connection_changed.notify_all()
       list_gate.wait(timeout=10)
@@ -114,6 +128,9 @@ if __name__=='__main__':
       connection_changed.wait_for(lambda:connections['status']>previous,timeout=8);value=dict(connections)
     elif self.path=='/hold-files':file_gate.clear();value={'ok':True}
     elif self.path=='/release-files':file_gate.set();value={'ok':True}
+    elif self.path=='/hold-append':append_requests.clear();append_failure.set();append_gate.clear();value={'ok':True}
+    elif self.path=='/append-requests':value={'calls':len(append_requests),'distinct':len(set(append_requests))}
+    elif self.path=='/release-append':append_gate.set();value={'ok':True}
     elif self.path=='/hold-ingest':ingest_gate.clear();ingest_failure.set();value={'ok':True}
     elif self.path=='/release-ingest':ingest_gate.set();value={'ok':True}
     elif self.path=='/hold-items':list_gate.clear();value={'ok':True}
@@ -162,6 +179,21 @@ if __name__=='__main__':
      value={'phone_count':sum(m.get('text')=='Mobile shared question' for m in chat['messages']),'offline_count':sum(m.get('text')=='Offline shared follow-up' for m in chat['messages']),'background_calls':chat_calls.count('Background shared question')}
     elif self.path=='/wait-background':value={'started':background_started.wait(timeout=5)}
     elif self.path=='/finish-background':background_release.set();value={'ok':True}
+    elif self.path=='/camera-batch-names':
+     item=next(i for i in service.archive.list() if i['title']=='Camera naming fixture')
+     from colorsys import rgb_to_hsv
+     from io import BytesIO
+     from PIL import Image
+     from secretary import bundles
+     archive=service.archive.root/'files'/item['id']
+     files=bundles.metadata(archive)
+     shots=[]
+     for file in files:
+      _,data=bundles.attachment(archive,file['id'])
+      with Image.open(BytesIO(data)) as image:
+       hue,_,_=rgb_to_hsv(*(c/255 for c in image.convert('RGB').getpixel((0,0))))
+       shots.append(round(hue*16)%16)
+     value={'names':[file['name'] for file in files],'shots':shots}
     elif self.path=='/count':value={'count':len(service.archive.list())}
     else:self.send_error(404);return
     data=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
@@ -183,9 +215,10 @@ if __name__=='__main__':
      print('Fixture chat calls:',chat_calls,flush=True)
      print('Fixture shared messages:',[(m.get('role'),m.get('text'),m.get('requestState')) for c in service.chat_history()['conversations'] if c['id']==shared_id for m in c['messages']],flush=True)
     result.check_returncode()
-    if len(sys.argv)==2:assert len(service.archive.list())==6
+    filtered=any(arg.startswith(("-only-testing","-skip-testing")) for arg in sys.argv[2:])
+    if not filtered:assert len(service.archive.list())==7
     assert 'Company queued note' not in [i['title'] for i in second.archive.list()]
-    if len(sys.argv)>2:
+    if filtered:
      print('PASS: selected native iOS scenarios: '+', '.join(sys.argv[2:]))
     else:
      print('PASS: native iOS pairing, Mac approval, pinned HTTPS, short foreground TLS reuse, long-background transport rebuild, suspended offline-attempt recovery, cached list reuse, nonblocking refresh, offline cache across restart, phone metadata editing, tag chips with add and confirmed deletion, automatic inline image previews, top original links and attachment controls, original file cache and download cancellation, note capture, reference details, knowledge answer, offline queue across restart, automatic retry and no duplicate archives, shared desktop chat context, bidirectional messages and offline chat retry')

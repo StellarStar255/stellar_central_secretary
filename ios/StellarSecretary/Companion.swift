@@ -63,6 +63,18 @@ class PinnedSession: NSObject, URLSessionDelegate {
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
+private final class AttachmentSendProgress: PinnedSession, URLSessionTaskDelegate, @unchecked Sendable {
+    let report: @Sendable (Int64, Int64) -> Void
+    init(fingerprint: String, report: @escaping @Sendable (Int64, Int64) -> Void) {
+        self.report = report
+        super.init(fingerprint)
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        if totalBytesExpectedToSend > 0 { report(totalBytesSent,totalBytesExpectedToSend) }
+    }
+}
+
 // A dedicated pinned download reports bytes and supports cancellation without
 // invalidating the session used by library queries or editing.
 private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegate, @unchecked Sendable {
@@ -104,6 +116,22 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
     }
     func urlSession(_ session:URLSession,task:URLSessionTask,didCompleteWithError error:Error?) {if let error {finish(.failure(error))}}
 }
+struct RecordAppendKey: Hashable {
+    let workspace: String
+    let record: String
+}
+
+struct RecordAppend {
+    let requestID = UUID().uuidString
+    let name: String
+    var data: Data?
+    var attempt: UUID?
+    var sent: Int64 = 0
+    var total: Int64 = 0
+    var failure = ""
+    var result: [String:Any]?
+}
+
 @MainActor final class Companion: NSObject, ObservableObject, NetServiceBrowserDelegate, NetServiceDelegate {
     @Published private(set) var paired: PairedMac?
     @Published private(set) var computers = PairedComputers()
@@ -315,6 +343,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         guard canChangeComputer else {error="正在提交内容，请完成后再移除电脑";return}
         do {
             var next=computers;next.remove(id);try CredentialStore.save(next);computers=next
+            recordAppends = recordAppends.filter { $0.key.workspace != id }
             if paired?.id==id {activateComputer(nil)}
         } catch {self.error="无法移除配对，请稍后重试"}
     }
@@ -402,7 +431,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         discoveredURLs=Array((NSOrderedSet(array:hints).array as? [String] ?? endpoints).prefix(16))
         Task { await connect() }
     }
-    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil, endpoint: String? = nil, uploadKey:String? = nil) async throws -> [String:Any] {
+    private func request(_ path: String, body: [String:Any]? = nil, using pair: PairedMac? = nil, timeout: TimeInterval? = nil, endpoint: String? = nil, uploadKey:String? = nil, sent: AttachmentSendProgress? = nil) async throws -> [String:Any] {
         let protectedWrite = body != nil && (path == "/ingest" || path.hasSuffix("/attachments") || path.hasSuffix("/messages"))
         if protectedWrite {
             guard privacySupported else {
@@ -433,7 +462,15 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             if let uploadKey { uploadProgress[uploadKey]=nil }
         }
         let data:Data,response:URLResponse
-        do {(data,response)=try await (alternateSession ?? session).data(for:request)}
+        do {
+            let connection = alternateSession ?? session
+            if let sent, let payload = request.httpBody {
+                request.httpBody = nil
+                (data,response) = try await connection.upload(for:request,from:payload,delegate:sent)
+            } else {
+                (data,response) = try await connection.data(for:request)
+            }
+        }
         catch {if generation != deviceGeneration {throw CancellationError()};throw error}
         guard generation==deviceGeneration, pair.id == (candidate ?? paired)?.id else {throw CancellationError()}
         let result = try JSONSerialization.jsonObject(with:data) as? [String:Any] ?? [:]
@@ -594,7 +631,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             let urls = Array(NSOrderedSet(array: [pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? [pair.info.url]
             var endpoint = online && session != nil ? sessionEndpoint : try await transport(pair.info,urls:urls,preferred:pair.transport)
             guard connectionGeneration==generation,!Task.isCancelled else {return}
-            let usingRelay = online && endpoint.hasPrefix("https://127.0.0.1:")
+            let usingRelay = online && (pair.transport == "bluetooth" || pair.transport == "wifi")
             var allowDirectProbe = usingRelay && Date() >= nextDirectProbe && !busy && !flushing && !chatSubmitting && activeWrites==0
             #if DEBUG
             if ["--nearby-only","--bluetooth-only","--wifi-only"].contains(where:ProcessInfo.processInfo.arguments.contains) {
@@ -620,7 +657,9 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             } catch {
                 guard connectionGeneration==generation,!Task.isCancelled,canRefreshSession(after:error) else {throw error}
                 if online {
-                    // Retry only the read-only status check. Never replay an in-flight write.
+                    // The current carrier failed. Offer offline capture while alternatives are probed.
+                    online=false
+                    status="\(pair.displayName) 离线 · 内容保留在手机"
                     endpoint=try await transport(pair.info,urls:urls)
                 } else if !quickResume {throw error}
                 guard connectionGeneration==generation,!Task.isCancelled else {return}
@@ -664,7 +703,7 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
             mayRetryConnection=canRefreshSession(after:error)
             pairingDiagnostic("connect-failed",error:error)
             wifiRelay?.rediscover()
-            session?.invalidateAndCancel();session = nil
+            session?.finishTasksAndInvalidate();session = nil
             online = false;status = "\(pair.displayName) 离线 · 内容保留在手机"
             if (error as NSError).code == 401 { self.error = "此手机已被移除，请重新配对" }
         }
@@ -1119,9 +1158,58 @@ private final class AttachmentTransfer: PinnedSession, URLSessionDownloadDelegat
         let value=try await request("/items/"+id+"/metadata",body:["title":title,"tags":tags,"expected_updated":updated])
         return acceptEditedItem(value)
     }
-    func addAttachment(_ id:String,name:String,data:Data,updated:String,requestID:String,workspace:String) async throws -> [String:Any] {
+    @Published private(set) var recordAppends: [RecordAppendKey:RecordAppend] = [:]
+
+    func stageAppend(_ key: RecordAppendKey, name: String, data: Data) {
+        guard workspaceID == key.workspace, recordAppends[key]?.attempt == nil else { return }
+        recordAppends[key] = RecordAppend(name:name,data:data)
+    }
+
+    func clearAppend(_ key: RecordAppendKey) {
+        guard recordAppends[key]?.attempt == nil else { return }
+        recordAppends[key] = nil
+    }
+
+    func submitAppend(_ key: RecordAppendKey, updated: String) {
+        guard workspaceID == key.workspace, var draft = recordAppends[key],
+              draft.attempt == nil, let data = draft.data else { return }
+        let attempt = UUID()
+        draft.attempt = attempt
+        draft.sent = 0
+        draft.total = 0
+        draft.failure = ""
+        recordAppends[key] = draft
+        activeWrites += 1
+        Task {
+            defer { activeWrites -= 1 }
+            do {
+                let item = try await addAttachment(key.record,name:draft.name,data:data,updated:updated,
+                                                   requestID:draft.requestID,workspace:key.workspace) { sent,total in
+                    Task { @MainActor in
+                        guard var current = self.recordAppends[key], current.attempt == attempt else { return }
+                        current.sent = max(current.sent,sent)
+                        current.total = total
+                        self.recordAppends[key] = current
+                    }
+                }
+                draft.data = nil
+                draft.result = item
+            } catch {
+                draft.failure = error.localizedDescription
+            }
+            draft.attempt = nil
+            recordAppends[key] = draft
+        }
+    }
+
+    private func addAttachment(_ id:String,name:String,data:Data,updated:String,requestID:String,workspace:String,
+                       progress:@escaping @Sendable (Int64,Int64)->Void) async throws -> [String:Any] {
+        guard workspace==workspaceID,candidate==nil,let pair=paired else {throw CancellationError()}
+        let route = try await attachmentUpload(using:pair,size:data.count)
+        defer { if pair.transport=="bluetooth", !chatSubmitting, !flushing { wifiRelay?.suspendDiscovery() } }
         guard workspace==workspaceID,candidate==nil else {throw CancellationError()}
-        let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data.base64EncodedString(),"expected_updated":updated,"request_id":requestID],timeout:120)
+        let sender = AttachmentSendProgress(fingerprint:pair.info.fingerprint,report:progress)
+        let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data.base64EncodedString(),"expected_updated":updated,"request_id":requestID],using:pair,timeout:route.timeout,endpoint:route.endpoint,sent:sender)
         return acceptEditedItem(value)
     }
     private var attachmentCacheFolder:URL {FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("phone-attachments",isDirectory:true)}
