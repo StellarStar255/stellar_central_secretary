@@ -1120,6 +1120,12 @@ class Service:
                 timings['total_seconds']=round(time.monotonic()-started,3)
                 response.update(timings=timings,answer_evidence=answer_evidence('catalog'))
                 return response
+            from . import plan_costs
+            comparison=measured('retrieval_seconds',lambda:plan_costs.lookup(self.archive,question,turns))
+            if comparison:return result(*comparison,[],'archive',turns)
+            from . import note_answers
+            field=measured('retrieval_seconds',lambda:note_answers.lookup(self.archive,question,turns))
+            if field:return result(*field,[],'archive')
             from .archived_arrangements import lookup
             with self.lock:archived=measured('retrieval_seconds',lambda:lookup(self.archive,question))
             if archived:
@@ -1181,8 +1187,11 @@ class Service:
                 if queries is None:
                     preview=[]
                     from .semantic import config as semantic_config
-                    if not retained and not force_refresh and not semantic_config(self.archive)['enabled']:
+                    if not force_refresh and not semantic_config(self.archive)['enabled']:
                         preview=measured('retrieval_seconds',lambda:knowledge_chat.planning_evidence(self.archive,question))
+                    if preview and retained:
+                        from .conversation_context import for_sources
+                        if for_sources(retained,[p['item_id'] for p in preview]):preview=[]
                     if preview:
                         try:backend=self.model_backend(item_ids=history_ids+[p['item_id'] for p in preview])
                         except company_ai.ApprovalRequired:preview=[]

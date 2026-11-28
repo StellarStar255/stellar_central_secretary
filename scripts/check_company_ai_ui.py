@@ -1,17 +1,17 @@
 """Synthetic company material; verify consent and HTTP enforcement without live providers."""
 import json,os,sys,tempfile,threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 from playwright.sync_api import sync_playwright,expect
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from secretary.local_http import LocalHTTPServer
 from secretary.server import Service,handler
 
 with tempfile.TemporaryDirectory() as root:
     service=Service(root);service.archive.configure('codex',True,capture_close_tabs=False)
     source=('Confidential synthetic project result. '*20).strip()
     item=service.ingest({'url':'https://intranet.fixture.test/report','text':source,'captured_at':'fixture','archive_only':True})['item']
-    server=ThreadingHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
+    server=LocalHTTPServer(('127.0.0.1',0),handler(service));threading.Thread(target=server.serve_forever,daemon=True).start()
     base=f'http://127.0.0.1:{server.server_port}'
     try:
         with patch('secretary.ai.run',return_value=json.dumps({'summary':'Synthetic permitted summary','tags':[]})) as model,sync_playwright() as pw:
