@@ -277,6 +277,7 @@ struct CaptureView: View {
                 Section {
                     Button {
                         editing = false
+                        model.prepareAttachmentTransfer()
                         cameraOpen = true
                     } label: { Label("拍照",systemImage:"camera") }
                     .accessibilityIdentifier("capture-camera")
@@ -346,6 +347,10 @@ struct CaptureView: View {
                             VStack(alignment:.leading) {
                                 Text(draft.attachmentBatch?.map(\.name).joined(separator:", ") ?? draft.filename ?? draft.text).lineLimit(2)
                                     .accessibilityIdentifier("capture-outbox-"+draft.id)
+                                if model.sendingDraftID==draft.id, let route=model.captureUploadTransport {
+                                    Text(LocalizedStringKey(route=="direct" ? "网络直连" : route=="bluetooth" ? "蓝牙中继" : "附近 Wi-Fi 中继"))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 if let progress=model.uploadProgress[draft.id] {
                                     AttachmentUploadProgress(progress:progress)
                                 } else {
@@ -379,6 +384,7 @@ struct CaptureView: View {
                 CaptureCameraBatch(slots:remainingCameraSlots, bytes:remainingCameraBytes) { batch in
                     guard batch.count <= remainingCameraSlots,
                           batch.reduce(0, { $0 + $1.data.count }) <= remainingCameraBytes else { return false }
+                    model.prepareAttachmentTransfer()
                     model.captureEditor.files.append(contentsOf:batch)
                     model.error = ""
                     return true
@@ -399,6 +405,7 @@ struct CaptureView: View {
             }
             .onChange(of:photos) { _,selection in
                 guard !selection.isEmpty else { return }
+                model.prepareAttachmentTransfer()
                 let id=model.workspaceID,existing=model.captureEditor.files
                 loadingPhotos=true
                 Task {
@@ -677,6 +684,7 @@ struct ChatView: View {
             .photosPicker(isPresented:$pickingPhoto,selection:$pickedPhotos,maxSelectionCount:ChatAttachment.maxCount,selectionBehavior:.ordered,matching:.images,preferredItemEncoding:.current)
             .onChange(of:pickedPhotos) {_,selection in
                 guard !selection.isEmpty else {return}
+                model.prepareAttachmentTransfer()
                 let workspace=model.workspaceID,chat=model.selectedChatID,existing=model.chatFiles
                 loadingAttachment=true;attachmentError=""
                 Task {

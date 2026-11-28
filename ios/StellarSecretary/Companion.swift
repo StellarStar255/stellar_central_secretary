@@ -198,6 +198,7 @@ struct RecordAppend {
     @Published var sources: [Record] = []
     @Published var drafts: [Draft] = []
     @Published private(set) var captureReceipts: [CaptureReceipt] = []
+    @Published private(set) var captureUploadTransport: String?
     @Published private(set) var sendingDraftID: String?
     @Published private(set) var captureStatusAvailable = false
     private var reuseActiveChat = false
@@ -217,6 +218,7 @@ struct RecordAppend {
     private var inBackground = false
     private var mayRetryConnection = false
     private var discoveredURLs: [String] = []
+    private var keepUploadWiFiUntil = Date.distantPast
     private var nextDirectProbe = Date.distantPast
     private var sessionEndpoint = ""
     private var wifiRelay: WiFiRelay?
@@ -695,7 +697,7 @@ struct RecordAppend {
             pair.transport = bluetooth ? "bluetooth" : wireless ? "wifi" : "direct"
             if bluetooth {
                 bluetoothRelay?.rememberVerifiedPeer()
-                if !chatSubmitting && !flushing { wifiRelay?.suspendDiscovery() }
+                if !chatSubmitting && !flushing { suspendIdleUploadWiFi() }
             }
             pairingDiagnostic(bluetooth ? "connected-bluetooth-verified" : wireless ? "connected-wifi-verified" : nearby ? "connected-nearby-verified" : "connected-direct-verified")
             try remember(pair);paired = computers.selected
@@ -756,7 +758,7 @@ struct RecordAppend {
         flushing = true
         defer {
             flushing = false;sendingDraftID=nil
-            if paired?.transport == "bluetooth", !chatSubmitting { wifiRelay?.suspendDiscovery() }
+            if paired?.transport == "bluetooth", !chatSubmitting { suspendIdleUploadWiFi() }
         }
         while let draft = currentDrafts.first(where: {
             (id==nil || id==$0.id)
@@ -764,6 +766,8 @@ struct RecordAppend {
                 && $0.lastError==nil && (captureRetryAfter[$0.id] ?? .distantPast)<=Date()
         }) {
             sendingDraftID=draft.id
+            captureUploadTransport=nil
+            defer { captureUploadTransport=nil }
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let files = draft.attachmentBatch { content["attachments"] = files.map(\.payload) }
             else if let file = draft.filename, let data = draft.data {
@@ -775,6 +779,7 @@ struct RecordAppend {
             do {
                 let size = draft.attachmentBatch.map { $0.reduce(0) { $0 + $1.data.count } } ?? draft.data.map { $0.utf8.count * 3 / 4 }
                 let upload = try await attachmentUpload(using:pair,size:size)
+                captureUploadTransport=upload.transport
                 let response = try await request("/ingest",body:["request_id":draft.id,"content":content],using:pair,timeout:upload.timeout,endpoint:upload.endpoint,uploadKey:size==nil ? nil : draft.id)
                 if let value = (response["capture"] ?? response["item"]) as? [String:Any] {
                     let receipt = CaptureReceipt(value)
@@ -1060,22 +1065,35 @@ struct RecordAppend {
         do {try persistChatQueue(pendingChatMessages.filter {$0.id != id});chatRetryAfter[id] = nil} catch {chatNotice="无法移除待发消息"}
     }
 
+    func prepareAttachmentTransfer() {
+        guard paired?.transport == "bluetooth", online else {return}
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--bluetooth-only") {return}
+        #endif
+        // Look for the faster carrier while the user takes or selects photos.
+        keepUploadWiFiUntil=Date().addingTimeInterval(30)
+        wifiRelay?.start()
+    }
+    private func suspendIdleUploadWiFi() {
+        if Date() >= keepUploadWiFiUntil && activeWrites == 0 {wifiRelay?.suspendDiscovery()}
+    }
+
     // Keep the working Bluetooth session for status and small messages. When
     // sending files, probe faster paths without switching the paired computer.
-    private func fasterAttachmentUploadEndpoint(_ pair: PairedMac) async -> String? {
+    private func fasterAttachmentUploadEndpoint(_ pair: PairedMac,timeout:TimeInterval) async -> String? {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--bluetooth-only") { return nil }
         #endif
         let direct = Array(NSOrderedSet(array:[pair.info.url] + discoveredURLs + pair.info.connectionURLs)) as? [String] ?? []
         let wifi = wifiRelay
         return try? await withThrowingTaskGroup(of:String?.self) { group in
-            group.addTask { try await Task.sleep(for:.seconds(4));throw PairingTransportFailure.timedOut }
+            group.addTask { try await Task.sleep(for:.seconds(timeout));throw PairingTransportFailure.timedOut }
             for url in direct.prefix(9) where URLComponents(string:url)?.host?.hasPrefix("169.254.") != true {
                 group.addTask { try? await PairingTLSProbe.verified(url,fingerprint:pair.info.fingerprint) }
             }
             if let wifi {
                 group.addTask {
-                    guard let endpoint = try? await wifi.endpoint(timeout:4) else { return nil }
+                    guard let endpoint = try? await wifi.endpoint(timeout:timeout) else { return nil }
                     return try? await PairingTLSProbe.verified(endpoint,fingerprint:pair.info.fingerprint)
                 }
             }
@@ -1088,9 +1106,17 @@ struct RecordAppend {
 
     private func attachmentUpload(using pair: PairedMac,size: Int?) async throws -> (endpoint:String?,timeout:TimeInterval?,transport:String?) {
         guard let size else { return (nil,nil,nil) }
-        let endpoint = pair.transport == "bluetooth" ? await fasterAttachmentUploadEndpoint(pair) : nil
+        prepareAttachmentTransfer()
+        // A megabyte on BLE can take over a minute. Allow a full nearby Wi-Fi
+        // discovery cycle for large uploads, even on a cold start.
+        let discoveryTimeout:TimeInterval = size >= 1_048_576 ? 12 : 4
+        let endpoint = pair.transport == "bluetooth" ? await fasterAttachmentUploadEndpoint(pair,timeout:discoveryTimeout) : nil
         try Task.checkCancellation()
-        let transport = endpoint != nil ? "wifi" : pair.transport
+        var transport = pair.transport
+        if let endpoint {
+            let wireless = await wifiRelay?.ownsEndpoint(endpoint) ?? false
+            transport = wireless ? "wifi" : "direct"
+        }
         // Bluetooth takes longer to transfer the same bytes than a direct connection.
         let timeout = transport == "bluetooth" ? max(120,TimeInterval(size)/12_288) : 120
         return (endpoint,timeout,transport)
@@ -1105,7 +1131,7 @@ struct RecordAppend {
         chatSubmitting=true
         defer {
             sendingChatID=nil;chatUploadTransport=nil;chatSubmitting=false
-            if paired?.transport == "bluetooth", !flushing { wifiRelay?.suspendDiscovery() }
+            if paired?.transport == "bluetooth", !flushing { suspendIdleUploadWiFi() }
         }
         var changed=false
         for pending in ready {
@@ -1175,6 +1201,7 @@ struct RecordAppend {
 
     func stageAppend(_ key: RecordAppendKey, name: String, data: Data) {
         guard workspaceID == key.workspace, recordAppends[key]?.attempt == nil else { return }
+        prepareAttachmentTransfer()
         recordAppends[key] = RecordAppend(name:name,data:data)
     }
 
@@ -1219,7 +1246,7 @@ struct RecordAppend {
                        progress:@escaping @Sendable (Int64,Int64)->Void) async throws -> [String:Any] {
         guard workspace==workspaceID,candidate==nil,let pair=paired else {throw CancellationError()}
         let route = try await attachmentUpload(using:pair,size:data.count)
-        defer { if pair.transport=="bluetooth", !chatSubmitting, !flushing { wifiRelay?.suspendDiscovery() } }
+        defer { if pair.transport=="bluetooth", !chatSubmitting, !flushing { suspendIdleUploadWiFi() } }
         guard workspace==workspaceID,candidate==nil else {throw CancellationError()}
         let sender = AttachmentSendProgress(fingerprint:pair.info.fingerprint,report:progress)
         let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data,"expected_updated":updated,"request_id":requestID],using:pair,timeout:route.timeout,endpoint:route.endpoint,sent:sender)

@@ -14,13 +14,10 @@ final class WiFiRelay: @unchecked Sendable {
     private var target: NWEndpoint?
     private var targetInterface: NWInterface?
     private var keeper: NWConnection?
-    private var probes: [UUID:NWConnection] = [:]
-    private var discovered: Set<NWBrowser.Result> = []
-    private var discoveryScheduled=false
+    private var probes: [NWEndpoint:NWConnection] = [:]
     private var started = false
     private var stopped = false
     private var suspended=false
-    private var generation=UUID()
     private var localURL: String?
     private var waiters: [UUID: CheckedContinuation<String,Error>] = [:]
     private var pipes: [UUID: Pipe] = [:]
@@ -79,25 +76,15 @@ final class WiFiRelay: @unchecked Sendable {
         let browser=NWBrowser(for:.bonjour(type:Self.serviceType,domain:"local."),using:discovery)
         self.browser=browser
         browser.browseResultsChangedHandler={ [weak self,weak browser] results,_ in
-            guard let self,let browser,self.browser === browser,self.target == nil,self.probes.isEmpty else { return }
-            self.discovered=results
-            self.report("browse-results-\(results.count)")
-            guard !results.isEmpty,!self.discoveryScheduled else {return}
-            self.discoveryScheduled=true
-            // Give peer-to-peer discovery time to return AWDL, rather than
-            // immediately choosing an isolated infrastructure Wi-Fi interface.
-            self.queue.asyncAfter(deadline:.now()+2) { [weak self,weak browser] in
-                guard let self,let browser,self.browser === browser else {return}
-                self.discoveryScheduled=false
-                var endpoints:[NWEndpoint]=[]
-                for result in self.discovered {
-                    guard case .service(let name,let type,let domain,_)=result.endpoint,name == "stellar-"+self.serverID else {continue}
-                    for interface in result.interfaces where interface.type == .wifi || interface.name.hasPrefix("awdl") {
-                        self.report("candidate-interface-"+interface.name+"-"+String(describing:interface.type))
-                        endpoints.append(.service(name:name,type:type,domain:domain,interface:interface))
+            guard let self,let browser,self.browser === browser,self.target == nil else {return}
+            for result in results {
+                guard case .service(let name,let type,let domain,_)=result.endpoint,name == "stellar-"+self.serverID else {continue}
+                for interface in result.interfaces where interface.type == .wifi || interface.name.hasPrefix("awdl") {
+                    let endpoint=NWEndpoint.service(name:name,type:type,domain:domain,interface:interface)
+                    if self.probes[endpoint] == nil && self.probes.count < 8 {
+                        self.check(endpoint)
                     }
                 }
-                if !endpoints.isEmpty {self.check(Array(endpoints.prefix(8)))}
             }
         }
         browser.stateUpdateHandler={ [weak self,weak browser] state in
@@ -107,39 +94,41 @@ final class WiFiRelay: @unchecked Sendable {
         }
         browser.start(queue:queue)
     }
-    private func check(_ endpoints: [NWEndpoint]) {
-        let attempt=UUID();generation=attempt
-        browser?.cancel();browser=nil
-        for endpoint in endpoints {
-            let id=UUID(),parameters=Self.directParameters();parameters.includePeerToPeer=true
-            if case .service(_,_,_,let interface)=endpoint,let interface {
-                // An explicit scope is the route requirement. AWDL's interface
-                // classification differs by OS; never fall back to USB or VPN.
-                parameters.requiredInterface=interface
+    private func check(_ endpoint: NWEndpoint) {
+        let parameters=Self.directParameters()
+        parameters.includePeerToPeer=true
+        if case .service(_,_,_,let interface)=endpoint {parameters.requiredInterface=interface}
+        let connection=NWConnection(to:endpoint,using:parameters)
+        probes[endpoint]=connection
+        connection.stateUpdateHandler={ [weak self,weak connection] state in
+            guard let self,let connection,self.probes[endpoint] === connection else {return}
+            self.report("probe-"+String(describing:state))
+            switch state {
+            case .ready:
+                self.target=connection.currentPath?.remoteEndpoint ?? endpoint
+                if case .service(_,_,_,let interface)=endpoint {self.targetInterface=interface}
+                self.browser?.cancel();self.browser=nil
+                self.keeper?.cancel();self.keeper=connection
+                let old=self.probes;self.probes.removeAll()
+                for probe in old.values where probe !== connection {probe.cancel()}
+                self.completeWaiters()
+            case .failed:
+                self.expireProbe(connection,endpoint:endpoint)
+            default:break
             }
-            let connection=NWConnection(to:endpoint,using:parameters);probes[id]=connection
-            connection.pathUpdateHandler={ [weak self] path in
-                self?.report("probe-path-"+String(describing:path.status)+"-"+path.availableInterfaces.map {$0.name+":"+String(describing:$0.type)}.joined(separator:","))
-            }
-            connection.stateUpdateHandler={ [weak self,weak connection] state in
-                guard let self,let connection,self.probes[id] === connection else {return}
-                self.report("probe-"+String(describing:state))
-                if case .ready=state {
-                    self.target=connection.currentPath?.remoteEndpoint ?? endpoint
-                    if case .service(_,_,_,let interface)=endpoint {self.targetInterface=interface}
-                    self.keeper?.cancel();self.keeper=connection
-                    let old=self.probes;self.probes.removeAll();for value in old.values where value !== connection {value.cancel()}
-                    self.completeWaiters()
-                } else if case .failed=state {
-                    self.probes.removeValue(forKey:id);connection.cancel()
-                    if self.probes.isEmpty {self.queue.asyncAfter(deadline:.now()+1) {self.browse()}}
-                }
-            }
-            connection.start(queue:queue)
         }
-        queue.asyncAfter(deadline:.now()+8) { [weak self] in
-            guard let self,!self.suspended,self.generation==attempt,self.target == nil else {return}
-            let old=self.probes;self.probes.removeAll();for value in old.values {value.cancel()};self.browse()
+        connection.start(queue:queue)
+        queue.asyncAfter(deadline:.now()+8) { [weak self,weak connection] in
+            if let connection {self?.expireProbe(connection,endpoint:endpoint)}
+        }
+    }
+    private func expireProbe(_ connection:NWConnection,endpoint:NWEndpoint) {
+        guard probes[endpoint] === connection else {return}
+        probes.removeValue(forKey:endpoint);connection.cancel()
+        guard probes.isEmpty,let current=browser else {return}
+        queue.asyncAfter(deadline:.now()+1) { [weak self,weak current] in
+            guard let self,let current,self.browser === current,self.probes.isEmpty else {return}
+            current.cancel();self.browser=nil;self.browse()
         }
     }
     func endpoint(timeout: TimeInterval = 14) async throws -> String {
@@ -205,7 +194,7 @@ final class WiFiRelay: @unchecked Sendable {
         await withCheckedContinuation { continuation in queue.async {continuation.resume(returning:self.localURL == url)} }
     }
     func suspendDiscovery() {queue.async {
-        self.suspended=true;self.generation=UUID();self.browser?.cancel();self.browser=nil;self.discoveryScheduled=false
+        self.suspended=true;self.browser?.cancel();self.browser=nil
         self.keeper?.cancel();self.keeper=nil
         let old=self.probes;self.probes.removeAll();for value in old.values {value.cancel()}
         self.target=nil;self.targetInterface=nil
