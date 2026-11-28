@@ -43,3 +43,33 @@ def lookup(archive, question):
     source['origin']=json.loads(source['origin'])
     source['text']=item['text']+('\n\n'+context if context else '')
     return '这条安排已归档：\n\n'+versions[0]+' [1]',[source]
+
+
+def visit_time(archive, question, turns):
+    """Quote a dated visit note only when all indexed visit candidates are simple originals."""
+    from datetime import date, timedelta
+    match = re.fullmatch(r'(?:请问)?(?:我(?:的)?)?(今天|明天|后天)(?:的)?(?:看病|就诊|复诊|挂号|看医生|门诊)(?:时间)?(?:是|在)?(?:几点(?:钟)?|什么时候)[？?]?', question.strip())
+    if not match or turns:
+        return None
+    target = date.today() + timedelta(days=('今天', '明天', '后天').index(match[1]))
+    date_text = rf'(?:{target.isoformat()}|{target.year}年0?{target.month}月0?{target.day}日)'
+    clock = r'(?:(?:(?:上午|下午|中午|晚上|早上)(?:0?[1-9]|1[0-2])|[01]?\d|2[0-3])[:：][0-5]\d|(?:上午|下午|中午|晚上|早上)(?:1[0-2]|[1-9]|十[一二]?|[一二三四五六七八九两])点(?:半|[0-5]?\d分)?)'
+    event = r'(?:看病|就诊|复诊|挂号|看医生|门诊|复查)'
+    fact = re.compile(date_text + rf'(?:（周{"一二三四五六日"[target.weekday()]}）)?\s*(?:' + clock + r'\s*' + event + '|' + event + r'\s*' + clock + r')[。.]?')
+    with archive.db() as db:
+        db.execute('BEGIN')
+        rows = db.execute("""SELECT * FROM items WHERE trashed_at='' AND id IN
+            (SELECT item_id FROM search WHERE search MATCH ?) LIMIT 2""",
+            ('看病 OR 就诊 OR 复诊 OR 挂号 OR 医生 OR 门诊 OR 复查 OR 医院 OR 预约 OR 改期 OR 取消',)).fetchall()
+        if len(rows) != 1 or rows[0]['kind'] != 'note':
+            return None
+        item = dict(rows[0])
+        value = content(item, arrangement_text(item['text']))
+        if not value or not fact.fullmatch(value):
+            return None
+        chunk = db.execute('SELECT * FROM chunks WHERE item_id=? AND position=0', (item['id'],)).fetchone()
+        if not chunk:
+            return None
+    source = dict(chunk, title=item['title'], revision=item['updated'], origin=json.loads(chunk['origin']),
+                  text=item['text'] + ('\n' + item['user_context'] if item['user_context'] else ''), url='', filename='')
+    return f'你归档的安排是「{value}」。[1]', [source]
