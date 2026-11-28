@@ -197,6 +197,37 @@ private func loadPhotos(_ photos:[PhotosPickerItem],addingTo existing:[ChatAttac
     return (files,error)
 }
 
+private func cameraPhotoSubject(_ data: Data) -> String {
+    let handler = VNImageRequestHandler(data:data)
+    let animals = VNRecognizeAnimalsRequest()
+    let people = VNDetectHumanRectanglesRequest()
+    try? handler.perform([animals,people])
+
+    // Prefer a substantial visible subject over a background texture.
+    let chinese = Locale.preferredLanguages.first?.hasPrefix("zh") == true
+    var subjects: [(area:CGFloat, name:String)] = []
+    for animal in animals.results ?? [] {
+        guard let label = animal.labels.first, label.confidence >= 0.5 else { continue }
+        let names = ["Dog":chinese ? "狗" : "Dog", "Cat":chinese ? "猫" : "Cat"]
+        if let name = names[label.identifier] {
+            subjects.append((animal.boundingBox.width * animal.boundingBox.height,name))
+        }
+    }
+    for person in people.results ?? [] where person.confidence >= 0.5 {
+        subjects.append((person.boundingBox.width * person.boundingBox.height,chinese ? "人物" : "Person"))
+    }
+    if let subject = subjects.max(by:{ $0.area < $1.area }), subject.area >= 0.04 { return subject.name }
+
+    let classifier = VNClassifyImageRequest()
+    try? handler.perform([classifier])
+    let generic: Set<String> = ["material","structure","object","textile","tool","equipment","furniture","organism"]
+    for result in classifier.results ?? [] where result.confidence >= 0.65 {
+        let label = String(result.identifier.split(separator:",").first ?? "")
+        if !label.isEmpty && !generic.contains(label) { return label.replacingOccurrences(of:"_",with:" ") }
+    }
+    return ""
+}
+
 private func namedCameraFiles(_ files: [ChatAttachment], note: String) -> [ChatAttachment] {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier:"en_US_POSIX")
@@ -215,11 +246,7 @@ private func namedCameraFiles(_ files: [ChatAttachment], note: String) -> [ChatA
         guard let date = file.capturedAt else { return file }
         var title = subject
         if title.isEmpty {
-            let request = VNClassifyImageRequest()
-            try? VNImageRequestHandler(data:file.data).perform([request])
-            if let match = request.results?.first, match.confidence >= 0.65 {
-                title = stem(String(match.identifier.split(separator:",").first ?? "").replacingOccurrences(of:"_",with:" "))
-            }
+            title = stem(cameraPhotoSubject(file.data))
         }
         if title.isEmpty { title = "Photo-" + formatter.string(from:date) }
         var name: String
