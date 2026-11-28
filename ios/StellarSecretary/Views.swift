@@ -197,14 +197,14 @@ private func loadPhotos(_ photos:[PhotosPickerItem],addingTo existing:[ChatAttac
     return (files,error)
 }
 
-private func cameraPhotoSubject(_ data: Data) -> String {
+private func cameraPhotoSubject(_ data: Data, locale: Locale) -> String {
     let handler = VNImageRequestHandler(data:data)
     let animals = VNRecognizeAnimalsRequest()
     let people = VNDetectHumanRectanglesRequest()
     try? handler.perform([animals,people])
 
     // Prefer a substantial visible subject over a background texture.
-    let chinese = Locale.preferredLanguages.first?.hasPrefix("zh") == true
+    let chinese = locale.language.languageCode?.identifier == "zh"
     var subjects: [(area:CGFloat, name:String)] = []
     for animal in animals.results ?? [] {
         guard let label = animal.labels.first, label.confidence >= 0.5 else { continue }
@@ -228,7 +228,7 @@ private func cameraPhotoSubject(_ data: Data) -> String {
     return ""
 }
 
-private func namedCameraFiles(_ files: [ChatAttachment], note: String) -> [ChatAttachment] {
+private func namedCameraFiles(_ files: [ChatAttachment], note: String, locale: Locale) -> [ChatAttachment] {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier:"en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd_HHmmss"
@@ -246,7 +246,7 @@ private func namedCameraFiles(_ files: [ChatAttachment], note: String) -> [ChatA
         guard let date = file.capturedAt else { return file }
         var title = subject
         if title.isEmpty {
-            title = stem(cameraPhotoSubject(file.data))
+            title = stem(cameraPhotoSubject(file.data,locale:locale))
         }
         if title.isEmpty { title = "Photo-" + formatter.string(from:date) }
         var name: String
@@ -346,9 +346,9 @@ struct CaptureView: View {
                                 let single = selected.count == 1 && attachments.isEmpty && note.isEmpty ? selected.first : nil
                                 let requestID = single?.deletingLastPathComponent().lastPathComponent ?? UUID().uuidString
                                 if renamePhotos && files.contains(where: { $0.capturedAt != nil }) {
-                                    let originals = files
+                                    let originals = files, locale = interfaceLocale
                                     files = await Task.detached(priority:.userInitiated) {
-                                        namedCameraFiles(originals,note:note)
+                                        namedCameraFiles(originals,note:note,locale:locale)
                                     }.value
                                 }
                                 let reference = try single.map { try SharedInbox.noteReference(for: $0) }
