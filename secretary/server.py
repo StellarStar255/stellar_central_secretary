@@ -1121,6 +1121,10 @@ class Service:
             if archived:
                 timings['archive_match']=True
                 return result(*archived,['安排内容一致，直接读取当前归档，未调用模型。'],'archive')
+            from .archived_arrangements import visit_time
+            visit=measured('retrieval_seconds',lambda:visit_time(self.archive,question,turns))
+            if visit:
+                return result(*visit,[],'archive')
             from . import archived_birthdays
             birthday=measured('retrieval_seconds',lambda:archived_birthdays.lookup(self.archive,question,turns))
             if birthday:

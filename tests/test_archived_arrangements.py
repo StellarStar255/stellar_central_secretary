@@ -12,6 +12,21 @@ class ArchivedArrangementsTests(unittest.TestCase):
         self.text='周六上午11:00带测试对象去复查'
         self.item=self.service.ingest({'text':self.text,'archive_only':True})['item']
 
+    def test_asked_visit_time_uses_archive_date_and_rejects_conflicts(self):
+        from secretary.archived_arrangements import visit_time
+        self.service.trash_item(self.item['id'],self.item['updated'])
+        item=self.service.ingest({'text':'我明天上午10:30看病','archive_only':True})['item']
+        question='明天看病是几点？'
+        with patch.object(self.service,'model_backend',side_effect=AssertionError('local answer')):
+            result=self.service.ask_library(question)
+        self.assertEqual(result['timings']['model_calls'],0)
+        self.assertEqual(result['sources'][0]['item_id'],item['id'])
+        self.assertIn('上午10:30',result['answer'])
+        self.assertIsNone(visit_time(self.service.archive,'今天看病是几点？',[]))
+        self.assertIsNone(visit_time(self.service.archive,question,[{'question':'改期了'}]))
+        self.service.archive.add('预约已取消','原安排作废')
+        self.assertIsNone(visit_time(self.service.archive,question,[]))
+
     def tearDown(self):
         self.service.close();self.temp.cleanup()
 

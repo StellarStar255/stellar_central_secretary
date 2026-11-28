@@ -88,7 +88,7 @@ class KnowledgeChatTest(unittest.TestCase):
         visit,_=self.service.archive.add('医院门诊预约','就诊日期：2026年11月28日，预约时间：10:30–11:00。')
         project,_=self.service.archive.add('青杉计划','负责人：示例乙。')
         history=[dict(question='示例甲的生日',answer='档案中有出生日期。[1]',source_ids=[person])]
-        for question,expected in [('我的生日呢？',person),('明天看病是几点？',visit),('「青杉计划」的负责人是谁？',project)]:
+        for question,expected in [('我的生日呢？',person),('明天看病是几点？',visit),('「青杉计划」的负责人是谁？',project),('青杉计划的负责人是谁？',project)]:
             def reply(prompt,*args,**kwargs):
                 data=json.loads(prompt.split('\n',1)[1])
                 hits=[p for p in data['passages'] if p['title']==self.service.archive.get(expected)['title']]
@@ -109,6 +109,8 @@ class KnowledgeChatTest(unittest.TestCase):
         self.service.archive.add('预约', '门诊暂未公布时间。')
         for q in ('我的生日呢？','明天看病是几点？','明天挂号需要带什么？','「青杉计划」的地点在哪里？'):
             self.assertIsNone(knowledge_chat.grounded_lookup(self.service.archive,q,[],None,[]))
+        self.service.archive.add('资料摘录','青杉计划的负责人仍未确定。')
+        self.assertIsNone(knowledge_chat.grounded_lookup(self.service.archive,'青杉计划的负责人是谁？',[],None,[]))
         self.service.archive.add('就诊安排','明天看病时间为下午三点。')
         with patch('secretary.ai.run',side_effect=['{"queries":["就诊安排"]}','下午三点。[1]']) as model:
             self.service.ask_library('明天看病是几点？',force_refresh=True)

@@ -59,6 +59,15 @@ class BirthdayTests(unittest.TestCase):
             self.assertIn('农历闰四月廿三', result['answer'])
             self.assertNotIn('2001', result['sources'][0]['text'])
 
+    def test_my_original_birthday_alongside_relative(self):
+        mine=self.service.ingest({'text':'我的生日 公历2000年3月2日','archive_only':True})['item']
+        result=self.service.ask_library('我的生日呢？')
+        self.assertEqual(result['timings']['model_calls'],0)
+        self.assertEqual(result['sources'][0]['item_id'],mine['id'])
+        self.assertIn('你的生日是公历2000年3月2日',result['answer'])
+        self.service.archive.add('纠正','我的生日其实是3月3日')
+        self.assertIsNone(lookup(self.archive,'我的生日呢？'))
+
     def test_date_boundaries(self):
         for value in ('2024-02-29', '农历二〇〇一年八月十二', '阴历闰四月二十三', '农历腊月初一', '11月30号'):
             self.assertTrue(date_identity(value), value)

@@ -113,25 +113,34 @@ def lookup(archive, question, turns=()):
             return None
         dates = set()
         original_dates = []
+        matches = []
         for row in rows:
             if row['kind'] != 'note' or row['user_context'] or row['note']:
                 return None
             if row['note_images'] != '[]' or row['additions'] != '[]':
                 return None
-            fact = record.fullmatch(arrangement_text(row['text']))
+            body = arrangement_text(row['text'])
+            if subject == '我':
+                # A standalone relative's birthday cannot describe the speaker.
+                relative = re.fullmatch(r'(?:[\w·]{1,20})?(?:爸爸|妈妈|父亲|母亲|儿子|女儿)(?:的)?(?:生日|出生日期)\s*[是在为]?\s*[:：]?\s*(.+?)[。！!]?', body)
+                if relative and date_identity(relative[1]):
+                    continue
+            fact = record.fullmatch(body)
             identity = date_identity(fact[1]) if fact else None
             if identity is None:
                 return None
+            matches.append(row)
             dates.add(identity)
             original_dates.append(fact[1])
         if len(dates) != 1:
             return None
-        if depends_on_conversation(subject, {row['id'] for row in rows}, turns, record, dates.pop()):
+        if depends_on_conversation(subject, {row['id'] for row in matches}, turns, record, dates.pop()):
             return None
-        item = rows[0]
+        item = matches[0]
         chunk = db.execute('SELECT * FROM chunks WHERE item_id=? AND position=0 LIMIT 1', (item['id'],)).fetchone()
         if not chunk:
             return None
     source = dict(chunk, title=item['title'], text=item['text'], revision=item['updated'],
                   origin=json.loads(chunk['origin']), url='', filename='')
-    return f'{subject}的生日是{original_dates[0]}。[1]', [source]
+    owner = '你' if subject == '我' else subject
+    return f'{owner}的生日是{original_dates[0]}。[1]', [source]

@@ -69,13 +69,15 @@ def grounded_lookup(archive, question, turns, semantic, notice):
                       re.search(r'我(?:的)?(?:生日|出生日期)|本人(?:的)?(?:生日|出生日期)|我叫|我的姓名',p['title']+' '+p['text'])]
             return queries,relevant
         return None
-    field=re.fullmatch(r'(?:请问)?(?:「([^「」]{2,60})」|《([^《》]{2,60})》)(?:的)?(负责人|联系人|截止日期|截止时间|地点|地址|时间)(?:是|在)?(?:谁|哪里|哪天|几点|什么时候|什么地方)',value)
+    field=re.fullmatch(r'(?:请问)?(?:(?:「([^「」]{2,60})」|《([^《》]{2,60})》)(?:的)?|([\w· -]{2,60}?)的)(负责人|联系人|截止日期|截止时间|地点|地址|时间)(?:是|在)?(?:谁|哪里|哪天|几点|什么时候|什么地方)',value)
     if field:
-        topic=field[1] or field[2]
-        label=field[3]
+        topic=(field[1] or field[2] or field[3]).strip()
+        label=field[4]
         queries=SearchPlan([topic+' '+label,topic,question],raw_query=question)
         passages=retrieve(archive,queries,semantic=semantic,notice=notice)
         relevant=[p for p in passages if topic.casefold() in (p['title']+'\n'+p['text']).casefold()]
+        if field[3] and not any(p['title'].strip().casefold()==topic.casefold() for p in relevant):
+            return None
         if any(label in p['text'] for p in relevant):
             return queries,relevant
         return None
