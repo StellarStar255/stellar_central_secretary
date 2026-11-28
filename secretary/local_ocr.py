@@ -53,13 +53,20 @@ def recognize(image):
     if sys.platform=='darwin':
         import Vision
         from Foundation import NSData
-        output=io.BytesIO();image.save(output,'PNG');data=NSData.dataWithBytes_length_(output.getvalue(),output.tell())
+        if isinstance(image,bytes):
+            encoded=image
+        else:
+            output=io.BytesIO();image.save(output,'PNG');encoded=output.getvalue()
+        data=NSData.dataWithBytes_length_(encoded,len(encoded))
         request=Vision.VNRecognizeTextRequest.alloc().init();request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
         request.setRecognitionLanguages_(['zh-Hans','en-US']);request.setUsesLanguageCorrection_(True)
         handler=Vision.VNImageRequestHandler.alloc().initWithData_options_(data,None)
         ok,error=handler.performRequests_error_([request],None)
         if not ok:raise ValueError('本机 OCR 失败：'+str(error))
         return '\n'.join(str(result.topCandidates_(1)[0].string()) for result in request.results() or [])[:8000]
+    if isinstance(image,bytes):
+        from PIL import Image
+        with Image.open(io.BytesIO(image)) as decoded:return recognize(decoded)
     with tempfile.TemporaryDirectory(prefix='stellar-ocr-') as temp:
         source=Path(temp)/'page.png';image.save(source,'PNG')
         if sys.platform=='win32':

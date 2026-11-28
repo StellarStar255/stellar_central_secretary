@@ -9,7 +9,7 @@ from secretary import ai
 class NoteDatesTests(unittest.TestCase):
     def test_weekdays_and_year_boundary(self):
         base='2026-11-13T16:20:00+08:00'
-        for phrase,expected in [('周六','2026年11月14日'),('本周一','2026年11月9日'),('下周六','2026年11月21日'),('下下星期六','2026年11月28日'),('明天','2026年11月14日')]:
+        for phrase,expected in [('周六','2026年11月14日'),('本周一','2026年11月9日'),('下周六','2026年11月21日'),('下礼拜六','2026年11月21日'),('下个星期六','2026年11月21日'),('下下星期六','2026年11月28日'),('明天','2026年11月14日')]:
             with self.subTest(phrase=phrase):self.assertIn(expected,resolve(phrase+'上午11:00去复查',base))
         self.assertIn('2027年1月1日',resolve('明天上午去复查','2026-12-31T23:59:00+08:00'))
         self.assertIn('2026年11月14日',resolve('周六上午去复查','2026-11-14T00:01:00+08:00'))
@@ -36,6 +36,34 @@ class NoteDatesTests(unittest.TestCase):
                 repeated=service.ingest({'text':text,'title':'Other title','archive_only':True})['item']
                 self.assertEqual(repeated['user_context'],item['user_context'])
                 self.assertEqual(repeated['created'],item['created'])
+            finally:service.close()
+
+    def test_dinner_invitation_is_pinned_to_original_saturday_without_assuming_mealtime(self):
+        from datetime import datetime
+        text='下周六请同学来我家吃饭'
+        with tempfile.TemporaryDirectory() as root:
+            service=Service(root)
+            try:
+                def archive(day):
+                    stamp=datetime(2025,11,day,12).astimezone().isoformat()
+                    return service.ingest({'text':text,'archive_only':True,'note_reference':stamp})['item']
+                first=archive(15)
+                self.assertEqual(first['title'],'2025年11月22日（周六）请同学来我家吃饭')
+                self.assertEqual(first['text'],text)
+                with patch.object(ai,'summarize',return_value={'title':'下周六聚餐','summary':'计划邀请同学来吃饭。','tags':[]}):
+                    fields=ai.summary_fields(first,'codex')
+                self.assertEqual(fields['title'],first['title'])
+                self.assertIn('2025年11月22日',fields['summary'])
+                self.assertEqual(archive(15)['id'],first['id'])
+                self.assertNotEqual(archive(22)['id'],first['id'])
+                self.assertEqual(archive(22)['title'],'2025年11月29日（周六）请同学来我家吃饭')
+                self.assertIn('2026年12月5日（周六）',resolve(text,'2026-11-28T09:30:00+08:00'))
+                legacy,_=service.archive.add('聚餐',text)
+                detail=service.item_detail(legacy)
+                self.assertIn('按归档日期推算',detail['summary'])
+                self.assertEqual(service.archive.get(legacy)['text'],text)
+                for phrase in ['每周六请同学吃饭','上个星期六请客','如果下周六有空就去吃饭','下周六晚上要不要吃饭','下周六要不要吃饭','比如下周六请同学吃饭']:
+                    self.assertEqual(resolve(phrase,'2026-11-28T09:30:00+08:00'),'')
             finally:service.close()
 
     def test_summary_deduplicates_date_interpretation_without_losing_extra_details(self):

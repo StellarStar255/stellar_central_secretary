@@ -90,7 +90,13 @@ def _import_backup(archive, data,stage):
             url, text = item.get('url', ''), item.get('text', '')
             if content is not None:
                 with content.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-            else:digest=hashlib.sha256((url or text).encode()).hexdigest()
+            else:
+                digest=hashlib.sha256((url or text).encode()).hexdigest()
+                from .note_dates import MARKER,dated_digest
+                context=item.get('user_context','').split('\n',2)
+                if not url and len(context)==3 and context[0]==MARKER:
+                    candidate=dated_digest(text,context[2])
+                    if item.get('digest')==candidate:digest=candidate
             if len(item.get('note',''))>20000:raise ValueError('速记文字不能超过 20000 个字符。')
             note_images=item.get('note_images',[])
             if not isinstance(note_images,list) or len(note_images)>MAX_IMAGES:raise ValueError('备份中的速记图片无效')

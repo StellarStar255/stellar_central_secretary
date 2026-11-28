@@ -392,6 +392,11 @@ def summary_fields(item, backend, full_pdf=False):
     if item.get('kind')=='note' and language=='zh':
         from .note_dates import date_summary
         summary=date_summary(summary,context)
-    return dict(title=str(result.get('title') or item['title'])[:300], summary=summary,
+    title=str(result.get('title') or item['title'])
+    if item.get('kind')=='note' and context.startswith('【日期解析】'):
+        resolved=context.split('\n',2)[-1]
+        if any(date in item['title'] for date in re.findall(r'\d{4}年\d{1,2}月\d{1,2}日',resolved)):
+            title=item['title']
+    return dict(title=title[:300], summary=summary,
                 category=str(result.get('category') or ('Uncategorized' if language=='en' else '未分类'))[:80],
                 tags=tags, state='ready', error='')

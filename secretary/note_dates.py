@@ -1,11 +1,21 @@
 """Resolve short, personal arrangements once, using their archive-local date."""
+import hashlib
 import re
 from datetime import datetime, timedelta
 
 MARKER = '【日期解析】'
-TOKEN = re.compile(r'(?<![每上])(?:(本周|这周|下周|下下周|本星期|这星期|下星期|下下星期)([一二三四五六日天])|(?:周|星期|礼拜)([一二三四五六日天])|今天|明天|大后天|后天|昨天|前天)')
-DATE_START=r'(?:今天|明天|大后天|后天|昨天|前天|(?:(?:上上|下下|上|下|本|这)?周|星期|礼拜)[一二三四五六日天]|\d{4}年\d+月\d+日|\d{4}-\d{2}-\d{2}|\d+月\d+日)'
+WEEKDAY = r'(?:(?P<week>下下|下|本|这)个?)?(?:周|星期|礼拜)(?P<day>[一二三四五六日天])'
+RELATIVE_DAY = r'今天|明天|大后天|后天|昨天|前天'
+TOKEN = re.compile(r'(?<![每上下本这个大])(?:'+WEEKDAY+'|'+RELATIVE_DAY+')')
+DATE_START = '(?:'+WEEKDAY+'|'+RELATIVE_DAY+r'|\d{4}年\d+月\d+日|\d{4}-\d{2}-\d{2}|\d+月\d+日)'
 
+# A day can be definite even when an arrangement has no clock time.
+SOCIAL_EVENT = r'吃饭|聚餐|聚会|聚一聚|请客|做客|做东|赴约|看电影|接机|送机|生日会'
+def dated_digest(text,resolved):
+    return hashlib.sha256(('dated-note\0'+text+'\0'+resolved).encode()).hexdigest()
+
+def social_arrangement(text):
+    return bool(re.search(SOCIAL_EVENT,text))
 
 def arrangement_text(value):
     value=re.sub(r'^(?:建档|存档|归档|保存|记录|记住)\s*[:：]\s*','',value.strip())
@@ -30,18 +40,18 @@ def date_summary(summary,context):
 
 
 def resolve(text, reference):
-    if not text or len(text) > 1000 or re.search(r'每(?:个)?(?:周|星期|礼拜)|每逢|每到|通常|一般|例如|比如|[？?]|[“”「」]|```|\d+月\d+日|\d{4}-\d{2}-\d{2}', text):
+    if not text or len(text) > 1000 or re.search(r'每(?:个)?(?:周|星期|礼拜)|每逢|每到|通常|一般|例如|比如|如果|假如|要不要|能不能|要是|是不是|是否|怎么|为什么|吗[。！!]?$|[？?]|[“”「」]|```|\d+月\d+日|\d{4}-\d{2}-\d{2}', text):
         return ''
     # Avoid interpreting quotations, imported articles and timeless descriptions.
-    if not re.search(r'\d{1,2}[:：点时]|上午|下午|中午|晚上|早上|复查|开会|预约|出发|面试|就诊|看病|去|见面|提醒', text):
+    if not social_arrangement(text) and not re.search(r'\d{1,2}[:：点时]|上午|下午|中午|晚上|早上|复查|开会|预约|出发|面试|就诊|看病|去|见面|提醒', text):
         return ''
     base = datetime.fromisoformat(reference)
     def replace(match):
-        word = match.group(); day = match[2] or match[3]
+        word = match.group(); day = match['day']
         if day:
             weekday = '一二三四五六日'.index(day.replace('天', '日'))
-            if match[1]:
-                weeks = 2 if match[1].startswith('下下') else 1 if match[1].startswith('下') else 0
+            if match['week']:
+                weeks = 2 if match['week']=='下下' else 1 if match['week']=='下' else 0
                 delta = weekday - base.weekday() + 7 * weeks
             else:
                 delta = (weekday - base.weekday()) % 7

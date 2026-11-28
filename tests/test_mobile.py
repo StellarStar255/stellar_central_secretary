@@ -72,6 +72,30 @@ class MobileTest(unittest.TestCase):
   self.assertEqual(self.request('/items/'+ident,credential=self.credential)[1]['item']['text'],body['content']['text'])
   self.s.trash_item(ident);self.assertEqual(self.request('/items/'+ident,credential=self.credential)[0],400)
 
+ def test_binary_capture_replays_across_json_and_rejects_incomplete_body(self):
+  from secretary.mobile import BINARY_UPLOAD_TYPE
+  self.approve()
+  self.assertTrue(self.request('/status',credential=self.credential)[1]['binary_attachments_v1'])
+  blobs=[b'first fixture',b'second fixture']
+  def body(values):
+   return {'request_id':'mixed-wire-retry','content':{'attachments':[
+    {'name':f'{index}.txt','data':value} for index,value in enumerate(values)]}}
+  meta=json.dumps(body(map(len,blobs))).encode()
+  packet=len(meta).to_bytes(4,'big')+meta+b''.join(blobs)
+  def send(data,credential):
+   req=urllib.request.Request(self.base+'/privacy-v1/ingest',data=data,
+       headers={'Content-Type':BINARY_UPLOAD_TYPE,'Authorization':'Bearer '+credential})
+   try:
+    with self.http.open(req,timeout=5) as res:return res.status
+   except urllib.error.HTTPError as error:return error.code
+  self.assertEqual(send(packet,''),401)
+  self.assertEqual(send(packet[:-1],self.credential),400)
+  self.assertEqual(send(packet+b'x',self.credential),400)
+  self.assertEqual(send(packet,self.credential),200)
+  legacy=body(base64.b64encode(b).decode() for b in blobs)
+  self.assertTrue(self.request('/privacy-v1/ingest',legacy,self.credential)[1]['duplicate'])
+  self.assertEqual(len(self.s.archive.list()),1)
+
  def test_upload_progress_counts_received_tls_bytes_and_is_phone_scoped(self):
   from http.client import HTTPSConnection
   import time

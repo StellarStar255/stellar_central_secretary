@@ -603,6 +603,7 @@
   "提问本次资料": "Ask about this material",
   "请概览本次图片和附件": "Summarize the images and attachments in this submission",
   "组合资料含清单后超过 50 MB，请减少附件大小": "The grouped archive including its manifest exceeds 50 MB. Use smaller attachments.",
+  "安排日期": "Scheduled date",
   "你的链接说明": "Your link annotation",
   "已按你提供的说明归档，原链接也已保留；尚未读取网页正文。": "Archived using your annotation with the original link retained; webpage content has not been read.",
   "正在根据说明整理摘要。": "Preparing a summary based on your annotation.",

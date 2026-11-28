@@ -58,7 +58,32 @@ struct ChatAttachment: Codable, Equatable {
         files.count <= maxCount && files.allSatisfy { !$0.data.isEmpty }
             && files.reduce(0) { $0 + $1.data.count } <= maxBytes
     }
-    var payload: [String:String] { ["name":name,"data":data.base64EncodedString()] }
+    var payload: [String:Any] { ["name":name,"data":data] }
+}
+// Four-byte big-endian JSON length, JSON metadata, then the unchanged file bytes.
+enum MobileUploadBody {
+    static let binaryType = "application/vnd.stellar.attachments-v1"
+    static func encode(_ body:[String:Any], binary:Bool) throws -> (data:Data,type:String) {
+        var parts:[Data] = []
+        func metadata(_ value:Any) -> Any {
+            if let data = value as? Data {
+                if !binary { return data.base64EncodedString() }
+                parts.append(data)
+                return data.count
+            }
+            if let object = value as? [String:Any] { return object.mapValues(metadata) }
+            if let array = value as? [Any] { return array.map(metadata) }
+            return value
+        }
+        let json = try JSONSerialization.data(withJSONObject:metadata(body),options:.withoutEscapingSlashes)
+        guard !parts.isEmpty else { return (json,"application/json") }
+        var length = UInt32(json.count).bigEndian
+        var payload = Data(bytes:&length,count:4)
+        payload.reserveCapacity(4 + json.count + parts.reduce(0) { $0 + $1.count })
+        payload.append(json)
+        for part in parts { payload.append(part) }
+        return (payload,binaryType)
+    }
 }
 struct ChatCache: Codable {
     var serverID:String;var fingerprint:String

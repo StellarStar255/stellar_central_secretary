@@ -77,16 +77,23 @@ with tempfile.TemporaryDirectory() as root:
     assert ask.call_count==2 and len(service.archive.list())==8
     page.unroute('**/api/ingest')
     page.locator('#new-chat').click();page.locator('#input-mode').select_option('library')
-    arrangement='周六上午11:00带测试对象去复查 contextual-save'
+    arrangement='下周六请同学来我家吃饭'
     page.locator('#message-input').fill(arrangement);page.locator('#send-button').click()
     expect(page.locator('#messages .message.assistant').last).to_contain_text('Synthetic question answer.')
+    page.evaluate("currentChat().messages.find(m=>m.role==='user').createdAt=new Date(2025,10,15,12).toISOString()")
     with page.expect_request(lambda request:request.url.endswith('/api/ingest')) as saved_request:
-     page.locator('#message-input').fill('建档');page.locator('#send-button').click()
+     page.locator('#message-input').fill('帮我归档');page.locator('#send-button').click()
     expect(page.locator('#messages .archive-card')).to_have_count(1)
     payload=saved_request.value.post_data_json;assert payload['text']==arrangement and payload.get('note_reference')
-    contextual=service.archive.get(service.archive.list(q='contextual-save')[0]['id'])
+    contextual=service.archive.get(service.archive.list(q='同学')[0]['id'])
     assert contextual['text']==arrangement and contextual['user_context'].startswith('【日期解析】')
     expect(page.locator('#messages .message.assistant').last).to_contain_text(contextual['user_context'].split('\n',2)[-1])
+    assert '2025年11月22日（周六）' in contextual['title'],contextual['title']
+    page.locator('#messages .archive-card').click()
+    expect(page.locator('#detail-content')).to_contain_text('2025年11月22日（周六）请同学来我家吃饭')
+    expect(page.locator('#detail-content')).to_contain_text(arrangement)
+    expect(page.locator('#detail-content h3').filter(has_text='安排日期')).to_be_visible()
+    page.locator('#detail-dialog .dialog-head button').click()
     page.screenshot(path='/tmp/stellar-contextual-save.png')
     page.locator('#new-chat').click();page.locator('#message-input').fill('建档');page.locator('#send-button').click()
     expect(page.locator('#messages .message.assistant').last).to_contain_text('没有找到可建档的上一条文字')
@@ -98,7 +105,7 @@ with tempfile.TemporaryDirectory() as root:
     expect(page.locator('#message-input')).to_have_value(disconnected)
     expect(page.locator('#messages .archive-card')).to_have_count(0)
     assert len(service.archive.list())==9
-    print('PASS: bare 建档 saves the prior user arrangement, retains the original timestamp, shows its resolved date, and never archives an empty command in a new chat')
+    print('PASS: 帮我归档 saves the prior user arrangement, retains the original timestamp, shows its resolved date, and never archives an empty command in a new chat')
     print('PASS: explicit 建档 saves during active dialogue in auto/library/ask; raw arrangement preserved, meaningful title, searchable and reload-persistent; archive-help questions remain questions; failed save preserves input without false success')
     assert not errors,errors
     print('PASS: real GUI auto-archives literal commands, command URLs and knowledge; no execution, fetch or retrieval; searchable persistent originals, meaningful title and manual ask/archive overrides')

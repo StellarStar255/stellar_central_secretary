@@ -2,6 +2,18 @@ import XCTest
 @testable import CompanionPairing
 
 final class PairedComputersTests: XCTestCase {
+    func testAttachmentEncodingKeepsLegacyJSONAndOrderedBinaryBytes() throws {
+        let photos = [Data([0,255]),Data([4,3,2])]
+        let body:[String:Any] = ["attachments":photos.map { ["name":"照片","data":$0] as [String:Any] }]
+        let legacy = try MobileUploadBody.encode(body,binary:false)
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with:legacy.data) as? [String:[[String:String]]])
+        XCTAssertEqual(parsed["attachments"]?.map { $0["data"] },photos.map { $0.base64EncodedString() })
+        let packet = try MobileUploadBody.encode(body,binary:true)
+        let length = packet.data.prefix(4).reduce(0) { $0 * 256 + Int($1) }
+        XCTAssertEqual(packet.type,MobileUploadBody.binaryType)
+        XCTAssertEqual(packet.data.dropFirst(4+length),photos[0]+photos[1])
+        XCTAssertEqual(try MobileUploadBody.encode(["text":"hello"],binary:true).type,"application/json")
+    }
     private func pair(_ server:String, pin:String="b") -> PairedMac {
         PairedMac(info:PairInfo(v:1,server_id:String(repeating:server,count:32),name:"Computer "+server,url:"https://192.0.2.20:8769",fingerprint:String(repeating:pin,count:64),secret:nil),credential:"credential-"+server)
     }

@@ -181,6 +181,7 @@ struct RecordAppend {
     @Published private(set) var chatRetryAfter: [String:Date] = [:]
     @Published private(set) var captureRetryAfter: [String:Date] = [:]
     @Published private(set) var uploadProgress: [String:UploadProgress] = [:]
+    private var binaryUploads = false
     private var uploadProgressAvailable = false
     @Published var chatStage=""
     @Published var chatPartial=""
@@ -296,6 +297,7 @@ struct RecordAppend {
     }
     private func activateComputer(_ pair:PairedMac?) {
         saveInputs();deviceGeneration=UUID();paired=pair
+        binaryUploads = false
         privacySupported = false
         captureStatusAvailable = false
         reuseActiveChat = false
@@ -448,7 +450,13 @@ struct RecordAppend {
         if body != nil {activeWrites += 1}
         defer {if body != nil {activeWrites -= 1}}
         var request = URLRequest(url:url);if path == "/status" { request.timeoutInterval = 12 };if path == "/pair" { request.timeoutInterval = 15 };request.setValue("Bearer " + pair.credential,forHTTPHeaderField:"Authorization")
-        if let body { request.httpMethod = "POST";request.httpBody = try JSONSerialization.data(withJSONObject:body);request.setValue("application/json",forHTTPHeaderField:"Content-Type");if path == "/ask" { request.timeoutInterval = 300 } }
+        if let body {
+            let encoded = try MobileUploadBody.encode(body,binary:protectedWrite && binaryUploads)
+            request.httpMethod = "POST"
+            request.httpBody = encoded.data
+            request.setValue(encoded.type,forHTTPHeaderField:"Content-Type")
+            if path == "/ask" { request.timeoutInterval = 300 }
+        }
         if let timeout { request.timeoutInterval = timeout }
         var progressTask: Task<Void,Never>?
         if let uploadKey, uploadProgressAvailable {
@@ -696,6 +704,7 @@ struct RecordAppend {
             reuseActiveChat = value["reuse_active_chat"] as? Bool == true
             chatAttachmentsAvailable = value["chat_attachments"] as? Bool == true
             multiAttachmentsAvailable = value["multi_attachments"] as? Bool == true
+            binaryUploads = value["binary_attachments_v1"] as? Bool == true
             uploadProgressAvailable = value["upload_progress"] as? Bool == true
             online = true;status = "已连接 · \(pair.displayName)";error = "";discover();await flush();await flushChatMessages()
         } catch {
@@ -757,7 +766,11 @@ struct RecordAppend {
             sendingDraftID=draft.id
             var content: [String:Any] = ["text":draft.text,"note_reference":draft.created]
             if let files = draft.attachmentBatch { content["attachments"] = files.map(\.payload) }
-            else if let file = draft.filename, let data = draft.data { content["filename"] = file;content["data"] = data }
+            else if let file = draft.filename, let data = draft.data {
+                content["filename"] = file
+                if binaryUploads, let bytes = Data(base64Encoded:data) { content["data"] = bytes }
+                else { content["data"] = data }
+            }
             else if let url = URL(string:draft.text.trimmingCharacters(in:.whitespacesAndNewlines)), ["https","http"].contains(url.scheme ?? ""), !draft.text.contains("\n") { content["url"] = url.absoluteString;content["text"] = "" }
             do {
                 let size = draft.attachmentBatch.map { $0.reduce(0) { $0 + $1.data.count } } ?? draft.data.map { $0.utf8.count * 3 / 4 }
@@ -1209,7 +1222,7 @@ struct RecordAppend {
         defer { if pair.transport=="bluetooth", !chatSubmitting, !flushing { wifiRelay?.suspendDiscovery() } }
         guard workspace==workspaceID,candidate==nil else {throw CancellationError()}
         let sender = AttachmentSendProgress(fingerprint:pair.info.fingerprint,report:progress)
-        let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data.base64EncodedString(),"expected_updated":updated,"request_id":requestID],using:pair,timeout:route.timeout,endpoint:route.endpoint,sent:sender)
+        let value=try await request("/items/"+id+"/attachments",body:["filename":name,"data":data,"expected_updated":updated,"request_id":requestID],using:pair,timeout:route.timeout,endpoint:route.endpoint,sent:sender)
         return acceptEditedItem(value)
     }
     private var attachmentCacheFolder:URL {FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("phone-attachments",isDirectory:true)}

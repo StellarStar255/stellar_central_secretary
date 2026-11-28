@@ -11,6 +11,26 @@ from . import company_ai, mobile_privacy
 SERVICE_TYPE='_stellar-sec._tcp.local.'
 MAX_BODY=16*1024*1024
 
+BINARY_UPLOAD_TYPE='application/vnd.stellar.attachments-v1'
+
+def decode_binary_upload(raw):
+    offset=4+int.from_bytes(raw[:4],'big')
+    if not 4<offset<len(raw) or len(raw)-offset>10*1024*1024:
+        raise ValueError('附件长度无效')
+    body=json.loads(raw[4:offset])
+    if not isinstance(body,dict):raise ValueError('附件格式无效')
+    content=body.get('content',body)
+    if not isinstance(content,dict):raise ValueError('附件格式无效')
+    files=content.get('attachments',[content.get('attachment',content)])
+    if not isinstance(files,list) or not 1<=len(files)<=8:raise ValueError('附件数量无效')
+    for file in files:
+        size=file.get('data') if isinstance(file,dict) else None
+        if type(size) is not int or size<=0 or offset+size>len(raw):raise ValueError('附件长度无效')
+        file['data']=base64.b64encode(memoryview(raw)[offset:offset+size]).decode('ascii')
+        offset+=size
+    if offset!=len(raw):raise ValueError('附件长度无效')
+    return body
+
 def addresses(include_alternates=False):
     import ifaddr
     found=[]
@@ -443,6 +463,11 @@ class Mobile:
                     if post:
                         length=int(self.headers.get('Content-Length','0'))
                         if not 0<length<=MAX_BODY:return self.send(413,{'error':'单次发送不能超过 16 MB'})
+                        binary=self.headers.get('Content-Type')==BINARY_UPLOAD_TYPE
+                        if binary:
+                            if not re.fullmatch(r'/ingest|/chats/[^/]{1,100}/messages|/items/[a-f0-9]{32}/attachments',parsed.path):
+                                return self.send(415,{'error':'此操作不支持附件'})
+                            if not manager.device(credential):return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
                         upload_id=self.headers.get('X-Stellar-Upload')
                         if upload_id is not None:
                             if not re.fullmatch(r'[a-f0-9]{32}',upload_id) or not re.fullmatch(r'/ingest|/chats/[^/]{1,100}/messages',parsed.path):
@@ -464,7 +489,7 @@ class Mobile:
                         else:
                             raw=self.rfile.read(length)
                         if len(raw)!=length:raise ValueError('上传中断')
-                        body=json.loads(raw)
+                        body=decode_binary_upload(raw) if binary else json.loads(raw)
                         if not isinstance(body,dict):raise ValueError('请求格式无效')
                     if post and parsed.path=='/pair':return self.send(200,manager.pair(body))
                     device=manager.device(credential)
@@ -473,7 +498,7 @@ class Mobile:
                         with manager.lock:pending=any(value['expires']>time.time() and secrets.compare_digest(value['hash'],digest(credential)) for value in manager.pending.values())
                         return self.send(202 if pending else 403,{'approved':False,'error':'' if pending else '配对未获批准或已失效'})
                     if not device:return self.send(401,{'error':'设备未配对或已被移除，请重新扫码'})
-                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True,'multi_attachments':True,'upload_progress':True})
+                    if not post and parsed.path=='/status':return self.send(200,{'connected':True,'server_id':manager.state['server_id'],'name':socket.gethostname(),'urls':[endpoint(ip,manager.server.server_port) for ip in addresses(include_alternates=True)],'privacy_version':1,'capture_receipts':True,'reuse_active_chat':True,'chat_attachments':True,'multi_attachments':True,'upload_progress':True,'binary_attachments_v1':True})
                     progress_match=re.fullmatch(r'/upload-progress/([a-f0-9]{32})',parsed.path)
                     if not post and progress_match:
                         with manager.upload_lock:progress=manager.upload_progress.get((device,progress_match[1]))

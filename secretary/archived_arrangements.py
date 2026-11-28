@@ -1,7 +1,7 @@
 """Confirm an exact archived arrangement from live records, without a model."""
 import json
 import re
-from .note_dates import arrangement_text,DATE_START
+from .note_dates import arrangement_text,DATE_START,social_arrangement
 
 
 def content(item,value):
@@ -23,7 +23,7 @@ def lookup(archive, question):
     value=arrangement_text(question)
     if not 4<=len(value)<=1000 or re.search(r'[?？]|```|https?://|\[\d+\]|吗|是否|为什么|怎么|如何|提醒我|改为|取消',value):return None
     if not re.search(r'今天|明天|后天|(?:周|星期|礼拜)[一二三四五六日天]|\d+月\d+日|\d{4}-\d{2}-\d{2}',value):return None
-    if not re.search(r'\d{1,2}[:：点时]|上午|下午|中午|晚上|早上|复查|开会|预约|出发|面试|就诊|看病|见面',value):return None
+    if not social_arrangement(value) and not re.search(r'\d{1,2}[:：点时]|上午|下午|中午|晚上|早上|复查|开会|预约|出发|面试|就诊|看病|见面',value):return None
     bodies=[value,'我'+value] if re.match(DATE_START,value) else [value]
     variants=list(bodies)
     for command in ('建档','存档','归档','保存','记录','记住'):

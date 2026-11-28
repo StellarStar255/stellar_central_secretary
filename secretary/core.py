@@ -1,6 +1,6 @@
 """Local durable archive, document extraction and bilingual passage retrieval."""
 import hashlib
-from .note_dates import date_summary
+from .note_dates import date_summary,dated_digest
 from contextlib import contextmanager
 import io
 import json
@@ -63,12 +63,11 @@ def extract(name, data):
     suffix = Path(name).suffix.lower()
     from . import image_formats
     if image_formats.is_image(name):
-        from PIL import Image
         from . import local_ocr
         try:
             raw=data.read_bytes() if isinstance(data,Path) else data
             preview=image_formats.preview(raw)
-            with Image.open(io.BytesIO(preview)) as image:text=local_ocr.recognize(image).strip()
+            text=local_ocr.recognize(preview).strip()
             return text, '' if text else '图片原件已保存，未识别到可读文字。'
         except Exception as error:
             return '', '图片原件已保存，本机文字识别未完成：'+str(error)[:200]
@@ -312,10 +311,11 @@ class Archive:
                 source_chunks.append((cursor.lastrowid,offset,len(chunk)))
                 db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
             index_source(db,source_chunks,content)
-    def add(self, title='', text='', url='', filename='', data=None, warning=''):
+    def add(self, title='', text='', url='', filename='', data=None, warning='', *, dated_note=''):
         if isinstance(data,Path):
             with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
         else:digest = hashlib.sha256(data if data is not None else (url or text).encode()).hexdigest()
+        if dated_note:digest=dated_digest(text,dated_note)
         now = datetime.now(timezone.utc).isoformat(); item_id = uuid.uuid4().hex
         with self.lock, self.db() as db:
             old = db.execute("SELECT id,text FROM items WHERE trashed_at='' AND (digest=? OR (url=? AND ?!='')) ORDER BY created LIMIT 1", (digest, url, url)).fetchone()

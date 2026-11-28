@@ -917,30 +917,27 @@ class Service:
         if location:archive_only=True;title=title or location['title']
         if text and not (url or name or title):
             title=next((line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith('```')),'未命名笔记')[:100]
+        resolved=''
         if not (url or name):
             from datetime import datetime
             from .archived_arrangements import lookup,content
             from .note_dates import resolve,arrangement_text
+            reference=(note_reference or datetime.now().astimezone()).astimezone().isoformat()
+            resolved=resolve(text,reference)
             canonical=arrangement_text(text)
             with self.lock:
                 matched=lookup(self.archive,canonical)
                 if matched:
                     existing=self.archive.get(matched[1][0]['item_id'])
-                    reference=(note_reference or datetime.now().astimezone()).astimezone().isoformat()
                     requested=resolve(canonical,reference)
                     expected=requested.split('\n',2)[-1] if requested else canonical
                     if content(existing,canonical)==expected:
                         return {'item':existing,'created':False,'updated':False,'reused':True}
-        item_id, created = self.archive.add(title, text, url, name, data, warning)
-        if created and not (url or name):
-            from .note_dates import resolve
-            from datetime import datetime
-            reference=(note_reference or datetime.fromisoformat(self.archive.get(item_id)['created'])).astimezone().isoformat()
-            resolved=resolve(text,reference)
-            if resolved:
-                self.archive.save_context(item_id,resolved)
-                dated_title=resolve(title,reference)
-                if dated_title:self.archive.update(item_id,title=dated_title.split('\n',2)[-1][:300])
+        item_id, created = self.archive.add(title,text,url,name,data,warning,dated_note=resolved.split('\n',2)[-1])
+        if created and resolved:
+            self.archive.save_context(item_id,resolved)
+            dated_title=resolve(title,reference)
+            if dated_title:self.archive.update(item_id,title=dated_title.split('\n',2)[-1][:300])
         if browser_import or '公司网络或 VPN' in warning:company_ai.mark(self.archive,item_id)
         with self.lock:
             if url and context.strip() and (item_id in self.busy or item_id in self.captures):raise ValueError('资料正在处理，请稍后再补充链接说明')
@@ -970,6 +967,17 @@ class Service:
                 page=origin.get('page');entry=selected.get(pdf_reading.key(origin['batch_id'],origin['attachment_id']),{})
                 token=(origin['batch_id'],origin['attachment_id'],page)
                 if page and (page<=5 or str(page) in entry.get('pages',{})) and token not in seen:seen.add(token);item['source_pages'].append(origin)
+        if item['kind']=='note' and not item['user_context']:
+            from .note_dates import resolve,social_arrangement
+            if social_arrangement(item['text']):
+                from datetime import datetime
+                try:
+                    reference=datetime.fromisoformat(item['created']).astimezone().isoformat()
+                    inferred=resolve(item['text'],reference)
+                except (ValueError,OverflowError):
+                    inferred=''  # Older imports can lack a usable reference date.
+                if inferred:
+                    item['summary']='按归档日期推算：'+inferred.split('\n',2)[-1]+('\n\n'+item['summary'] if item['summary'] else '')
         self.material_attachments(item,include_body=True)
         return item
 
