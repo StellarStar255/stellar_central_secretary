@@ -1134,6 +1134,11 @@ class Service:
                 return result(*visit,[],'archive')
             from . import archived_birthdays
             birthday=measured('retrieval_seconds',lambda:archived_birthdays.lookup(self.archive,question,turns))
+            if not birthday:
+                inferred=measured('retrieval_seconds',lambda:archived_birthdays.document_birthday(self.archive,question,turns))
+                if inferred:
+                    timings['document_birthday']=True
+                    return result(*inferred,[],'archive')
             if birthday:
                 timings['birthday_match']=True
                 return result(*birthday,[],'archive')

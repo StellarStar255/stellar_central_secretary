@@ -303,13 +303,15 @@ class Archive:
             chunk = text[offset:offset+1200]
             cursor = db.execute('INSERT INTO chunks(item_id,position,text) VALUES (?,?,?)', (item_id, pos, chunk))
             db.execute('INSERT INTO search VALUES (?,?,?)', (' '.join(terms(keywords+' '+chunk)), cursor.lastrowid, item_id))
+        from .appointment_facts import index_source
         for content,origin in origins.material(self,db,item_id):
+            source_chunks=[]
             for offset in range(0,len(content),1000):
                 chunk=content[offset:offset+1200]
                 cursor=db.execute('INSERT INTO chunks(item_id,position,text,origin) VALUES (?,?,?,?)',(item_id,-1,chunk,json.dumps(origin,ensure_ascii=False)))
-                from .appointment_facts import extract
-                extract(db,cursor.lastrowid,chunk,origin)
+                source_chunks.append((cursor.lastrowid,offset,len(chunk)))
                 db.execute('INSERT INTO search VALUES (?,?,?)',(' '.join(terms(keywords+' '+chunk)),cursor.lastrowid,item_id))
+            index_source(db,source_chunks,content)
     def add(self, title='', text='', url='', filename='', data=None, warning=''):
         if isinstance(data,Path):
             with data.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()

@@ -997,6 +997,7 @@ function answerTiming(message){
  const timing=message.timings;if(!timing||!Number.isFinite(Number(timing.total_seconds)))return '';
  const seconds=key=>Math.max(0,Number(timing[key])||0).toFixed(1);
  if(timing.cache_hit)return `<details class="answer-timing"><summary>${esc(t('复用近期回答'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('问题与资料未变化，可点击重新核对强制生成。'))}</p></details>`;
+ if(timing.document_birthday)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('出生日期由原件中与姓名对应的身份证字段推得。'))}</p></details>`;
  if(timing.birthday_match)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('生日日期来自归档原文。'))}</p></details>`;
  if(timing.archive_match)return `<details class="answer-timing"><summary>${esc(t('直接读取归档'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('安排内容一致，直接读取当前归档，未调用模型。'))}</p></details>`;
  if(timing.local_reply)return `<details class="answer-timing"><summary>${esc(t('本地即时回复'))} · ${seconds('total_seconds')} ${esc(t('秒'))}</summary><p>${esc(t('未调用模型，也未检索知识库。'))}</p></details>`;

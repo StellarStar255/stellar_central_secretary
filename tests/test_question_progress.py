@@ -47,4 +47,7 @@ class QuestionCancellationTest(unittest.TestCase):
         self.assertEqual(progress.snapshot(key)['stage'],'cancelled')
         self.assertNotIn('partial',progress.snapshot(key))
         other='e'*32;progress.begin(other);progress.update(other,'done')
+        progress.partial(other,'late');progress.update(other,'answering');progress.update(other,'excerpts',[{}])
+        self.assertEqual(progress.snapshot(other)['stage'],'done')
+        self.assertNotIn('partial',progress.snapshot(other));self.assertNotIn('excerpts',progress.snapshot(other))
         self.assertFalse(progress.cancel(other));self.assertFalse(progress.event(other).is_set())

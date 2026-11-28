@@ -1,4 +1,4 @@
-"""Short-lived, progress for concurrent library requests."""
+"""Short-lived progress for concurrent library requests."""
 import re
 import threading
 import time
@@ -24,6 +24,7 @@ class QuestionProgress:
     def update(self,key,stage,count=None):
         with self.lock:
             value=self.records[key]
+            if 'ended' in value:return
             if value['cancel'].is_set():stage='cancelled';count=None
             if stage=='excerpts':
                 if 'ended' not in value:value['excerpts']=count
@@ -37,7 +38,8 @@ class QuestionProgress:
 
     def partial(self,key,text):
         with self.lock:
-            if not self.records[key]['cancel'].is_set():self.records[key]['partial']=str(text)[:16000]
+            value=self.records[key]
+            if 'ended' not in value and not value['cancel'].is_set():value['partial']=str(text)[:16000]
 
     def snapshot(self,key):
         self.validate(key)
